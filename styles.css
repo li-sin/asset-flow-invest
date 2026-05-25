@@ -250,6 +250,10 @@ textarea {
   border-color: #dec9a9;
 }
 
+.diagnostic-crop.fallback {
+  border-style: dashed;
+}
+
 .diagnostic-crop img {
   width: 100%;
   height: 110px;

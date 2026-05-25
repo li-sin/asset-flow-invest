@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.8.2";
-const APP_VERSION_NOTE = "橫列裁切診斷";
+const APP_VERSION = "v0.8.3";
+const APP_VERSION_NOTE = "橫列裁切備援";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -555,17 +555,19 @@ async function recognizeArkRows(dataUrl, fullLines, onProgress) {
   for (let index = 0; index < rects.length; index += 1) {
     const rect = rects[index];
     const crop = await cropImageDataUrl(dataUrl, rect);
-    const label = `第 ${index + 1} 列`;
+    const label = rect.fallback ? `備援第 ${index + 1} 列` : `第 ${index + 1} 列`;
     const result = await recognizeDataUrl(crop, attempts, (progress) => {
       onProgress?.(progress, `${label} OCR`);
     });
-    const row = parseArkRowCropText(result.text, crop, label);
+    const parsedRow = parseArkRowCropText(result.text, crop, label);
+    const row = rect.fallback ? null : parsedRow;
     const cropRecord = {
       key: `row_${index + 1}`,
       label,
       dataUrl: crop,
       text: result.text || "",
       status: row ? "imported" : "skipped",
+      fallback: Boolean(rect.fallback),
     };
 
     if (row) {
@@ -589,8 +591,7 @@ async function detectArkRowRects(dataUrl) {
   const separators = await detectArkRowSeparators(image);
   const minHeight = height * 0.052;
   const maxHeight = height * 0.145;
-
-  return separators.slice(0, -1).map((top, index) => {
+  const rects = separators.slice(0, -1).map((top, index) => {
     const bottom = separators[index + 1];
     const rowHeight = bottom - top;
     if (rowHeight < minHeight || rowHeight > maxHeight) return null;
@@ -601,6 +602,28 @@ async function detectArkRowRects(dataUrl) {
       height: Math.max(1, rowHeight - 2) / height,
     };
   }).filter(Boolean);
+
+  return rects.length ? rects : fallbackArkRowRects(width, height, left, right);
+}
+
+function fallbackArkRowRects(width, height, left, right) {
+  const top = height * 0.21;
+  const bottom = height * 0.82;
+  const rowHeight = height * 0.086;
+  const gap = height * 0.006;
+  const rects = [];
+
+  for (let y = top; y + rowHeight <= bottom; y += rowHeight + gap) {
+    rects.push({
+      x: left,
+      y: y / height,
+      width: right - left,
+      height: rowHeight / height,
+      fallback: true,
+    });
+  }
+
+  return rects;
 }
 
 async function detectArkRowSeparators(image) {
@@ -1330,13 +1353,14 @@ function renderRowCropDiagnostics(rowCrops, skippedRowCrops = []) {
 
   const items = unique.map((crop) => {
     const imported = crop.status === "imported";
+    const statusText = crop.fallback ? "備援候選" : (imported ? "已進庫存" : "未匯入");
     const text = String(crop.text || "").trim();
     return `
-      <figure class="diagnostic-crop ${imported ? "imported" : "skipped"}">
+      <figure class="diagnostic-crop ${imported ? "imported" : "skipped"} ${crop.fallback ? "fallback" : ""}">
         <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "個股橫列裁切")}">
         <figcaption>
           <strong>${escapeHtml(crop.label || "橫列")}</strong>
-          <span>${imported ? "已進庫存" : "未匯入"}</span>
+          <span>${statusText}</span>
           <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
         </figcaption>
       </figure>
