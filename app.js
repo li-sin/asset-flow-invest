@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.6.4";
-const APP_VERSION_NOTE = "修正欄位靠近狀態";
+const APP_VERSION = "v0.7.0";
+const APP_VERSION_NOTE = "固定欄位裁切 OCR";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -338,6 +338,9 @@ async function saveEntry(event) {
       ? base.title
       : `${base.title || "截圖"} ${index + 1}`,
     images: [image],
+    parsedRows: image.parsedRows || base.parsedRows,
+    ocrElapsedMs: image.ocrElapsedMs,
+    columnOcrMs: image.columnOcrMs,
   }));
 
   await txStore("readwrite", (store) => {
@@ -376,6 +379,7 @@ function openDetail(id) {
       <div class="detail-grid">
         <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
         <div class="detail-field"><span>檔名</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
+        ${renderOcrTiming(entry)}
       </div>
       <div class="detail-field">
         <span>擷取文字 / 手動補資料</span>
@@ -446,6 +450,7 @@ async function ensureTesseract() {
 }
 
 async function recognizeImage(image, onProgress, options = {}) {
+  const startedAt = performance.now();
   await ensureTesseract();
   const imageForOcr = await prepareImageForOcr(image, options);
 
@@ -455,9 +460,46 @@ async function recognizeImage(image, onProgress, options = {}) {
   ];
   const errors = [];
 
+  const full = await recognizeDataUrl(imageForOcr.dataUrl, attempts, (progress, label) => {
+    onProgress?.(progress, label);
+  }, errors);
+
+  if (full.text.trim()) {
+    if (!options.columnOcr) {
+      return {
+        text: full.text,
+        mode: full.mode,
+        elapsedMs: Math.round(performance.now() - startedAt),
+      };
+    }
+
+    const columnStartedAt = performance.now();
+    const column = await recognizeArkColumns(imageForOcr.dataUrl, (progress, label) => {
+      onProgress?.(progress, label);
+    });
+    const columnRows = parseColumnOcrRows(column);
+    const fullRows = parseHoldings(full.text);
+    const rows = columnRows.length
+      ? dedupeRows([...fullRows.filter((row) => row.symbol), ...columnRows])
+      : fullRows;
+    const columnText = renderColumnOcrText(column);
+
+    return {
+      text: [full.text.trim(), columnText].filter(Boolean).join("\n\n--- 欄位 OCR ---\n\n"),
+      mode: `${full.mode} + 欄位裁切`,
+      rows,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      columnOcrMs: Math.round(performance.now() - columnStartedAt),
+    };
+  }
+
+  throw new Error(`OCR 無法完成。${errors.join("；")}`);
+}
+
+async function recognizeDataUrl(dataUrl, attempts, onProgress, errors = []) {
   for (const attempt of attempts) {
     try {
-      const result = await window.Tesseract.recognize(imageForOcr.dataUrl, attempt.lang, {
+      const result = await window.Tesseract.recognize(dataUrl, attempt.lang, {
         workerPath: OCR_WORKER_URL,
         corePath: OCR_CORE_URL,
         langPath: OCR_LANG_PATH,
@@ -468,16 +510,13 @@ async function recognizeImage(image, onProgress, options = {}) {
         },
       });
       const text = result?.data?.text || "";
-      if (text.trim()) {
-        return { text, mode: attempt.label };
-      }
+      if (text.trim()) return { text, mode: attempt.label };
       errors.push(`${attempt.label}: 沒有辨識到文字`);
     } catch (error) {
       errors.push(`${attempt.label}: ${error.message || error}`);
     }
   }
-
-  throw new Error(`OCR 無法完成。${errors.join("；")}`);
+  return { text: "", mode: "" };
 }
 
 async function prepareImageForOcr(image, options = {}) {
@@ -526,6 +565,55 @@ async function maskArkEditButtons(dataUrl) {
   return canvas.toDataURL("image/png", 0.95);
 }
 
+async function cropImageDataUrl(dataUrl, rect) {
+  const image = await loadImage(dataUrl);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const sx = Math.round(sourceWidth * rect.x);
+  const sy = Math.round(sourceHeight * rect.y);
+  const sw = Math.round(sourceWidth * rect.width);
+  const sh = Math.round(sourceHeight * rect.height);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvas.toDataURL("image/png", 0.95);
+}
+
+async function recognizeArkColumns(dataUrl, onProgress) {
+  const columnAttempts = [{ lang: "chi_tra+eng", label: "欄位" }];
+  const columns = [
+    { key: "name", label: "持有股票欄", rect: { x: 0.095, y: 0.215, width: 0.255, height: 0.64 } },
+    { key: "shares", label: "總股數欄", rect: { x: 0.535, y: 0.215, width: 0.165, height: 0.64 } },
+    { key: "avgCost", label: "成交均價欄", rect: { x: 0.72, y: 0.215, width: 0.18, height: 0.64 } },
+  ];
+  const result = {};
+
+  for (const column of columns) {
+    const crop = await cropImageDataUrl(dataUrl, column.rect);
+    const text = await recognizeDataUrl(crop, columnAttempts, (progress) => {
+      onProgress?.(progress, column.label);
+    });
+    result[column.key] = text.text || "";
+  }
+
+  return result;
+}
+
+function renderColumnOcrText(column) {
+  if (!column) return "";
+  return [
+    "【持有股票欄】",
+    column.name || "",
+    "【總股數欄】",
+    column.shares || "",
+    "【成交均價欄】",
+    column.avgCost || "",
+  ].join("\n").trim();
+}
+
 async function applyManualSymbol(entryId, rowIndex, value) {
   const entry = state.entries.find((item) => item.id === entryId);
   if (!entry?.parsedRows?.[rowIndex]) return;
@@ -570,14 +658,24 @@ async function parseDraftImages() {
       setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張`);
       const result = await recognizeImage(image, (progress, mode) => {
         setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%（${mode}）`);
-      }, { maskEditButtons: els.kind.value === "ark_position" });
+      }, {
+        maskEditButtons: els.kind.value === "ark_position",
+        columnOcr: els.kind.value === "ark_position",
+      });
       texts.push(result.text.trim());
+      if (Array.isArray(result.rows)) {
+        image.parsedRows = result.rows;
+        image.ocrElapsedMs = result.elapsedMs;
+        image.columnOcrMs = result.columnOcrMs;
+      }
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
     els.text.value = combinedText;
-    const rows = parseHoldings(els.text.value);
-    els.parsePreview.innerHTML = renderParsedRows(rows, "draft");
-    setOcrStatus(rows.length ? `完成，抓到 ${rows.length} 筆候選庫存` : "完成，未抓到庫存列");
+    const rows = state.draftImages.flatMap((image) => image.parsedRows || []);
+    const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value);
+    els.parsePreview.innerHTML = renderParsedRows(parsedRows, "draft");
+    const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
+    setOcrStatus(parsedRows.length ? `完成，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(elapsed)}）` : `完成，未抓到庫存列（${formatDuration(elapsed)}）`);
   } catch (error) {
     console.error(error);
     setOcrStatus("解析失敗");
@@ -596,9 +694,14 @@ async function parseExistingEntry(id) {
   try {
     const result = await recognizeImage(entry.images[0], (progress, mode) => {
       button.textContent = `解析中 ${progress}%（${mode}）`;
-    }, { maskEditButtons: entry.kind === "ark_position" });
+    }, {
+      maskEditButtons: entry.kind === "ark_position",
+      columnOcr: entry.kind === "ark_position",
+    });
     entry.text = result.text.trim();
-    entry.parsedRows = parseHoldings(entry.text);
+    entry.parsedRows = Array.isArray(result.rows) ? result.rows : parseHoldings(entry.text);
+    entry.ocrElapsedMs = result.elapsedMs;
+    entry.columnOcrMs = result.columnOcrMs;
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
     render();
@@ -639,6 +742,91 @@ function parseHoldings(text) {
   if (arkRows.length) return dedupeRows(arkRows);
 
   return parseLineBasedRows(lines);
+}
+
+function parseColumnOcrRows(column) {
+  const nameRows = parseNameColumnRows(column.name || "");
+  const shares = extractColumnNumbers(column.shares || "", "shares");
+  const avgCosts = extractColumnNumbers(column.avgCost || "", "avgCost");
+  const count = Math.max(nameRows.length, shares.length, avgCosts.length);
+  const rows = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const nameRow = nameRows[index] || {};
+    const symbol = nameRow.symbol || "";
+    const officialName = lookupSymbolName(symbol);
+    const ocrName = nameRow.ocrName || "";
+    rows.push({
+      symbol,
+      name: officialName || ocrName,
+      ocrName,
+      kind: "現股",
+      shares: shares[index] ?? null,
+      avgCost: avgCosts[index] ?? null,
+      currentPrice: null,
+      pnl: null,
+      pnlRate: null,
+      source: "ark_column_ocr",
+      rawLine: [
+        nameRow.rawLine,
+        shares[index] !== undefined ? `股數:${shares[index]}` : "",
+        avgCosts[index] !== undefined ? `均價:${avgCosts[index]}` : "",
+      ].filter(Boolean).join(" | "),
+      needsReview: !symbol || !officialName,
+      reviewReason: symbol ? "名稱待補" : "代號待補",
+    });
+  }
+
+  return rows;
+}
+
+function parseNameColumnRows(text) {
+  const lines = normalizeOcrText(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isNoiseLine(line));
+  const rows = [];
+  const pending = [];
+
+  for (const line of lines) {
+    const symbol = exactSymbolFromLine(line);
+    if (symbol) {
+      rows.push({
+        symbol,
+        ocrName: compactText(pending.map(cleanArkNamePart).filter(Boolean).join("")),
+        rawLine: [...pending, line].join(" / "),
+      });
+      pending.length = 0;
+      continue;
+    }
+    pending.push(line);
+  }
+
+  if (pending.length) {
+    rows.push({
+      symbol: "",
+      ocrName: compactText(pending.map(cleanArkNamePart).filter(Boolean).join("")),
+      rawLine: pending.join(" / "),
+    });
+  }
+
+  return rows;
+}
+
+function extractColumnNumbers(text, type) {
+  const values = [];
+  const lines = normalizeOcrText(text).split(/\r?\n/);
+  for (const line of lines) {
+    const matches = line.match(/[\d,]+(?:\.\d+)?/g) || [];
+    for (const match of matches) {
+      const value = parseNumberToken(match);
+      if (value === null) continue;
+      if (type === "shares" && !Number.isInteger(value)) continue;
+      values.push(value);
+    }
+  }
+  return values;
 }
 
 function parseArkPositionRows(lines) {
@@ -754,8 +942,9 @@ function isTwSymbol(value) {
 }
 
 function findNearbySymbol(lines, index, pendingNameLines) {
-  for (let offset = 1; offset <= 2; offset += 1) {
+  for (let offset = 1; offset <= 4; offset += 1) {
     const candidateLine = lines[index + offset];
+    if (offset > 1 && /現\s*股\s+[\d,]+\s+[\d,.]+/.test(candidateLine || "")) break;
     const symbol = exactSymbolFromLine(candidateLine);
     if (symbol) return { symbol, index: index + offset, line: candidateLine };
   }
@@ -824,6 +1013,17 @@ function dedupeRows(rows) {
 function displayValue(value, suffix = "") {
   if (value === null || value === undefined || Number.isNaN(value)) return "";
   return `${value}${suffix}`;
+}
+
+function formatDuration(ms) {
+  if (!ms) return "0 秒";
+  return `${(ms / 1000).toFixed(1)} 秒`;
+}
+
+function renderOcrTiming(entry) {
+  if (!entry.ocrElapsedMs) return "";
+  const columnText = entry.columnOcrMs ? `，欄位 ${formatDuration(entry.columnOcrMs)}` : "";
+  return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
 }
 
 function renderParsedRows(rows, context, entryId = "") {
