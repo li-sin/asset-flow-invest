@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.1";
-const APP_VERSION_NOTE = "自動顯示雲端庫存";
+const APP_VERSION = "v0.9.2";
+const APP_VERSION_NOTE = "雲端讀取修正";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -1581,11 +1581,12 @@ async function readSheetValues(sheetName, range) {
   return payload.values || [];
 }
 
-function parseGoogleVisualizationValues(text) {
-  const jsonText = String(text || "")
-    .replace(/^[\s\S]*google\.visualization\.Query\.setResponse\(/, "")
-    .replace(/\);?\s*$/, "");
-  const payload = JSON.parse(jsonText);
+function parseGoogleVisualizationValues(payloadOrText) {
+  const payload = typeof payloadOrText === "string"
+    ? JSON.parse(String(payloadOrText || "")
+      .replace(/^[\s\S]*google\.visualization\.Query\.setResponse\(/, "")
+      .replace(/\);?\s*$/, ""))
+    : payloadOrText;
   if (payload.status === "error") {
     throw new Error(payload.errors?.[0]?.detailed_message || payload.errors?.[0]?.reason || "Google Sheet 讀取失敗");
   }
@@ -1593,10 +1594,38 @@ function parseGoogleVisualizationValues(text) {
 }
 
 async function readPublicSheetValues(sheetName) {
-  const url = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Google Sheet public read ${response.status}`);
-  return parseGoogleVisualizationValues(await response.text());
+  return new Promise((resolve, reject) => {
+    const callbackName = `assetflowInvestSheet_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const script = document.createElement("script");
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("讀取 Google Sheet 逾時，請確認 2026 Invest 是否允許知道連結的人檢視"));
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      script.remove();
+      delete window[callbackName];
+    }
+
+    window[callbackName] = (payload) => {
+      try {
+        const values = parseGoogleVisualizationValues(payload);
+        cleanup();
+        resolve(values);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("讀取 Google Sheet 失敗，請確認 2026 Invest 是否允許知道連結的人檢視"));
+    };
+    script.src = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/gviz/tq?tqx=${encodeURIComponent(`out:json;responseHandler:${callbackName}`)}&sheet=${encodeURIComponent(sheetName)}`;
+    document.head.appendChild(script);
+  });
 }
 
 async function readCloudSheetValues(sheetName, range) {
