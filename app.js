@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.7.1";
-const APP_VERSION_NOTE = "欄位裁切圖對照";
+const APP_VERSION = "v0.8.0";
+const APP_VERSION_NOTE = "個股橫列裁切";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -341,7 +341,9 @@ async function saveEntry(event) {
     parsedRows: image.parsedRows || base.parsedRows,
     ocrElapsedMs: image.ocrElapsedMs,
     columnOcrMs: image.columnOcrMs,
+    rowOcrMs: image.rowOcrMs,
     columnCrops: image.columnCrops || [],
+    rowCrops: image.rowCrops || [],
   }));
 
   await txStore("readwrite", (store) => {
@@ -474,24 +476,24 @@ async function recognizeImage(image, onProgress, options = {}) {
       };
     }
 
-    const columnStartedAt = performance.now();
-    const column = await recognizeArkColumns(imageForOcr.dataUrl, (progress, label) => {
+    const rowStartedAt = performance.now();
+    const rowResult = await recognizeArkRows(imageForOcr.dataUrl, full.lines || [], (progress, label) => {
       onProgress?.(progress, label);
     });
-    const columnRows = parseColumnOcrRows(column);
+    const rowRows = rowResult.rows || [];
     const fullRows = parseHoldings(full.text);
-    const rows = columnRows.length
-      ? dedupeRows([...fullRows.filter((row) => row.symbol), ...columnRows])
-      : fullRows;
-    const columnText = renderColumnOcrText(column);
+    const rows = rowRows.length ? dedupeRows(rowRows) : [];
+    const rowText = renderRowOcrText(rowResult);
 
     return {
-      text: [full.text.trim(), columnText].filter(Boolean).join("\n\n--- 欄位 OCR ---\n\n"),
-      mode: `${full.mode} + 欄位裁切`,
+      text: [full.text.trim(), rowText].filter(Boolean).join("\n\n--- 橫列 OCR ---\n\n"),
+      mode: `${full.mode} + 橫列裁切`,
       rows,
       elapsedMs: Math.round(performance.now() - startedAt),
-      columnOcrMs: Math.round(performance.now() - columnStartedAt),
-      columnCrops: column.crops || [],
+      rowOcrMs: Math.round(performance.now() - rowStartedAt),
+      rowCrops: rowResult.crops || [],
+      skippedRowCrops: rowResult.skipped || [],
+      fallbackRows: fullRows,
     };
   }
 
@@ -512,13 +514,152 @@ async function recognizeDataUrl(dataUrl, attempts, onProgress, errors = []) {
         },
       });
       const text = result?.data?.text || "";
-      if (text.trim()) return { text, mode: attempt.label };
+      if (text.trim()) return {
+        text,
+        mode: attempt.label,
+        lines: normalizeTesseractLines(result?.data?.lines || []),
+      };
       errors.push(`${attempt.label}: 沒有辨識到文字`);
     } catch (error) {
       errors.push(`${attempt.label}: ${error.message || error}`);
     }
   }
   return { text: "", mode: "" };
+}
+
+function normalizeTesseractLines(lines) {
+  return (Array.isArray(lines) ? lines : [])
+    .map((line) => {
+      const bbox = line?.bbox || {};
+      const x0 = Number(bbox.x0 ?? line?.x0);
+      const y0 = Number(bbox.y0 ?? line?.y0);
+      const x1 = Number(bbox.x1 ?? line?.x1);
+      const y1 = Number(bbox.y1 ?? line?.y1);
+      if (![x0, y0, x1, y1].every(Number.isFinite)) return null;
+      return {
+        text: String(line?.text || "").trim(),
+        bbox: { x0, y0, x1, y1 },
+      };
+    })
+    .filter((line) => line && line.text && line.bbox.x1 > line.bbox.x0 && line.bbox.y1 > line.bbox.y0);
+}
+
+async function recognizeArkRows(dataUrl, fullLines, onProgress) {
+  const rects = await detectArkRowRects(dataUrl, fullLines);
+  const attempts = [{ lang: "chi_tra+eng", label: "橫列" }];
+  const rows = [];
+  const crops = [];
+  const skipped = [];
+
+  for (let index = 0; index < rects.length; index += 1) {
+    const rect = rects[index];
+    const crop = await cropImageDataUrl(dataUrl, rect);
+    const label = `第 ${index + 1} 列`;
+    const result = await recognizeDataUrl(crop, attempts, (progress) => {
+      onProgress?.(progress, `${label} OCR`);
+    });
+    const row = parseArkRowCropText(result.text, crop, label);
+    const cropRecord = {
+      key: `row_${index + 1}`,
+      label,
+      dataUrl: crop,
+      text: result.text || "",
+    };
+
+    if (row) {
+      row.crop = cropRecord;
+      rows.push(row);
+      crops.push(cropRecord);
+    } else {
+      skipped.push(cropRecord);
+    }
+  }
+
+  return { rows, crops, skipped };
+}
+
+async function detectArkRowRects(dataUrl) {
+  const image = await loadImage(dataUrl);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const left = 0.095;
+  const right = 0.965;
+  const separators = await detectArkRowSeparators(image);
+  const minHeight = height * 0.052;
+  const maxHeight = height * 0.145;
+
+  return separators.slice(0, -1).map((top, index) => {
+    const bottom = separators[index + 1];
+    const rowHeight = bottom - top;
+    if (rowHeight < minHeight || rowHeight > maxHeight) return null;
+    return {
+      x: left,
+      y: (top + 1) / height,
+      width: right - left,
+      height: Math.max(1, rowHeight - 2) / height,
+    };
+  }).filter(Boolean);
+}
+
+async function detectArkRowSeparators(image) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, width, height).data;
+  const xStart = Math.round(width * 0.095);
+  const xEnd = Math.round(width * 0.97);
+  const yStart = Math.round(height * 0.2);
+  const yEnd = Math.round(height * 0.84);
+  const candidates = [];
+
+  for (let y = yStart; y < yEnd; y += 1) {
+    let matching = 0;
+    let total = 0;
+    for (let x = xStart; x < xEnd; x += 4) {
+      const index = (y * width + x) * 4;
+      const red = imageData[index];
+      const green = imageData[index + 1];
+      const blue = imageData[index + 2];
+      const brightness = (red + green + blue) / 3;
+      const spread = Math.max(red, green, blue) - Math.min(red, green, blue);
+      if (brightness >= 42 && brightness <= 66 && spread <= 16) matching += 1;
+      total += 1;
+    }
+    if (total && matching / total > 0.55) candidates.push(y);
+  }
+
+  const groups = [];
+  let current = [];
+  for (const y of candidates) {
+    if (!current.length || y <= current[current.length - 1] + 2) {
+      current.push(y);
+      continue;
+    }
+    groups.push(current);
+    current = [y];
+  }
+  if (current.length) groups.push(current);
+
+  const minGap = height * 0.045;
+  const separators = groups
+    .map((group) => group[group.length - 1])
+    .filter((y, index, items) => index === 0 || y - items[index - 1] >= minGap);
+
+  return separators;
+}
+
+function extractNumbersAfterHolding(text) {
+  const normalized = normalizeOcrText(text);
+  const index = normalized.search(/現\s*股/);
+  if (index < 0) return [];
+  return (normalized.slice(index).match(/[\d,]+(?:\.\d+)?/g) || [])
+    .map(parseNumberToken)
+    .filter((value) => value !== null);
 }
 
 async function prepareImageForOcr(image, options = {}) {
@@ -675,7 +816,10 @@ async function parseDraftImages() {
         image.parsedRows = result.rows;
         image.ocrElapsedMs = result.elapsedMs;
         image.columnOcrMs = result.columnOcrMs;
+        image.rowOcrMs = result.rowOcrMs;
         image.columnCrops = result.columnCrops || [];
+        image.rowCrops = result.rowCrops || [];
+        image.skippedRowCrops = result.skippedRowCrops || [];
       }
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
@@ -712,7 +856,10 @@ async function parseExistingEntry(id) {
     entry.parsedRows = Array.isArray(result.rows) ? result.rows : parseHoldings(entry.text);
     entry.ocrElapsedMs = result.elapsedMs;
     entry.columnOcrMs = result.columnOcrMs;
+    entry.rowOcrMs = result.rowOcrMs;
     entry.columnCrops = result.columnCrops || [];
+    entry.rowCrops = result.rowCrops || [];
+    entry.skippedRowCrops = result.skippedRowCrops || [];
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
     render();
@@ -753,6 +900,66 @@ function parseHoldings(text) {
   if (arkRows.length) return dedupeRows(arkRows);
 
   return parseLineBasedRows(lines);
+}
+
+function parseArkRowCropText(text, cropDataUrl, label) {
+  const normalized = normalizeOcrText(text);
+  const compact = compactText(normalized);
+  if (!/現\s*股/.test(normalized) || !compact.includes("現股")) return null;
+
+  const holdingIndex = normalized.search(/現\s*股/);
+  const numbers = extractNumbersAfterHolding(normalized);
+  if (numbers.length < 2) return null;
+
+  const shares = numbers.find((value) => Number.isInteger(value) && value > 0) ?? null;
+  const avgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
+  if (shares === null || avgCost === null) return null;
+
+  const symbol = findKnownSymbolInText(normalized);
+  const officialName = lookupSymbolName(symbol);
+  const beforeHolding = holdingIndex >= 0 ? normalized.slice(0, holdingIndex) : normalized;
+  const ocrName = cleanArkNamePart(beforeHolding);
+
+  return {
+    symbol,
+    name: officialName || ocrName,
+    ocrName,
+    kind: "現股",
+    shares,
+    avgCost,
+    currentPrice: null,
+    pnl: null,
+    pnlRate: null,
+    source: "ark_row_ocr",
+    rawLine: normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(" / "),
+    needsReview: !officialName,
+    reviewReason: symbol ? "名稱待補" : "代號待補",
+    crop: {
+      key: label,
+      label,
+      dataUrl: cropDataUrl,
+      text: normalized,
+    },
+  };
+}
+
+function findKnownSymbolInText(text) {
+  const compact = compactText(text).replace(/[^\dA-Za-z]/g, "").toUpperCase();
+  const symbols = Object.keys(SYMBOL_NAMES).sort((a, b) => b.length - a.length);
+  return symbols.find((symbol) => compact.includes(symbol)) || "";
+}
+
+function renderRowOcrText(result) {
+  if (!result?.crops?.length && !result?.skipped?.length) return "";
+  const imported = (result.crops || []).map((crop) => [
+    `【${crop.label}】`,
+    crop.text || "",
+  ].join("\n"));
+  const skipped = (result.skipped || []).map((crop) => [
+    `【略過 ${crop.label}】`,
+    crop.text || "",
+  ].join("\n"));
+  return [...imported, ...skipped].join("\n\n").trim();
 }
 
 function parseColumnOcrRows(column) {
@@ -1033,7 +1240,9 @@ function formatDuration(ms) {
 
 function renderOcrTiming(entry) {
   if (!entry.ocrElapsedMs) return "";
-  const columnText = entry.columnOcrMs ? `，欄位 ${formatDuration(entry.columnOcrMs)}` : "";
+  const cropMs = entry.rowOcrMs || entry.columnOcrMs;
+  const cropLabel = entry.rowOcrMs ? "橫列" : "欄位";
+  const columnText = cropMs ? `，${cropLabel} ${formatDuration(cropMs)}` : "";
   return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
 }
 
@@ -1055,6 +1264,7 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = []) {
   }
   const body = rows.map((row, index) => `
     <tr>
+      <td>${renderRowCropCell(row)}</td>
       <td>${escapeHtml(row.symbol || "待確認")}</td>
       <td>${escapeHtml(row.name)}</td>
       <td>${escapeHtml(row.kind || "")}</td>
@@ -1073,6 +1283,7 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = []) {
         <table class="parsed-table">
           <thead>
             <tr>
+              <th>截圖</th>
               <th>代號</th>
               <th>名稱</th>
               <th>種類</th>
@@ -1087,6 +1298,16 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = []) {
         </table>
       </div>
     </div>
+  `;
+}
+
+function renderRowCropCell(row) {
+  if (!row?.crop?.dataUrl) return "";
+  return `
+    <figure class="row-crop">
+      <img src="${row.crop.dataUrl}" alt="${escapeHtml(row.crop.label || "個股橫列裁切")}">
+      <figcaption>${escapeHtml(row.crop.label || "")}</figcaption>
+    </figure>
   `;
 }
 
