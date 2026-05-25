@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.0";
-const APP_VERSION_NOTE = "Google Sheet 庫存快照";
+const APP_VERSION = "v0.9.1";
+const APP_VERSION_NOTE = "自動顯示雲端庫存";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -71,7 +71,6 @@ const els = {
   summary: $("#summary-line"),
   search: $("#search-input"),
   exportBackup: $("#export-backup"),
-  syncSettings: $("#sync-settings"),
   syncLatest: $("#sync-latest"),
   cloudSnapshot: $("#cloud-snapshot"),
   appVersion: $("#app-version"),
@@ -1582,6 +1581,28 @@ async function readSheetValues(sheetName, range) {
   return payload.values || [];
 }
 
+function parseGoogleVisualizationValues(text) {
+  const jsonText = String(text || "")
+    .replace(/^[\s\S]*google\.visualization\.Query\.setResponse\(/, "")
+    .replace(/\);?\s*$/, "");
+  const payload = JSON.parse(jsonText);
+  if (payload.status === "error") {
+    throw new Error(payload.errors?.[0]?.detailed_message || payload.errors?.[0]?.reason || "Google Sheet 讀取失敗");
+  }
+  return (payload.table?.rows || []).map((row) => (row.c || []).map((cell) => cell?.v ?? ""));
+}
+
+async function readPublicSheetValues(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Google Sheet public read ${response.status}`);
+  return parseGoogleVisualizationValues(await response.text());
+}
+
+async function readCloudSheetValues(sheetName, range) {
+  return readPublicSheetValues(sheetName);
+}
+
 async function updateSheetValues(sheetName, range, values) {
   return sheetsFetch(`/values/${sheetRange(sheetName, range)}?valueInputOption=RAW`, {
     method: "PUT",
@@ -1718,9 +1739,8 @@ function parsePositionRows(values) {
 
 async function loadLatestCloudSnapshot(showAlert = true) {
   try {
-    await ensureSheetTables();
-    const snapshotValues = await readSheetValues(SHEET_NAMES.snapshots, "A2:H");
-    const snapshots = parseSnapshotRows(snapshotValues).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     if (!snapshots.length) {
       state.cloudSnapshot = null;
       renderCloudSnapshot();
@@ -1728,8 +1748,8 @@ async function loadLatestCloudSnapshot(showAlert = true) {
       return;
     }
     const latest = snapshots[0];
-    const positionValues = await readSheetValues(SHEET_NAMES.positions, "A2:J");
-    const positions = parsePositionRows(positionValues).filter((row) => row.snapshotId === latest.snapshotId);
+    const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
+    const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions)).filter((row) => row.snapshotId === latest.snapshotId);
     state.cloudSnapshot = { snapshot: latest, positions };
     renderCloudSnapshot();
     if (showAlert) alert(`已讀取雲端庫存：${positions.length} 筆`);
@@ -1737,6 +1757,13 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     console.error(error);
     if (showAlert) alert(error.message || "讀取 Google Sheet 失敗");
   }
+}
+
+function stripHeaderRow(values, headers) {
+  if (!values?.length) return [];
+  const first = values[0].map((value) => String(value || "").trim());
+  const sameHeader = headers.every((header, index) => first[index] === header);
+  return sameHeader ? values.slice(1) : values;
 }
 
 function renderCloudSnapshot() {
@@ -1967,7 +1994,6 @@ function bindEvents() {
     render();
   });
   els.exportBackup.addEventListener("click", exportBackup);
-  els.syncSettings.addEventListener("click", configureSheetSync);
   els.syncLatest.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.closeDetail.addEventListener("click", closeDetail);
   document.querySelectorAll(".segment").forEach((button) => {
@@ -1990,6 +2016,7 @@ async function init() {
   state.entries = await getAllEntries();
   renderCloudSnapshot();
   render();
+  loadLatestCloudSnapshot(false);
 }
 
 function registerServiceWorker() {

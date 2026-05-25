@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#2f7d5b">
   <title>AssetFlow Invest</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=0.9.0">
+  <link rel="stylesheet" href="./styles.css?v=0.9.1">
 </head>
 <body>
   <div class="app-shell">
@@ -16,8 +16,7 @@
         <p id="summary-line">0 張截圖</p>
       </div>
       <div class="topbar-actions">
-        <button id="sync-settings" class="button secondary" type="button">同步設定</button>
-        <button id="sync-latest" class="button secondary" type="button">讀取雲端庫存</button>
+        <button id="sync-latest" class="button secondary" type="button">重新整理雲端庫存</button>
         <button id="export-backup" class="button secondary" type="button">匯出備份</button>
         <label class="button secondary file-button">
           匯入備份
@@ -33,7 +32,7 @@
     <main class="workspace">
       <section class="capture-panel" aria-label="新增截圖">
         <div class="notice">
-          截圖仍只存在這台裝置；確認後的庫存快照可同步到 Google Sheet。
+          App 會自動讀取 Google Sheet 內最近一次庫存快照；截圖仍只存在這台裝置。
         </div>
         <div id="drop-zone" class="drop-zone" tabindex="0">
           <div class="drop-mark">+</div>
@@ -131,7 +130,7 @@
     </main>
 
     <footer class="app-footer">
-      <span id="app-version">AssetFlow Invest v0.9.0</span>
+      <span id="app-version">AssetFlow Invest v0.9.1</span>
     </footer>
 
     <aside id="detail-panel" class="detail-panel" aria-label="截圖內容">
@@ -140,6 +139,6 @@
     </aside>
   </div>
 
-  <script src="./app.js?v=0.9.0"></script>
+  <script src="./app.js?v=0.9.1"></script>
 </body>
 </html>
