@@ -164,6 +164,37 @@ textarea {
   padding: 10px;
 }
 
+.cloud-snapshot:empty {
+  display: none;
+}
+
+.cloud-snapshot {
+  border: 1px solid #c7dfce;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.cloud-snapshot header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.cloud-snapshot h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.cloud-snapshot p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .table-scroll {
   overflow-x: auto;
   margin-top: 8px;
