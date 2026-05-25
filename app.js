@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.6.1";
-const APP_VERSION_NOTE = "代號查表名稱";
+const APP_VERSION = "v0.6.2";
+const APP_VERSION_NOTE = "顯示代號待補列";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -585,19 +585,16 @@ function parseArkPositionRows(lines) {
 
     const beforeHolding = line.slice(0, holdingMatch.index).trim();
     const symbolInfo = findNearbySymbol(lines, index, pendingNameLines);
-    if (!symbolInfo?.symbol) {
-      pendingNameLines.length = 0;
-      continue;
-    }
-    if (symbolInfo.index > index) consumed.add(symbolInfo.index);
+    if (symbolInfo?.index > index) consumed.add(symbolInfo.index);
 
-    const ocrName = buildArkName(pendingNameLines, beforeHolding, symbolInfo?.symbol);
-    const officialName = lookupSymbolName(symbolInfo.symbol);
+    const symbol = symbolInfo?.symbol || "";
+    const ocrName = buildArkName(pendingNameLines, beforeHolding, symbol);
+    const officialName = lookupSymbolName(symbol);
     const shares = parseNumberToken(holdingMatch[1]);
     const avgCost = parseNumberToken(holdingMatch[2]);
 
     rows.push({
-      symbol: symbolInfo.symbol,
+      symbol,
       name: officialName || ocrName,
       ocrName,
       kind: "現股",
@@ -609,6 +606,7 @@ function parseArkPositionRows(lines) {
       source: "ark_position",
       rawLine: [pendingNameLines.join(" / "), line, symbolInfo?.line].filter(Boolean).join(" | "),
       needsReview: !officialName,
+      reviewReason: symbol ? "名稱待補" : "代號待補",
     });
 
     pendingNameLines.length = 0;
@@ -760,12 +758,12 @@ function renderParsedRows(rows, context) {
   }
   const body = rows.map((row) => `
     <tr>
-      <td>${escapeHtml(row.symbol)}</td>
+      <td>${escapeHtml(row.symbol || "待確認")}</td>
       <td>${escapeHtml(row.name)}</td>
       <td>${escapeHtml(row.kind || "")}</td>
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
-      <td>${escapeHtml(row.needsReview ? "名稱待補" : "")}</td>
+      <td>${escapeHtml(row.needsReview ? row.reviewReason || "待確認" : "")}</td>
     </tr>
   `).join("");
   return `
