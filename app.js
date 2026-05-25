@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.5.1";
-const APP_VERSION_NOTE = "重新解析覆蓋舊資料";
+const APP_VERSION = "v0.6.0";
+const APP_VERSION_NOTE = "方舟庫存區塊解析";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -542,6 +542,62 @@ function parseNumberToken(token) {
 function parseHoldings(text) {
   const normalized = normalizeOcrText(text);
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const arkRows = parseArkPositionRows(lines);
+  if (arkRows.length) return dedupeRows(arkRows);
+
+  return parseLineBasedRows(lines);
+}
+
+function parseArkPositionRows(lines) {
+  const rows = [];
+  const pendingNameLines = [];
+  const consumed = new Set();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (consumed.has(index)) continue;
+
+    const line = lines[index];
+    if (isNoiseLine(line)) continue;
+
+    const holdingMatch = line.match(/現\s*股\s+([\d,]+)\s+([\d,.]+)/);
+    if (!holdingMatch) {
+      pendingNameLines.push(line);
+      continue;
+    }
+
+    const beforeHolding = line.slice(0, holdingMatch.index).trim();
+    const symbolInfo = findNearbySymbol(lines, index, pendingNameLines);
+    if (!symbolInfo?.symbol) {
+      pendingNameLines.length = 0;
+      continue;
+    }
+    if (symbolInfo.index > index) consumed.add(symbolInfo.index);
+
+    const name = buildArkName(pendingNameLines, beforeHolding, symbolInfo?.symbol);
+    const shares = parseNumberToken(holdingMatch[1]);
+    const avgCost = parseNumberToken(holdingMatch[2]);
+
+    rows.push({
+      symbol: symbolInfo.symbol,
+      name,
+      kind: "現股",
+      shares,
+      avgCost,
+      currentPrice: null,
+      pnl: null,
+      pnlRate: null,
+      source: "ark_position",
+      rawLine: [pendingNameLines.join(" / "), line, symbolInfo?.line].filter(Boolean).join(" | "),
+      needsReview: !name,
+    });
+
+    pendingNameLines.length = 0;
+  }
+
+  return rows;
+}
+
+function parseLineBasedRows(lines) {
   const rows = [];
 
   for (const line of lines) {
@@ -573,6 +629,7 @@ function parseHoldings(text) {
     rows.push({
       symbol,
       name: nameTokens.join(" "),
+      kind: "",
       shares,
       avgCost: nonPercentNumbers[firstPriceIndex]?.value ?? null,
       currentPrice: nonPercentNumbers[firstPriceIndex + 1]?.value ?? null,
@@ -583,6 +640,86 @@ function parseHoldings(text) {
   }
 
   return rows;
+}
+
+function isNoiseLine(line) {
+  return /^(《|編輯庫存|編輯 庫存|台股庫存|台 股 庫存|美股庫存|美 股 庫存|持有股票|持 有 股票|總共|總 共|新增持股|新 增 持 股)/.test(compactText(line));
+}
+
+function compactText(value) {
+  return String(value || "").replace(/\s+/g, "");
+}
+
+function isTwSymbol(value) {
+  return /^\d{4,6}[A-Z]?$/.test(String(value || "").trim());
+}
+
+function findNearbySymbol(lines, index, pendingNameLines) {
+  for (let offset = 1; offset <= 2; offset += 1) {
+    const candidateLine = lines[index + offset];
+    const symbol = exactSymbolFromLine(candidateLine);
+    if (symbol) return { symbol, index: index + offset, line: candidateLine };
+  }
+
+  for (let offset = pendingNameLines.length - 1; offset >= 0; offset -= 1) {
+    const candidateLine = pendingNameLines[offset];
+    const symbol = exactSymbolFromLine(candidateLine);
+    if (symbol) return { symbol, index: -1, line: candidateLine };
+  }
+
+  return null;
+}
+
+function exactSymbolFromLine(line) {
+  if (/[\u3400-\u9fff]/.test(String(line || ""))) return "";
+  const compact = compactText(line).replace(/[^\dA-Za-z]/g, "").toUpperCase();
+  return isTwSymbol(compact) ? compact : "";
+}
+
+function buildArkName(pendingNameLines, beforeHolding, symbol) {
+  const parts = [...pendingNameLines, beforeHolding]
+    .filter(Boolean)
+    .filter((line) => exactSymbolFromLine(line) !== symbol)
+    .map(cleanArkNamePart)
+    .filter(Boolean);
+  return compactText(parts.join(""));
+}
+
+function cleanArkNamePart(value) {
+  let text = String(value || "")
+    .replace(/現\s*股.*/, "")
+    .replace(/\b\d{4,6}[A-Z]?\b/g, "")
+    .replace(/[\d,]+(?:\.\d+)?/g, "")
+    .replace(/[《》\[\]「」"'`~!@#$%^&*_=+|\\/:;，。,.?？、三喧呈””-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tokens = text.split(" ").filter(Boolean);
+  if (tokens.length > 1 && /^(伍|全|愈|會|圖|師|朮|可|第)$/.test(tokens[0])) {
+    tokens.shift();
+  }
+
+  text = tokens.join("");
+  if (/^(持有股票|種類|總股數|成交均價|台股庫存|美股庫存)$/.test(text)) return "";
+  return text;
+}
+
+function dedupeRows(rows) {
+  const seen = new Map();
+  const result = [];
+  for (const row of rows) {
+    if (!row.symbol) {
+      result.push(row);
+      continue;
+    }
+    if (seen.has(row.symbol)) {
+      result[seen.get(row.symbol)] = row;
+      continue;
+    }
+    seen.set(row.symbol, result.length);
+    result.push(row);
+  }
+  return result;
 }
 
 function displayValue(value, suffix = "") {
@@ -600,11 +737,10 @@ function renderParsedRows(rows, context) {
     <tr>
       <td>${escapeHtml(row.symbol)}</td>
       <td>${escapeHtml(row.name)}</td>
+      <td>${escapeHtml(row.kind || "")}</td>
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
-      <td>${escapeHtml(displayValue(row.currentPrice))}</td>
-      <td>${escapeHtml(displayValue(row.pnl))}</td>
-      <td>${escapeHtml(displayValue(row.pnlRate, row.pnlRate === null ? "" : "%"))}</td>
+      <td>${escapeHtml(row.needsReview ? "待確認" : "")}</td>
     </tr>
   `).join("");
   return `
@@ -616,11 +752,10 @@ function renderParsedRows(rows, context) {
             <tr>
               <th>代號</th>
               <th>名稱</th>
+              <th>種類</th>
               <th>股數</th>
-              <th>成本</th>
-              <th>現價</th>
-              <th>損益</th>
-              <th>損益率</th>
+              <th>成交均價</th>
+              <th>狀態</th>
             </tr>
           </thead>
           <tbody>${body}</tbody>
