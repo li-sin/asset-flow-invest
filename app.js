@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.5.0";
-const APP_VERSION_NOTE = "繁中 OCR + HEIC";
+const APP_VERSION = "v0.5.1";
+const APP_VERSION_NOTE = "重新解析覆蓋舊資料";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -481,7 +481,7 @@ async function parseDraftImages() {
       texts.push(result.text.trim());
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
-    els.text.value = [els.text.value.trim(), combinedText].filter(Boolean).join("\n\n");
+    els.text.value = combinedText;
     const rows = parseHoldings(els.text.value);
     els.parsePreview.innerHTML = renderParsedRows(rows, "draft");
     setOcrStatus(rows.length ? `完成，抓到 ${rows.length} 筆候選庫存` : "完成，未抓到庫存列");
@@ -504,7 +504,7 @@ async function parseExistingEntry(id) {
     const result = await recognizeImage(entry.images[0], (progress, mode) => {
       button.textContent = `解析中 ${progress}%（${mode}）`;
     });
-    entry.text = [entry.text, result.text.trim()].filter(Boolean).join("\n\n");
+    entry.text = result.text.trim();
     entry.parsedRows = parseHoldings(entry.text);
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
