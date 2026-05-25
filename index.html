@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2f7d5b">
+  <title>AssetFlow Invest</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>AssetFlow Invest</h1>
+        <p id="summary-line">0 張截圖</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="export-backup" class="button secondary" type="button">匯出備份</button>
+        <label class="button secondary file-button">
+          匯入備份
+          <input id="backup-input" type="file" accept="application/json">
+        </label>
+        <label class="button primary file-button">
+          新增截圖
+          <input id="file-input" type="file" accept="image/*" multiple>
+        </label>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="capture-panel" aria-label="新增截圖">
+        <div class="notice">
+          截圖只存在這台裝置的瀏覽器；換手機前請先匯出備份。
+        </div>
+        <div id="drop-zone" class="drop-zone" tabindex="0">
+          <div class="drop-mark">+</div>
+          <div>
+            <h2>貼上或拖放截圖</h2>
+            <p>支援 PNG、JPG、WebP</p>
+          </div>
+        </div>
+        <div id="draft-preview" class="draft-preview"></div>
+
+        <form id="entry-form" class="entry-form">
+          <div class="field-grid">
+            <label>
+              日期
+              <input id="entry-date" name="date" type="date">
+            </label>
+            <label>
+              市場
+              <select id="entry-market" name="market">
+                <option value="TW">台股</option>
+                <option value="US">美股</option>
+                <option value="ALL">全部</option>
+              </select>
+            </label>
+            <label>
+              類型
+              <select id="entry-kind" name="kind">
+                <option value="ark_position">方舟庫存</option>
+                <option value="ark_level">方舟水位</option>
+                <option value="ark_layout">方舟布局</option>
+                <option value="broker_position">券商庫存</option>
+                <option value="other">其他</option>
+              </select>
+            </label>
+            <label>
+              狀態
+              <select id="entry-status" name="status">
+                <option value="new">未整理</option>
+                <option value="reviewed">已確認</option>
+                <option value="imported">已匯入</option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            標題
+            <input id="entry-title" name="title" type="text" placeholder="例如：方舟台股庫存更新後">
+          </label>
+
+          <label>
+            擷取文字 / 手動補資料
+            <textarea id="entry-text" name="text" rows="5" placeholder="貼上方舟畫面中的股票、股數、成本或水位"></textarea>
+          </label>
+
+          <label>
+            備註
+            <textarea id="entry-note" name="note" rows="3" placeholder="例如：已更新方舟、待比對成本"></textarea>
+          </label>
+
+          <div class="form-actions">
+            <button id="save-entry" class="button primary" type="submit" disabled>儲存截圖</button>
+            <button id="clear-draft" class="button ghost" type="button">清除</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="library-panel" aria-label="截圖清單">
+        <div class="toolbar">
+          <div class="segmented" role="tablist" aria-label="篩選">
+            <button class="segment is-active" type="button" data-filter="all">全部</button>
+            <button class="segment" type="button" data-filter="new">未整理</button>
+            <button class="segment" type="button" data-filter="reviewed">已確認</button>
+            <button class="segment" type="button" data-filter="imported">已匯入</button>
+          </div>
+          <input id="search-input" class="search" type="search" placeholder="搜尋代號或備註">
+        </div>
+
+        <div id="empty-state" class="empty-state">
+          <h2>還沒有截圖</h2>
+          <p>新增第一張方舟或券商畫面</p>
+        </div>
+
+        <div id="entry-list" class="entry-list"></div>
+      </section>
+    </main>
+
+    <aside id="detail-panel" class="detail-panel" aria-label="截圖內容">
+      <button id="close-detail" class="icon-button" type="button" aria-label="關閉">×</button>
+      <div id="detail-content"></div>
+    </aside>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
