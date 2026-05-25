@@ -1,6 +1,11 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
+const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
+const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
+const OCR_LANG_PATH = "https://tessdata.projectnaptha.com/4.0.0";
+const HEIC_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
 
 const state = {
   entries: [],
@@ -40,6 +45,8 @@ const els = {
 };
 
 let dbPromise = null;
+let tesseractLoadPromise = null;
+let heicLoadPromise = null;
 
 function emptyParseResult() {
   return {
@@ -104,15 +111,84 @@ function fileToDataUrl(file) {
   });
 }
 
-async function addFiles(files) {
-  const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
-  if (!imageFiles.length) return;
-  const images = await Promise.all(imageFiles.map(async (file) => ({
+function isHeicImage(image) {
+  return /image\/hei[cf]/i.test(image?.type || "") || /^data:image\/hei[cf]/i.test(image?.dataUrl || "");
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = String(dataUrl).split(",");
+  const mime = header.match(/data:([^;]+)/)?.[1] || "application/octet-stream";
+  const binary = atob(base64 || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function ensureHeicConverter() {
+  if (window.heic2any) return;
+  if (!heicLoadPromise) {
+    heicLoadPromise = loadScript(HEIC_SCRIPT_URL, () => Boolean(window.heic2any), "HEIC 轉檔模組");
+  }
+  await heicLoadPromise;
+  if (!window.heic2any) {
+    throw new Error("HEIC 轉檔模組載入後仍不可用，請重新整理後再試");
+  }
+}
+
+async function convertHeicToPngDataUrl(source) {
+  await ensureHeicConverter();
+  const blob = source instanceof Blob ? source : dataUrlToBlob(source.dataUrl);
+  const converted = await window.heic2any({
+    blob,
+    toType: "image/png",
+    quality: 0.92,
+  });
+  const pngBlob = Array.isArray(converted) ? converted[0] : converted;
+  return blobToDataUrl(pngBlob);
+}
+
+async function imageRecordFromFile(file) {
+  const original = {
     name: file.name || "clipboard-image",
     type: file.type,
     size: file.size,
     dataUrl: await fileToDataUrl(file),
-  })));
+  };
+
+  if (!isHeicImage(original)) return original;
+
+  try {
+    const dataUrl = await convertHeicToPngDataUrl(file);
+    return {
+      name: original.name.replace(/\.(hei[cf])$/i, ".png"),
+      type: "image/png",
+      size: file.size,
+      originalName: original.name,
+      originalType: original.type,
+      convertedFrom: "heic",
+      dataUrl,
+    };
+  } catch (error) {
+    console.warn("HEIC conversion failed", error);
+    return original;
+  }
+}
+
+async function addFiles(files) {
+  const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
+  if (!imageFiles.length) return;
+  const images = await Promise.all(imageFiles.map((file) => imageRecordFromFile(file)));
   state.draftImages.push(...images);
   updateDraftState();
 }
@@ -309,18 +385,82 @@ function setOcrStatus(text) {
   els.ocrStatus.textContent = text;
 }
 
-async function recognizeImage(image, onProgress) {
-  if (!window.Tesseract?.recognize) {
-    throw new Error("OCR 模組尚未載入，請確認網路連線後重試");
-  }
-  const result = await window.Tesseract.recognize(image.dataUrl, "eng+chi_tra", {
-    logger: (message) => {
-      if (message.status === "recognizing text" && typeof message.progress === "number") {
-        onProgress?.(Math.round(message.progress * 100));
-      }
-    },
+function loadScript(src, isReady, label) {
+  if (isReady()) return Promise.resolve();
+  const existing = document.querySelector(`script[src="${src}"]`);
+  return new Promise((resolve, reject) => {
+    const script = existing || document.createElement("script");
+    const timer = setTimeout(() => reject(new Error(`${label} 載入逾時`)), 20000);
+    script.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    script.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error(`無法載入 ${label}，請確認網路連線`));
+    };
+    if (!existing) {
+      script.src = src;
+      document.head.appendChild(script);
+    }
   });
-  return result?.data?.text || "";
+}
+
+async function ensureTesseract() {
+  if (window.Tesseract?.recognize) return;
+  if (!tesseractLoadPromise) {
+    tesseractLoadPromise = loadScript(OCR_SCRIPT_URL, () => Boolean(window.Tesseract?.recognize), "OCR 模組");
+  }
+  await tesseractLoadPromise;
+  if (!window.Tesseract?.recognize) {
+    throw new Error("OCR 模組載入後仍不可用，請重新整理後再試");
+  }
+}
+
+async function recognizeImage(image, onProgress) {
+  await ensureTesseract();
+  const imageForOcr = await prepareImageForOcr(image);
+
+  const attempts = [
+    { lang: "eng", label: "英文/數字" },
+    { lang: "eng+chi_tra", label: "繁中加強" },
+  ];
+  const errors = [];
+
+  for (const attempt of attempts) {
+    try {
+      const result = await window.Tesseract.recognize(imageForOcr.dataUrl, attempt.lang, {
+        workerPath: OCR_WORKER_URL,
+        corePath: OCR_CORE_URL,
+        langPath: OCR_LANG_PATH,
+        logger: (message) => {
+          if (message.status === "recognizing text" && typeof message.progress === "number") {
+            onProgress?.(Math.round(message.progress * 100), attempt.label);
+          }
+        },
+      });
+      const text = result?.data?.text || "";
+      if (text.trim()) {
+        return { text, mode: attempt.label };
+      }
+      errors.push(`${attempt.label}: 沒有辨識到文字`);
+    } catch (error) {
+      errors.push(`${attempt.label}: ${error.message || error}`);
+    }
+  }
+
+  throw new Error(`OCR 無法完成。${errors.join("；")}`);
+}
+
+async function prepareImageForOcr(image) {
+  if (!isHeicImage(image)) return image;
+  const dataUrl = await convertHeicToPngDataUrl(image);
+  return {
+    ...image,
+    dataUrl,
+    type: "image/png",
+    convertedFrom: image.convertedFrom || "heic",
+  };
 }
 
 async function parseDraftImages() {
@@ -332,10 +472,10 @@ async function parseDraftImages() {
     for (let index = 0; index < state.draftImages.length; index += 1) {
       const image = state.draftImages[index];
       setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張`);
-      const text = await recognizeImage(image, (progress) => {
-        setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%`);
+      const result = await recognizeImage(image, (progress, mode) => {
+        setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%（${mode}）`);
       });
-      texts.push(text.trim());
+      texts.push(result.text.trim());
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
     els.text.value = [els.text.value.trim(), combinedText].filter(Boolean).join("\n\n");
@@ -345,7 +485,7 @@ async function parseDraftImages() {
   } catch (error) {
     console.error(error);
     setOcrStatus("解析失敗");
-    alert(error.message || "截圖解析失敗");
+    alert(error.message || "截圖解析失敗，請重新整理後再試");
   } finally {
     els.parseDraft.disabled = state.draftImages.length === 0;
   }
@@ -358,10 +498,10 @@ async function parseExistingEntry(id) {
   button.disabled = true;
   button.textContent = "解析中...";
   try {
-    const text = await recognizeImage(entry.images[0], (progress) => {
-      button.textContent = `解析中 ${progress}%`;
+    const result = await recognizeImage(entry.images[0], (progress, mode) => {
+      button.textContent = `解析中 ${progress}%（${mode}）`;
     });
-    entry.text = [entry.text, text.trim()].filter(Boolean).join("\n\n");
+    entry.text = [entry.text, result.text.trim()].filter(Boolean).join("\n\n");
     entry.parsedRows = parseHoldings(entry.text);
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
@@ -369,7 +509,7 @@ async function parseExistingEntry(id) {
     openDetail(id);
   } catch (error) {
     console.error(error);
-    alert(error.message || "截圖解析失敗");
+    alert(error.message || "截圖解析失敗，請重新整理後再試");
     button.disabled = false;
     button.textContent = "重新解析截圖";
   }
