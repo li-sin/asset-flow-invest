@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.8.1";
-const APP_VERSION_NOTE = "更新快取修正";
+const APP_VERSION = "v0.8.2";
+const APP_VERSION_NOTE = "橫列裁切診斷";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -344,6 +344,7 @@ async function saveEntry(event) {
     rowOcrMs: image.rowOcrMs,
     columnCrops: image.columnCrops || [],
     rowCrops: image.rowCrops || [],
+    skippedRowCrops: image.skippedRowCrops || [],
   }));
 
   await txStore("readwrite", (store) => {
@@ -379,6 +380,12 @@ function openDetail(id) {
         <span class="chip ${entry.status}">${statusLabel(entry.status)}</span>
       </div>
       <h2>${escapeHtml(entry.title || "未命名截圖")}</h2>
+      <div class="form-actions detail-actions">
+        <button class="button secondary" type="button" data-action="parse-entry">重新解析截圖</button>
+        <button class="button secondary" type="button" data-action="mark-reviewed">標記已確認</button>
+        <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
+        <button class="button ghost danger" type="button" data-action="delete">刪除</button>
+      </div>
       <div class="detail-grid">
         <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
         <div class="detail-field"><span>檔名</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
@@ -388,16 +395,10 @@ function openDetail(id) {
         <span>擷取文字 / 手動補資料</span>
         <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
       </div>
-      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [])}
+      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-field">
         <span>備註</span>
         <div class="pre-wrap">${escapeHtml(entry.note || "尚未填寫")}</div>
-      </div>
-      <div class="form-actions">
-        <button class="button secondary" type="button" data-action="parse-entry">重新解析截圖</button>
-        <button class="button secondary" type="button" data-action="mark-reviewed">標記已確認</button>
-        <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
-        <button class="button ghost danger" type="button" data-action="delete">刪除</button>
       </div>
     </div>
   `;
@@ -564,15 +565,16 @@ async function recognizeArkRows(dataUrl, fullLines, onProgress) {
       label,
       dataUrl: crop,
       text: result.text || "",
+      status: row ? "imported" : "skipped",
     };
 
     if (row) {
       row.crop = cropRecord;
       rows.push(row);
-      crops.push(cropRecord);
     } else {
       skipped.push(cropRecord);
     }
+    crops.push(cropRecord);
   }
 
   return { rows, crops, skipped };
@@ -827,7 +829,9 @@ async function parseDraftImages() {
     const rows = state.draftImages.flatMap((image) => image.parsedRows || []);
     const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value);
     const columnCrops = state.draftImages.flatMap((image) => image.columnCrops || []);
-    els.parsePreview.innerHTML = renderParsedRows(parsedRows, "draft", "", columnCrops);
+    const rowCrops = state.draftImages.flatMap((image) => image.rowCrops || []);
+    const skippedRowCrops = state.draftImages.flatMap((image) => image.skippedRowCrops || []);
+    els.parsePreview.innerHTML = renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops);
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     setOcrStatus(parsedRows.length ? `完成，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(elapsed)}）` : `完成，未抓到庫存列（${formatDuration(elapsed)}）`);
   } catch (error) {
@@ -1246,9 +1250,10 @@ function renderOcrTiming(entry) {
   return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
 }
 
-function renderParsedRows(rows, context, entryId = "", columnCrops = []) {
+function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrops = [], skippedRowCrops = []) {
+  const rowDiagnostics = renderRowCropDiagnostics(rowCrops, skippedRowCrops);
   if (!rows?.length) {
-    const crops = renderColumnCrops(columnCrops);
+    const crops = rowDiagnostics || renderColumnCrops(columnCrops);
     if (crops) {
       return `
         <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
@@ -1278,6 +1283,7 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = []) {
   return `
     <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
       <span>解析庫存</span>
+      ${rowDiagnostics}
       ${renderColumnCrops(columnCrops)}
       <div class="table-scroll">
         <table class="parsed-table">
@@ -1308,6 +1314,39 @@ function renderRowCropCell(row) {
       <img src="${row.crop.dataUrl}" alt="${escapeHtml(row.crop.label || "個股橫列裁切")}">
       <figcaption>${escapeHtml(row.crop.label || "")}</figcaption>
     </figure>
+  `;
+}
+
+function renderRowCropDiagnostics(rowCrops, skippedRowCrops = []) {
+  const unique = [];
+  const seen = new Set();
+  for (const crop of [...(rowCrops || []), ...(skippedRowCrops || [])]) {
+    const key = crop?.key || crop?.dataUrl;
+    if (!crop?.dataUrl || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(crop);
+  }
+  if (!unique.length) return "";
+
+  const items = unique.map((crop) => {
+    const imported = crop.status === "imported";
+    const text = String(crop.text || "").trim();
+    return `
+      <figure class="diagnostic-crop ${imported ? "imported" : "skipped"}">
+        <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "個股橫列裁切")}">
+        <figcaption>
+          <strong>${escapeHtml(crop.label || "橫列")}</strong>
+          <span>${imported ? "已進庫存" : "未匯入"}</span>
+          <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
+        </figcaption>
+      </figure>
+    `;
+  }).join("");
+
+  return `
+    <div class="row-diagnostics" aria-label="個股橫列裁切診斷">
+      ${items}
+    </div>
   `;
 }
 
