@@ -172,7 +172,7 @@ textarea {
 .parsed-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 620px;
+  min-width: 880px;
   font-size: 13px;
 }
 
@@ -188,6 +188,30 @@ textarea {
   color: var(--muted);
   font-weight: 600;
   background: #f7f3eb;
+}
+
+.raw-cell {
+  max-width: 260px;
+  white-space: normal;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.symbol-fix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.symbol-fix input {
+  width: 96px;
+  min-height: 34px;
+  padding: 7px 8px;
+}
+
+.button.compact {
+  min-height: 34px;
+  padding: 0 10px;
 }
 
 .workspace {

@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.6.2";
-const APP_VERSION_NOTE = "顯示代號待補列";
+const APP_VERSION = "v0.6.3";
+const APP_VERSION_NOTE = "遮蔽雜訊與手動補代號";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -381,7 +381,7 @@ function openDetail(id) {
         <span>擷取文字 / 手動補資料</span>
         <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
       </div>
-      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail")}
+      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id)}
       <div class="detail-field">
         <span>備註</span>
         <div class="pre-wrap">${escapeHtml(entry.note || "尚未填寫")}</div>
@@ -400,6 +400,13 @@ function openDetail(id) {
   els.detailContent.querySelector('[data-action="mark-reviewed"]').addEventListener("click", () => updateStatus(id, "reviewed"));
   els.detailContent.querySelector('[data-action="mark-imported"]').addEventListener("click", () => updateStatus(id, "imported"));
   els.detailContent.querySelector('[data-action="delete"]').addEventListener("click", () => deleteEntry(id));
+  els.detailContent.querySelectorAll('[data-action="apply-symbol"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const rowIndex = Number(button.dataset.rowIndex);
+      const input = els.detailContent.querySelector(`[data-symbol-input="${rowIndex}"]`);
+      applyManualSymbol(id, rowIndex, input?.value || "");
+    });
+  });
 }
 
 function setOcrStatus(text) {
@@ -438,9 +445,9 @@ async function ensureTesseract() {
   }
 }
 
-async function recognizeImage(image, onProgress) {
+async function recognizeImage(image, onProgress, options = {}) {
   await ensureTesseract();
-  const imageForOcr = await prepareImageForOcr(image);
+  const imageForOcr = await prepareImageForOcr(image, options);
 
   const attempts = [
     { lang: "chi_tra+eng", label: "繁中/英文" },
@@ -473,15 +480,83 @@ async function recognizeImage(image, onProgress) {
   throw new Error(`OCR 無法完成。${errors.join("；")}`);
 }
 
-async function prepareImageForOcr(image) {
-  if (!isHeicImage(image)) return image;
-  const dataUrl = await convertHeicToPngDataUrl(image);
+async function prepareImageForOcr(image, options = {}) {
+  const converted = isHeicImage(image)
+    ? {
+      ...image,
+      dataUrl: await convertHeicToPngDataUrl(image),
+      type: "image/png",
+      convertedFrom: image.convertedFrom || "heic",
+    }
+    : image;
+
+  if (!options.maskEditButtons) return converted;
+
   return {
-    ...image,
-    dataUrl,
+    ...converted,
+    dataUrl: await maskArkEditButtons(converted.dataUrl),
     type: "image/png",
-    convertedFrom: image.convertedFrom || "heic",
+    maskedForOcr: true,
   };
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("圖片載入失敗，無法進行 OCR 前處理"));
+    image.src = dataUrl;
+  });
+}
+
+async function maskArkEditButtons(dataUrl) {
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0);
+
+  const maskWidth = Math.round(canvas.width * 0.095);
+  const top = Math.round(canvas.height * 0.2);
+  const bottom = Math.round(canvas.height * 0.85);
+  ctx.fillStyle = "#151515";
+  ctx.fillRect(0, top, maskWidth, bottom - top);
+
+  return canvas.toDataURL("image/png", 0.95);
+}
+
+async function applyManualSymbol(entryId, rowIndex, value) {
+  const entry = state.entries.find((item) => item.id === entryId);
+  if (!entry?.parsedRows?.[rowIndex]) return;
+
+  const symbol = normalizeSymbolInput(value);
+  if (!isTwSymbol(symbol)) {
+    alert("請輸入有效代號，例如 0050、2330、00988A");
+    return;
+  }
+
+  const row = entry.parsedRows[rowIndex];
+  const officialName = lookupSymbolName(symbol);
+  entry.parsedRows[rowIndex] = {
+    ...row,
+    symbol,
+    name: officialName || row.ocrName || row.name || "",
+    needsReview: !officialName,
+    reviewReason: officialName ? "" : "名稱待補",
+    manualSymbol: true,
+  };
+  entry.updatedAt = new Date().toISOString();
+  await txStore("readwrite", (store) => store.put(entry));
+  render();
+  openDetail(entryId);
+}
+
+function normalizeSymbolInput(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/[^\dA-Za-z]/g, "")
+    .toUpperCase();
 }
 
 async function parseDraftImages() {
@@ -495,7 +570,7 @@ async function parseDraftImages() {
       setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張`);
       const result = await recognizeImage(image, (progress, mode) => {
         setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%（${mode}）`);
-      });
+      }, { maskEditButtons: els.kind.value === "ark_position" });
       texts.push(result.text.trim());
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
@@ -521,7 +596,7 @@ async function parseExistingEntry(id) {
   try {
     const result = await recognizeImage(entry.images[0], (progress, mode) => {
       button.textContent = `解析中 ${progress}%（${mode}）`;
-    });
+    }, { maskEditButtons: entry.kind === "ark_position" });
     entry.text = result.text.trim();
     entry.parsedRows = parseHoldings(entry.text);
     entry.updatedAt = new Date().toISOString();
@@ -638,6 +713,7 @@ function parseLineBasedRows(lines) {
 
     if (!numbers.length) continue;
 
+    const nameTokens = tokens.slice(0, numbers[0].index).filter((token) => !/[+-]?\d/.test(token));
     const ocrName = nameTokens.join(" ");
     const shares = numbers.find((item) => Number.isInteger(item.value) && Math.abs(item.value) >= 1)?.value ?? null;
     const percent = numbers.find((item) => item.percent)?.value ?? null;
@@ -750,13 +826,13 @@ function displayValue(value, suffix = "") {
   return `${value}${suffix}`;
 }
 
-function renderParsedRows(rows, context) {
+function renderParsedRows(rows, context, entryId = "") {
   if (!rows?.length) {
     return context === "detail"
       ? `<div class="detail-field"><span>解析庫存</span><div class="pre-wrap">尚未抓到庫存列</div></div>`
       : "";
   }
-  const body = rows.map((row) => `
+  const body = rows.map((row, index) => `
     <tr>
       <td>${escapeHtml(row.symbol || "待確認")}</td>
       <td>${escapeHtml(row.name)}</td>
@@ -764,6 +840,8 @@ function renderParsedRows(rows, context) {
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
       <td>${escapeHtml(row.needsReview ? row.reviewReason || "待確認" : "")}</td>
+      <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
+      <td>${renderSymbolFixCell(row, index, context, entryId)}</td>
     </tr>
   `).join("");
   return `
@@ -779,11 +857,23 @@ function renderParsedRows(rows, context) {
               <th>股數</th>
               <th>成交均價</th>
               <th>狀態</th>
+              <th>OCR 區塊</th>
+              <th>修正</th>
             </tr>
           </thead>
           <tbody>${body}</tbody>
         </table>
       </div>
+    </div>
+  `;
+}
+
+function renderSymbolFixCell(row, index, context, entryId) {
+  if (context !== "detail" || !entryId || !row.needsReview) return "";
+  return `
+    <div class="symbol-fix">
+      <input data-symbol-input="${index}" type="text" inputmode="text" placeholder="代號" value="${escapeHtml(row.symbol || "")}">
+      <button class="button secondary compact" type="button" data-action="apply-symbol" data-row-index="${index}">套用</button>
     </div>
   `;
 }
