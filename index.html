@@ -86,6 +86,15 @@
             <textarea id="entry-text" name="text" rows="5" placeholder="貼上方舟畫面中的股票、股數、成本或水位"></textarea>
           </label>
 
+          <div class="ocr-panel">
+            <div>
+              <strong>截圖解析</strong>
+              <span id="ocr-status">尚未解析</span>
+            </div>
+            <button id="parse-draft" class="button secondary" type="button" disabled>解析截圖</button>
+          </div>
+          <div id="parse-preview" class="parse-preview"></div>
+
           <label>
             備註
             <textarea id="entry-note" name="note" rows="3" placeholder="例如：已更新方舟、待比對成本"></textarea>
@@ -124,6 +133,7 @@
     </aside>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

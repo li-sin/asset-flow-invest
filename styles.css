@@ -127,6 +127,69 @@ textarea {
   margin-bottom: 12px;
 }
 
+.ocr-panel {
+  border: 1px solid #d8e2d9;
+  border-radius: 8px;
+  background: #f6fbf7;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ocr-panel div {
+  display: grid;
+  gap: 3px;
+}
+
+.ocr-panel strong {
+  font-size: 14px;
+}
+
+.ocr-panel span,
+.parsed-card > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.parse-preview:empty {
+  display: none;
+}
+
+.parsed-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.parsed-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+  font-size: 13px;
+}
+
+.parsed-table th,
+.parsed-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.parsed-table th {
+  color: var(--muted);
+  font-weight: 600;
+  background: #f7f3eb;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);

@@ -23,6 +23,9 @@ const els = {
   title: $("#entry-title"),
   text: $("#entry-text"),
   note: $("#entry-note"),
+  parseDraft: $("#parse-draft"),
+  parsePreview: $("#parse-preview"),
+  ocrStatus: $("#ocr-status"),
   save: $("#save-entry"),
   clear: $("#clear-draft"),
   draftPreview: $("#draft-preview"),
@@ -37,6 +40,15 @@ const els = {
 };
 
 let dbPromise = null;
+
+function emptyParseResult() {
+  return {
+    text: "",
+    rows: [],
+    source: "none",
+    parsedAt: null,
+  };
+}
 
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -107,6 +119,7 @@ async function addFiles(files) {
 
 function updateDraftState() {
   els.save.disabled = state.draftImages.length === 0;
+  els.parseDraft.disabled = state.draftImages.length === 0;
   els.draftPreview.innerHTML = state.draftImages.map((image) => `
     <div class="draft-shot">
       <img src="${image.dataUrl}" alt="">
@@ -117,6 +130,10 @@ function updateDraftState() {
     els.title.value = state.draftImages.length === 1
       ? state.draftImages[0].name.replace(/\.[^.]+$/, "")
       : `${state.draftImages.length} 張截圖`;
+  }
+  if (!state.draftImages.length) {
+    els.ocrStatus.textContent = "尚未解析";
+    els.parsePreview.innerHTML = "";
   }
 }
 
@@ -212,6 +229,7 @@ async function saveEntry(event) {
     title: els.title.value.trim(),
     text: els.text.value.trim(),
     note: els.note.value.trim(),
+    parsedRows: parseHoldings(els.text.value.trim()),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -239,7 +257,10 @@ function clearDraft() {
   els.form.reset();
   els.date.value = today();
   els.save.disabled = true;
+  els.parseDraft.disabled = true;
   els.draftPreview.innerHTML = "";
+  els.parsePreview.innerHTML = "";
+  els.ocrStatus.textContent = "尚未解析";
 }
 
 function openDetail(id) {
@@ -263,11 +284,13 @@ function openDetail(id) {
         <span>擷取文字 / 手動補資料</span>
         <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
       </div>
+      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail")}
       <div class="detail-field">
         <span>備註</span>
         <div class="pre-wrap">${escapeHtml(entry.note || "尚未填寫")}</div>
       </div>
       <div class="form-actions">
+        <button class="button secondary" type="button" data-action="parse-entry">重新解析截圖</button>
         <button class="button secondary" type="button" data-action="mark-reviewed">標記已確認</button>
         <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
@@ -276,9 +299,192 @@ function openDetail(id) {
   `;
   els.detail.classList.add("is-open");
 
+  els.detailContent.querySelector('[data-action="parse-entry"]').addEventListener("click", () => parseExistingEntry(id));
   els.detailContent.querySelector('[data-action="mark-reviewed"]').addEventListener("click", () => updateStatus(id, "reviewed"));
   els.detailContent.querySelector('[data-action="mark-imported"]').addEventListener("click", () => updateStatus(id, "imported"));
   els.detailContent.querySelector('[data-action="delete"]').addEventListener("click", () => deleteEntry(id));
+}
+
+function setOcrStatus(text) {
+  els.ocrStatus.textContent = text;
+}
+
+async function recognizeImage(image, onProgress) {
+  if (!window.Tesseract?.recognize) {
+    throw new Error("OCR 模組尚未載入，請確認網路連線後重試");
+  }
+  const result = await window.Tesseract.recognize(image.dataUrl, "eng+chi_tra", {
+    logger: (message) => {
+      if (message.status === "recognizing text" && typeof message.progress === "number") {
+        onProgress?.(Math.round(message.progress * 100));
+      }
+    },
+  });
+  return result?.data?.text || "";
+}
+
+async function parseDraftImages() {
+  if (!state.draftImages.length || els.parseDraft.disabled) return;
+  els.parseDraft.disabled = true;
+  setOcrStatus("載入 OCR 中...");
+  try {
+    const texts = [];
+    for (let index = 0; index < state.draftImages.length; index += 1) {
+      const image = state.draftImages[index];
+      setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張`);
+      const text = await recognizeImage(image, (progress) => {
+        setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%`);
+      });
+      texts.push(text.trim());
+    }
+    const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
+    els.text.value = [els.text.value.trim(), combinedText].filter(Boolean).join("\n\n");
+    const rows = parseHoldings(els.text.value);
+    els.parsePreview.innerHTML = renderParsedRows(rows, "draft");
+    setOcrStatus(rows.length ? `完成，抓到 ${rows.length} 筆候選庫存` : "完成，未抓到庫存列");
+  } catch (error) {
+    console.error(error);
+    setOcrStatus("解析失敗");
+    alert(error.message || "截圖解析失敗");
+  } finally {
+    els.parseDraft.disabled = state.draftImages.length === 0;
+  }
+}
+
+async function parseExistingEntry(id) {
+  const entry = state.entries.find((item) => item.id === id);
+  if (!entry?.images?.length) return;
+  const button = els.detailContent.querySelector('[data-action="parse-entry"]');
+  button.disabled = true;
+  button.textContent = "解析中...";
+  try {
+    const text = await recognizeImage(entry.images[0], (progress) => {
+      button.textContent = `解析中 ${progress}%`;
+    });
+    entry.text = [entry.text, text.trim()].filter(Boolean).join("\n\n");
+    entry.parsedRows = parseHoldings(entry.text);
+    entry.updatedAt = new Date().toISOString();
+    await txStore("readwrite", (store) => store.put(entry));
+    render();
+    openDetail(id);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "截圖解析失敗");
+    button.disabled = false;
+    button.textContent = "重新解析截圖";
+  }
+}
+
+function normalizeOcrText(text) {
+  return String(text || "")
+    .replace(/[０-９]/g, (value) => String.fromCharCode(value.charCodeAt(0) - 0xfee0))
+    .replace(/[，]/g, ",")
+    .replace(/[％]/g, "%")
+    .replace(/[＋]/g, "+")
+    .replace(/[－]/g, "-")
+    .replace(/[|｜]/g, " ")
+    .replace(/[：]/g, ":");
+}
+
+function parseNumberToken(token) {
+  const normalized = String(token || "")
+    .replace(/[,$]/g, "")
+    .replace(/[()]/g, "")
+    .replace(/[％%]/g, "")
+    .replace(/[+]/g, "");
+  if (!/^[-]?\d+(?:\.\d+)?$/.test(normalized)) return null;
+  return Number(normalized);
+}
+
+function parseHoldings(text) {
+  const normalized = normalizeOcrText(text);
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rows = [];
+
+  for (const line of lines) {
+    const symbolMatch = line.match(/\b(?:\d{4,6}|[A-Z]{1,5}(?:\.[A-Z]{1,3})?)\b/);
+    if (!symbolMatch) continue;
+
+    const symbol = symbolMatch[0];
+    if (["TW", "US", "ETF", "TWD", "USD", "BUY", "SELL"].includes(symbol)) continue;
+
+    const afterSymbol = line.slice(symbolMatch.index + symbol.length).trim();
+    const tokens = afterSymbol.split(/\s+/).filter(Boolean);
+    const numbers = tokens
+      .map((token, index) => ({
+        token,
+        index,
+        value: parseNumberToken(token),
+        percent: /[%％]/.test(token),
+      }))
+      .filter((item) => item.value !== null);
+
+    if (!numbers.length) continue;
+
+    const nameTokens = tokens.slice(0, numbers[0].index).filter((token) => !/[+-]?\d/.test(token));
+    const shares = numbers.find((item) => Number.isInteger(item.value) && Math.abs(item.value) >= 1)?.value ?? null;
+    const percent = numbers.find((item) => item.percent)?.value ?? null;
+    const nonPercentNumbers = numbers.filter((item) => !item.percent);
+    const firstPriceIndex = shares === null ? 0 : Math.max(0, nonPercentNumbers.findIndex((item) => item.value === shares) + 1);
+
+    rows.push({
+      symbol,
+      name: nameTokens.join(" "),
+      shares,
+      avgCost: nonPercentNumbers[firstPriceIndex]?.value ?? null,
+      currentPrice: nonPercentNumbers[firstPriceIndex + 1]?.value ?? null,
+      pnl: nonPercentNumbers.find((item) => /^[+-]/.test(item.token))?.value ?? null,
+      pnlRate: percent,
+      rawLine: line,
+    });
+  }
+
+  return rows;
+}
+
+function displayValue(value, suffix = "") {
+  if (value === null || value === undefined || Number.isNaN(value)) return "";
+  return `${value}${suffix}`;
+}
+
+function renderParsedRows(rows, context) {
+  if (!rows?.length) {
+    return context === "detail"
+      ? `<div class="detail-field"><span>解析庫存</span><div class="pre-wrap">尚未抓到庫存列</div></div>`
+      : "";
+  }
+  const body = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.symbol)}</td>
+      <td>${escapeHtml(row.name)}</td>
+      <td>${escapeHtml(displayValue(row.shares))}</td>
+      <td>${escapeHtml(displayValue(row.avgCost))}</td>
+      <td>${escapeHtml(displayValue(row.currentPrice))}</td>
+      <td>${escapeHtml(displayValue(row.pnl))}</td>
+      <td>${escapeHtml(displayValue(row.pnlRate, row.pnlRate === null ? "" : "%"))}</td>
+    </tr>
+  `).join("");
+  return `
+    <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
+      <span>解析庫存</span>
+      <div class="table-scroll">
+        <table class="parsed-table">
+          <thead>
+            <tr>
+              <th>代號</th>
+              <th>名稱</th>
+              <th>股數</th>
+              <th>成本</th>
+              <th>現價</th>
+              <th>損益</th>
+              <th>損益率</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function closeDetail() {
@@ -365,6 +571,7 @@ function bindEvents() {
   });
   els.form.addEventListener("submit", saveEntry);
   els.clear.addEventListener("click", clearDraft);
+  els.parseDraft.addEventListener("click", parseDraftImages);
   els.search.addEventListener("input", (event) => {
     state.query = event.target.value;
     render();
