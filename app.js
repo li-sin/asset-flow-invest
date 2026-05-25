@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.8.5";
-const APP_VERSION_NOTE = "橫列偵測修正";
+const APP_VERSION = "v0.8.6";
+const APP_VERSION_NOTE = "庫存區塊置頂";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -387,6 +387,7 @@ function openDetail(id) {
         <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
       </div>
+      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-grid">
         <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
         <div class="detail-field"><span>檔名</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
@@ -396,7 +397,6 @@ function openDetail(id) {
         <span>擷取文字 / 手動補資料</span>
         <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
       </div>
-      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-field">
         <span>備註</span>
         <div class="pre-wrap">${escapeHtml(entry.note || "尚未填寫")}</div>
@@ -1306,8 +1306,8 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
       return `
         <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
           <span>解析庫存</span>
-          ${crops}
           <div class="pre-wrap">尚未抓到庫存列</div>
+          ${crops}
         </div>
       `;
     }
@@ -1331,8 +1331,6 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
   return `
     <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
       <span>解析庫存</span>
-      ${rowDiagnostics}
-      ${renderColumnCrops(columnCrops)}
       <div class="table-scroll">
         <table class="parsed-table">
           <thead>
@@ -1351,6 +1349,8 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
           <tbody>${body}</tbody>
         </table>
       </div>
+      ${rowDiagnostics}
+      ${renderColumnCrops(columnCrops)}
     </div>
   `;
 }
