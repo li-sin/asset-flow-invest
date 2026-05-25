@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.8.3";
-const APP_VERSION_NOTE = "橫列裁切備援";
+const APP_VERSION = "v0.8.4";
+const APP_VERSION_NOTE = "診斷匯出";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -382,6 +382,7 @@ function openDetail(id) {
       <h2>${escapeHtml(entry.title || "未命名截圖")}</h2>
       <div class="form-actions detail-actions">
         <button class="button secondary" type="button" data-action="parse-entry">重新解析截圖</button>
+        <button class="button secondary" type="button" data-action="export-diagnostics">匯出診斷</button>
         <button class="button secondary" type="button" data-action="mark-reviewed">標記已確認</button>
         <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
@@ -405,6 +406,7 @@ function openDetail(id) {
   els.detail.classList.add("is-open");
 
   els.detailContent.querySelector('[data-action="parse-entry"]').addEventListener("click", () => parseExistingEntry(id));
+  els.detailContent.querySelector('[data-action="export-diagnostics"]').addEventListener("click", () => exportEntryDiagnostics(id));
   els.detailContent.querySelector('[data-action="mark-reviewed"]').addEventListener("click", () => updateStatus(id, "reviewed"));
   els.detailContent.querySelector('[data-action="mark-imported"]').addEventListener("click", () => updateStatus(id, "imported"));
   els.detailContent.querySelector('[data-action="delete"]').addEventListener("click", () => deleteEntry(id));
@@ -591,7 +593,13 @@ async function detectArkRowRects(dataUrl) {
   const separators = await detectArkRowSeparators(image);
   const minHeight = height * 0.052;
   const maxHeight = height * 0.145;
-  const rects = separators.slice(0, -1).map((top, index) => {
+  const rects = rectsFromSeparators(separators, width, height, left, right, minHeight, maxHeight);
+
+  return rects.length ? rects : fallbackArkRowRects(width, height, left, right);
+}
+
+function rectsFromSeparators(separators, width, height, left, right, minHeight, maxHeight) {
+  return separators.slice(0, -1).map((top, index) => {
     const bottom = separators[index + 1];
     const rowHeight = bottom - top;
     if (rowHeight < minHeight || rowHeight > maxHeight) return null;
@@ -600,10 +608,10 @@ async function detectArkRowRects(dataUrl) {
       y: (top + 1) / height,
       width: right - left,
       height: Math.max(1, rowHeight - 2) / height,
+      top,
+      bottom,
     };
   }).filter(Boolean);
-
-  return rects.length ? rects : fallbackArkRowRects(width, height, left, right);
 }
 
 function fallbackArkRowRects(width, height, left, right) {
@@ -748,6 +756,14 @@ async function cropImageDataUrl(dataUrl, rect) {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
   return canvas.toDataURL("image/png", 0.95);
+}
+
+async function imageDimensions(dataUrl) {
+  const image = await loadImage(dataUrl);
+  return {
+    width: image.naturalWidth || image.width,
+    height: image.naturalHeight || image.height,
+  };
 }
 
 async function recognizeArkColumns(dataUrl, onProgress) {
@@ -1432,6 +1448,126 @@ function exportBackup() {
   const link = document.createElement("a");
   link.href = url;
   link.download = `assetflow-invest-backup-${today()}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportEntryDiagnostics(id) {
+  const entry = state.entries.find((item) => item.id === id);
+  const image = entry?.images?.[0];
+  if (!entry || !image?.dataUrl) return;
+
+  const button = els.detailContent.querySelector('[data-action="export-diagnostics"]');
+  if (button) {
+    button.disabled = true;
+    button.textContent = "診斷中...";
+  }
+
+  try {
+    const prepared = await prepareImageForOcr(image, {
+      maskEditButtons: entry.kind === "ark_position",
+    });
+    const dimensions = await imageDimensions(prepared.dataUrl);
+    const loadedImage = await loadImage(prepared.dataUrl);
+    const separators = await detectArkRowSeparators(loadedImage);
+    const left = 0.095;
+    const right = 0.965;
+    const minHeight = dimensions.height * 0.052;
+    const maxHeight = dimensions.height * 0.145;
+    const detectedRects = rectsFromSeparators(separators, dimensions.width, dimensions.height, left, right, minHeight, maxHeight);
+    const fallbackRects = fallbackArkRowRects(dimensions.width, dimensions.height, left, right);
+    const activeRects = detectedRects.length ? detectedRects : fallbackRects;
+    const activeSource = detectedRects.length ? "separator" : "fallback";
+    const activeCrops = [];
+
+    for (let index = 0; index < activeRects.length; index += 1) {
+      const rect = activeRects[index];
+      activeCrops.push({
+        index: index + 1,
+        source: rect.fallback ? "fallback" : "separator",
+        rect: serializeRect(rect, dimensions),
+        dataUrl: await cropImageDataUrl(prepared.dataUrl, rect),
+      });
+    }
+
+    const payload = {
+      app: "AssetFlow Invest",
+      appVersion: APP_VERSION,
+      diagnosticVersion: 1,
+      exportedAt: new Date().toISOString(),
+      entry: {
+        id: entry.id,
+        title: entry.title,
+        date: entry.date,
+        kind: entry.kind,
+        market: entry.market,
+        imageName: image.name,
+        imageType: image.type,
+        convertedFrom: prepared.convertedFrom || "",
+        maskedForOcr: Boolean(prepared.maskedForOcr),
+      },
+      image: {
+        width: dimensions.width,
+        height: dimensions.height,
+        processedDataUrl: prepared.dataUrl,
+      },
+      detection: {
+        separators,
+        detectedRectCount: detectedRects.length,
+        fallbackRectCount: fallbackRects.length,
+        activeSource,
+        activeRectCount: activeRects.length,
+        detectedRects: detectedRects.map((rect) => serializeRect(rect, dimensions)),
+        fallbackRects: fallbackRects.map((rect) => serializeRect(rect, dimensions)),
+        activeCrops,
+      },
+      savedParseState: {
+        parsedRows: entry.parsedRows || [],
+        rowCrops: entry.rowCrops || [],
+        skippedRowCrops: entry.skippedRowCrops || [],
+      },
+    };
+
+    downloadJson(payload, `assetflow-invest-diagnostics-${entry.id}-${today()}.json`);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "診斷匯出失敗，請重新整理後再試");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "匯出診斷";
+    }
+  }
+}
+
+function serializeRect(rect, dimensions) {
+  const x = Math.round(dimensions.width * rect.x);
+  const y = Math.round(dimensions.height * rect.y);
+  const width = Math.round(dimensions.width * rect.width);
+  const height = Math.round(dimensions.height * rect.height);
+  return {
+    x,
+    y,
+    width,
+    height,
+    top: rect.top ?? y,
+    bottom: rect.bottom ?? (y + height),
+    fallback: Boolean(rect.fallback),
+    relative: {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    },
+  };
+}
+
+function downloadJson(payload, filename) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
 }

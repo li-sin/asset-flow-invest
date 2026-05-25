@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#2f7d5b">
   <title>AssetFlow Invest</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=0.8.3">
+  <link rel="stylesheet" href="./styles.css?v=0.8.4">
 </head>
 <body>
   <div class="app-shell">
@@ -85,6 +85,7 @@
             擷取文字 / 手動補資料
             <textarea id="entry-text" name="text" rows="5" placeholder="貼上方舟畫面中的股票、股數、成本或水位"></textarea>
           </label>
+          <div id="parse-preview" class="parse-preview"></div>
 
           <div class="ocr-panel">
             <div>
@@ -93,7 +94,6 @@
             </div>
             <button id="parse-draft" class="button secondary" type="button" disabled>解析截圖</button>
           </div>
-          <div id="parse-preview" class="parse-preview"></div>
 
           <label>
             備註
@@ -128,7 +128,7 @@
     </main>
 
     <footer class="app-footer">
-      <span id="app-version">AssetFlow Invest v0.8.3</span>
+      <span id="app-version">AssetFlow Invest v0.8.4</span>
     </footer>
 
     <aside id="detail-panel" class="detail-panel" aria-label="截圖內容">
@@ -137,6 +137,6 @@
     </aside>
   </div>
 
-  <script src="./app.js?v=0.8.3"></script>
+  <script src="./app.js?v=0.8.4"></script>
 </body>
 </html>
