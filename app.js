@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.8.4";
-const APP_VERSION_NOTE = "診斷匯出";
+const APP_VERSION = "v0.8.5";
+const APP_VERSION_NOTE = "橫列偵測修正";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -392,7 +392,7 @@ function openDetail(id) {
         <div class="detail-field"><span>檔名</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
         ${renderOcrTiming(entry)}
       </div>
-      <div class="detail-field">
+      <div class="detail-field ocr-text-field">
         <span>擷取文字 / 手動補資料</span>
         <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
       </div>
@@ -660,7 +660,7 @@ async function detectArkRowSeparators(image) {
       const blue = imageData[index + 2];
       const brightness = (red + green + blue) / 3;
       const spread = Math.max(red, green, blue) - Math.min(red, green, blue);
-      if (brightness >= 42 && brightness <= 66 && spread <= 16) matching += 1;
+      if (brightness >= 39 && brightness <= 66 && spread <= 16) matching += 1;
       total += 1;
     }
     if (total && matching / total > 0.55) candidates.push(y);
@@ -955,7 +955,8 @@ function parseArkRowCropText(text, cropDataUrl, label) {
   if (numbers.length < 2) return null;
 
   const shares = numbers.find((value) => Number.isInteger(value) && value > 0) ?? null;
-  const avgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
+  const rawAvgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
+  const avgCost = normalizeArkAvgCost(rawAvgCost);
   if (shares === null || avgCost === null) return null;
 
   const symbol = findKnownSymbolInText(normalized);
@@ -984,6 +985,14 @@ function parseArkRowCropText(text, cropDataUrl, label) {
       text: normalized,
     },
   };
+}
+
+function normalizeArkAvgCost(value) {
+  if (!Number.isFinite(value)) return null;
+  if (Number.isInteger(value) && value >= 1000) {
+    return Number((value / 100).toFixed(2));
+  }
+  return value;
 }
 
 function findKnownSymbolInText(text) {

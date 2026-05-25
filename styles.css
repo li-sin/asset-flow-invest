@@ -689,6 +689,11 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.ocr-text-field .pre-wrap {
+  max-height: 180px;
+  overflow: auto;
+}
+
 .danger {
   color: var(--red);
 }
