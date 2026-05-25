@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.8.0";
-const APP_VERSION_NOTE = "個股橫列裁切";
+const APP_VERSION = "v0.8.1";
+const APP_VERSION_NOTE = "更新快取修正";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -1443,11 +1443,22 @@ async function init() {
   }
   els.date.value = today();
   bindEvents();
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch((error) => console.warn("service worker", error));
-  }
+  registerServiceWorker();
   state.entries = await getAllEntries();
   render();
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register("./sw.js").then((registration) => {
+    registration.update?.();
+  }).catch((error) => console.warn("service worker", error));
 }
 
 init().catch((error) => {
