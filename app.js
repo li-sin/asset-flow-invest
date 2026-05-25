@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.7.0";
-const APP_VERSION_NOTE = "固定欄位裁切 OCR";
+const APP_VERSION = "v0.7.1";
+const APP_VERSION_NOTE = "欄位裁切圖對照";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -341,6 +341,7 @@ async function saveEntry(event) {
     parsedRows: image.parsedRows || base.parsedRows,
     ocrElapsedMs: image.ocrElapsedMs,
     columnOcrMs: image.columnOcrMs,
+    columnCrops: image.columnCrops || [],
   }));
 
   await txStore("readwrite", (store) => {
@@ -385,7 +386,7 @@ function openDetail(id) {
         <span>擷取文字 / 手動補資料</span>
         <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
       </div>
-      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id)}
+      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [])}
       <div class="detail-field">
         <span>備註</span>
         <div class="pre-wrap">${escapeHtml(entry.note || "尚未填寫")}</div>
@@ -490,6 +491,7 @@ async function recognizeImage(image, onProgress, options = {}) {
       rows,
       elapsedMs: Math.round(performance.now() - startedAt),
       columnOcrMs: Math.round(performance.now() - columnStartedAt),
+      columnCrops: column.crops || [],
     };
   }
 
@@ -597,6 +599,12 @@ async function recognizeArkColumns(dataUrl, onProgress) {
       onProgress?.(progress, column.label);
     });
     result[column.key] = text.text || "";
+    result.crops = result.crops || [];
+    result.crops.push({
+      key: column.key,
+      label: column.label,
+      dataUrl: crop,
+    });
   }
 
   return result;
@@ -667,13 +675,15 @@ async function parseDraftImages() {
         image.parsedRows = result.rows;
         image.ocrElapsedMs = result.elapsedMs;
         image.columnOcrMs = result.columnOcrMs;
+        image.columnCrops = result.columnCrops || [];
       }
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
     els.text.value = combinedText;
     const rows = state.draftImages.flatMap((image) => image.parsedRows || []);
     const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value);
-    els.parsePreview.innerHTML = renderParsedRows(parsedRows, "draft");
+    const columnCrops = state.draftImages.flatMap((image) => image.columnCrops || []);
+    els.parsePreview.innerHTML = renderParsedRows(parsedRows, "draft", "", columnCrops);
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     setOcrStatus(parsedRows.length ? `完成，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(elapsed)}）` : `完成，未抓到庫存列（${formatDuration(elapsed)}）`);
   } catch (error) {
@@ -702,6 +712,7 @@ async function parseExistingEntry(id) {
     entry.parsedRows = Array.isArray(result.rows) ? result.rows : parseHoldings(entry.text);
     entry.ocrElapsedMs = result.elapsedMs;
     entry.columnOcrMs = result.columnOcrMs;
+    entry.columnCrops = result.columnCrops || [];
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
     render();
@@ -1026,8 +1037,18 @@ function renderOcrTiming(entry) {
   return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
 }
 
-function renderParsedRows(rows, context, entryId = "") {
+function renderParsedRows(rows, context, entryId = "", columnCrops = []) {
   if (!rows?.length) {
+    const crops = renderColumnCrops(columnCrops);
+    if (crops) {
+      return `
+        <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
+          <span>解析庫存</span>
+          ${crops}
+          <div class="pre-wrap">尚未抓到庫存列</div>
+        </div>
+      `;
+    }
     return context === "detail"
       ? `<div class="detail-field"><span>解析庫存</span><div class="pre-wrap">尚未抓到庫存列</div></div>`
       : "";
@@ -1047,6 +1068,7 @@ function renderParsedRows(rows, context, entryId = "") {
   return `
     <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
       <span>解析庫存</span>
+      ${renderColumnCrops(columnCrops)}
       <div class="table-scroll">
         <table class="parsed-table">
           <thead>
@@ -1064,6 +1086,21 @@ function renderParsedRows(rows, context, entryId = "") {
           <tbody>${body}</tbody>
         </table>
       </div>
+    </div>
+  `;
+}
+
+function renderColumnCrops(crops) {
+  if (!Array.isArray(crops) || !crops.length) return "";
+  const items = crops.map((crop) => `
+    <figure class="column-crop">
+      <img src="${crop.dataUrl || ""}" alt="${escapeHtml(crop.label || "欄位裁切")}">
+      <figcaption>${escapeHtml(crop.label || "欄位裁切")}</figcaption>
+    </figure>
+  `).join("");
+  return `
+    <div class="column-crops" aria-label="固定欄位裁切對照">
+      ${items}
     </div>
   `;
 }

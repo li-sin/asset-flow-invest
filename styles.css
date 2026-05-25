@@ -169,6 +169,36 @@ textarea {
   margin-top: 8px;
 }
 
+.column-crops {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.column-crop {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f3eb;
+  margin: 0;
+  overflow: hidden;
+}
+
+.column-crop img {
+  width: 100%;
+  height: 210px;
+  object-fit: contain;
+  display: block;
+  background: #151515;
+}
+
+.column-crop figcaption {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
 .parsed-table {
   width: 100%;
   border-collapse: collapse;
@@ -598,6 +628,10 @@ textarea {
   .toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .column-crops {
+    grid-template-columns: 1fr;
   }
 
   .segmented {
