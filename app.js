@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.6.3";
-const APP_VERSION_NOTE = "遮蔽雜訊與手動補代號";
+const APP_VERSION = "v0.6.4";
+const APP_VERSION_NOTE = "修正欄位靠近狀態";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -840,8 +840,8 @@ function renderParsedRows(rows, context, entryId = "") {
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
       <td>${escapeHtml(row.needsReview ? row.reviewReason || "待確認" : "")}</td>
-      <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
       <td>${renderSymbolFixCell(row, index, context, entryId)}</td>
+      <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
     </tr>
   `).join("");
   return `
@@ -857,8 +857,8 @@ function renderParsedRows(rows, context, entryId = "") {
               <th>股數</th>
               <th>成交均價</th>
               <th>狀態</th>
-              <th>OCR 區塊</th>
               <th>修正</th>
+              <th>OCR 區塊</th>
             </tr>
           </thead>
           <tbody>${body}</tbody>
