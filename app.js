@@ -1,13 +1,31 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.6.0";
-const APP_VERSION_NOTE = "方舟庫存區塊解析";
+const APP_VERSION = "v0.6.1";
+const APP_VERSION_NOTE = "代號查表名稱";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
 const OCR_LANG_PATH = "https://tessdata.projectnaptha.com/4.0.0";
 const HEIC_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+const SYMBOL_NAMES = {
+  "0050": "元大台灣50",
+  "0051": "元大中型100",
+  "0052": "富邦科技",
+  "0053": "元大電子",
+  "00830": "國泰費城半導體",
+  "00861": "元大全球未來通訊",
+  "00876": "元大全球5G",
+  "00893": "國泰智能電動車",
+  "00909": "國泰數位支付服務",
+  "00910": "第一金太空衛星",
+  "00911": "兆豐洲際半導體",
+  "00920": "富邦ESG綠色電力",
+  "00941": "中信上游半導體",
+  "00988A": "主動統一全球創新",
+  "2327": "國巨",
+  "2330": "台積電",
+};
 
 const state = {
   entries: [],
@@ -573,13 +591,15 @@ function parseArkPositionRows(lines) {
     }
     if (symbolInfo.index > index) consumed.add(symbolInfo.index);
 
-    const name = buildArkName(pendingNameLines, beforeHolding, symbolInfo?.symbol);
+    const ocrName = buildArkName(pendingNameLines, beforeHolding, symbolInfo?.symbol);
+    const officialName = lookupSymbolName(symbolInfo.symbol);
     const shares = parseNumberToken(holdingMatch[1]);
     const avgCost = parseNumberToken(holdingMatch[2]);
 
     rows.push({
       symbol: symbolInfo.symbol,
-      name,
+      name: officialName || ocrName,
+      ocrName,
       kind: "現股",
       shares,
       avgCost,
@@ -588,7 +608,7 @@ function parseArkPositionRows(lines) {
       pnlRate: null,
       source: "ark_position",
       rawLine: [pendingNameLines.join(" / "), line, symbolInfo?.line].filter(Boolean).join(" | "),
-      needsReview: !name,
+      needsReview: !officialName,
     });
 
     pendingNameLines.length = 0;
@@ -620,7 +640,7 @@ function parseLineBasedRows(lines) {
 
     if (!numbers.length) continue;
 
-    const nameTokens = tokens.slice(0, numbers[0].index).filter((token) => !/[+-]?\d/.test(token));
+    const ocrName = nameTokens.join(" ");
     const shares = numbers.find((item) => Number.isInteger(item.value) && Math.abs(item.value) >= 1)?.value ?? null;
     const percent = numbers.find((item) => item.percent)?.value ?? null;
     const nonPercentNumbers = numbers.filter((item) => !item.percent);
@@ -628,7 +648,8 @@ function parseLineBasedRows(lines) {
 
     rows.push({
       symbol,
-      name: nameTokens.join(" "),
+      name: lookupSymbolName(symbol) || ocrName,
+      ocrName,
       kind: "",
       shares,
       avgCost: nonPercentNumbers[firstPriceIndex]?.value ?? null,
@@ -644,6 +665,10 @@ function parseLineBasedRows(lines) {
 
 function isNoiseLine(line) {
   return /^(《|編輯庫存|編輯 庫存|台股庫存|台 股 庫存|美股庫存|美 股 庫存|持有股票|持 有 股票|總共|總 共|新增持股|新 增 持 股)/.test(compactText(line));
+}
+
+function lookupSymbolName(symbol) {
+  return SYMBOL_NAMES[String(symbol || "").toUpperCase()] || "";
 }
 
 function compactText(value) {
@@ -740,7 +765,7 @@ function renderParsedRows(rows, context) {
       <td>${escapeHtml(row.kind || "")}</td>
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
-      <td>${escapeHtml(row.needsReview ? "待確認" : "")}</td>
+      <td>${escapeHtml(row.needsReview ? "名稱待補" : "")}</td>
     </tr>
   `).join("");
   return `
