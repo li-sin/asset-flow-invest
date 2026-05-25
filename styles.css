@@ -36,7 +36,7 @@ textarea {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
 }
 
 .topbar {
@@ -479,6 +479,14 @@ textarea {
 
 .detail-panel.is-open {
   transform: translateX(0);
+}
+
+.app-footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 18px 14px;
+  text-align: center;
 }
 
 .icon-button {

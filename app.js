@@ -1,6 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
+const APP_VERSION = "v0.5.0";
+const APP_VERSION_NOTE = "繁中 OCR + HEIC";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -39,6 +41,7 @@ const els = {
   summary: $("#summary-line"),
   search: $("#search-input"),
   exportBackup: $("#export-backup"),
+  appVersion: $("#app-version"),
   detail: $("#detail-panel"),
   detailContent: $("#detail-content"),
   closeDetail: $("#close-detail"),
@@ -422,8 +425,8 @@ async function recognizeImage(image, onProgress) {
   const imageForOcr = await prepareImageForOcr(image);
 
   const attempts = [
-    { lang: "eng", label: "英文/數字" },
-    { lang: "eng+chi_tra", label: "繁中加強" },
+    { lang: "chi_tra+eng", label: "繁中/英文" },
+    { lang: "eng", label: "英文/數字備援" },
   ];
   const errors = [];
 
@@ -729,6 +732,9 @@ function bindEvents() {
 }
 
 async function init() {
+  if (els.appVersion) {
+    els.appVersion.textContent = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
+  }
   els.date.value = today();
   bindEvents();
   if ("serviceWorker" in navigator) {
