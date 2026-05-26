@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.8";
-const APP_VERSION_NOTE = "OAuth Client 修正";
+const APP_VERSION = "v0.9.9";
+const APP_VERSION_NOTE = "自動建立雲端表";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -106,6 +106,7 @@ let googleIdentityLoadPromise = null;
 let googleTokenClient = null;
 let googleAccessToken = "";
 let googleAccessTokenExpiresAt = 0;
+let sheetTablesReady = false;
 
 function emptyParseResult() {
   return {
@@ -1772,6 +1773,12 @@ async function ensureSheetTables() {
   await updateSheetValues(SHEET_NAMES.positions, "A1:J1", [SHEET_HEADERS.positions]);
 }
 
+async function ensureCloudSheetTables() {
+  if (sheetTablesReady) return;
+  await ensureSheetTables();
+  sheetTablesReady = true;
+}
+
 function validSnapshotRows(rows) {
   return (rows || []).filter((row) => row?.symbol && row?.shares !== null && row?.shares !== undefined && row?.avgCost !== null && row?.avgCost !== undefined);
 }
@@ -1824,7 +1831,7 @@ async function saveEntrySnapshotToGoogleSheet(id) {
   }
 
   try {
-    await ensureSheetTables();
+    await ensureCloudSheetTables();
     await appendSheetValues(SHEET_NAMES.snapshots, "A:H", [payload.snapshotRow]);
     await appendSheetValues(SHEET_NAMES.positions, "A:J", payload.positionRows);
     entry.status = "imported";
@@ -1876,6 +1883,7 @@ function parsePositionRows(values) {
 
 async function loadLatestCloudSnapshot(showAlert = true) {
   try {
+    await ensureCloudSheetTables();
     const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
     const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     if (!snapshots.length) {
