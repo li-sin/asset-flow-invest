@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.4";
-const APP_VERSION_NOTE = "預設 OAuth Client";
+const APP_VERSION = "v0.9.5";
+const APP_VERSION_NOTE = "固定登入帳號";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -14,6 +14,7 @@ const GOOGLE_AUTH_SCOPE = "openid email profile";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-cccl087b251bejs1coa2oln1n6uddr35.apps.googleusercontent.com";
+const DEFAULT_AUTHORIZED_EMAIL = "lovelisa00000@gmail.com";
 const SHEET_SYNC_CONFIG_KEY = "assetflow_invest_sheet_sync";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
@@ -1491,10 +1492,10 @@ function getSheetSyncConfig() {
     return {
       spreadsheetId: parsed.spreadsheetId || DEFAULT_SPREADSHEET_ID,
       clientId: parsed.clientId || DEFAULT_GOOGLE_CLIENT_ID,
-      authorizedEmail: normalizeEmail(parsed.authorizedEmail || ""),
+      authorizedEmail: DEFAULT_AUTHORIZED_EMAIL,
     };
   } catch {
-    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: DEFAULT_GOOGLE_CLIENT_ID, authorizedEmail: "" };
+    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: DEFAULT_GOOGLE_CLIENT_ID, authorizedEmail: DEFAULT_AUTHORIZED_EMAIL };
   }
 }
 
@@ -1502,7 +1503,6 @@ function saveSheetSyncConfig(config) {
   localStorage.setItem(SHEET_SYNC_CONFIG_KEY, JSON.stringify({
     spreadsheetId: config.spreadsheetId || DEFAULT_SPREADSHEET_ID,
     clientId: config.clientId || DEFAULT_GOOGLE_CLIENT_ID,
-    authorizedEmail: normalizeEmail(config.authorizedEmail || ""),
   }));
 }
 
@@ -1526,17 +1526,15 @@ function configureSheetSync() {
   if (spreadsheetId === null) return null;
   const clientId = prompt("Google OAuth Client ID（Web application）", current.clientId || DEFAULT_GOOGLE_CLIENT_ID);
   if (clientId === null) return null;
-  const authorizedEmail = prompt("允許登入的 Google Email（必填）", current.authorizedEmail || "");
-  if (authorizedEmail === null) return null;
   const config = {
     spreadsheetId: spreadsheetId.trim() || DEFAULT_SPREADSHEET_ID,
-    clientId: clientId.trim(),
-    authorizedEmail: normalizeEmail(authorizedEmail),
+    clientId: clientId.trim() || DEFAULT_GOOGLE_CLIENT_ID,
+    authorizedEmail: DEFAULT_AUTHORIZED_EMAIL,
   };
   saveSheetSyncConfig(config);
-  resetGoogleSession(config.clientId && config.authorizedEmail
+  resetGoogleSession(config.clientId
     ? "設定已儲存，請使用授權帳號登入。"
-    : "請補齊 OAuth Client ID 與允許登入的 Google Email。");
+    : "請補齊 OAuth Client ID。");
   return config;
 }
 
@@ -1552,17 +1550,17 @@ function renderAuthGate(message = "") {
   els.authStatus.textContent = status;
   els.authEmail.textContent = config.authorizedEmail
     ? `允許帳號：${config.authorizedEmail}`
-    : "尚未設定允許登入的 Google Email";
+    : "允許帳號未設定";
   els.authSignIn.disabled = !config.clientId || !config.authorizedEmail;
   els.authSignIn.textContent = state.auth.authorized ? "已登入" : "使用 Google 登入";
 }
 
 function ensureAuthConfig() {
   const config = getSheetSyncConfig();
-  if (config.clientId && config.authorizedEmail) return config;
+  if (config.clientId) return config;
   const updated = configureSheetSync();
-  if (!updated?.clientId || !updated?.authorizedEmail) {
-    throw new Error("請先設定 OAuth Client ID 與允許登入的 Google Email");
+  if (!updated?.clientId) {
+    throw new Error("請先設定 OAuth Client ID");
   }
   return updated;
 }
@@ -1582,7 +1580,7 @@ function authorizeGoogleProfile(profile, config = getSheetSyncConfig()) {
   const email = normalizeEmail(profile.email || "");
   const allowed = normalizeEmail(config.authorizedEmail || "");
   if (!email) throw new Error("Google 帳號沒有回傳 email，請重新登入。");
-  if (!allowed) throw new Error("尚未設定允許登入的 Google Email");
+  if (!allowed) throw new Error("允許登入的 Google Email 尚未設定");
   if (email !== allowed) {
     state.auth = {
       signedIn: true,
