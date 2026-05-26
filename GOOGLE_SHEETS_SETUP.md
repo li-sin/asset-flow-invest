@@ -1,11 +1,11 @@
 # AssetFlow Invest Google Sheets Sync
 
-AssetFlow Invest v0.9.5 起改為必須先使用 Google 帳號登入，才會顯示主畫面與讀取雲端庫存。`2026 Invest` 不需要開啟「知道連結的人可檢視」；建議只分享給自己的 Google 帳號。
+AssetFlow Invest v0.9.6 起改為必須先使用 Google 帳號登入，才會顯示主畫面與讀取雲端庫存。`2026 Invest` 不需要開啟「知道連結的人可檢視」；建議只分享給自己的 Google 帳號。
 
 ## 需要準備
 
 - Spreadsheet ID：`1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI`
-- Google OAuth Client ID：App 已內建預設值 320535010458-cccl087b251bejs1coa2oln1n6uddr35.apps.googleusercontent.com，需要更換時可在 App 內設定。
+- Google OAuth Client ID：App 已內建預設值 320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com，需要更換時可在 App 內設定。
 - 允許登入的 Google Email：固定為 lovelisa00000@gmail.com，不由前端輸入。
 
 ## 建立 OAuth Client ID
