@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.2";
-const APP_VERSION_NOTE = "雲端讀取修正";
+const APP_VERSION = "v0.9.3";
+const APP_VERSION_NOTE = "Google 帳號限制";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -10,6 +10,8 @@ const OCR_LANG_PATH = "https://tessdata.projectnaptha.com/4.0.0";
 const HEIC_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
 const GOOGLE_ID_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const GOOGLE_AUTH_SCOPE = "openid email profile";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
 const SHEET_SYNC_CONFIG_KEY = "assetflow_invest_sheet_sync";
 const SHEET_NAMES = {
@@ -44,11 +46,24 @@ const state = {
   draftImages: [],
   filter: "all",
   query: "",
+  cloudSnapshot: null,
+  auth: {
+    signedIn: false,
+    authorized: false,
+    email: "",
+    message: "請使用授權的 Google 帳號登入。",
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
 
 const els = {
+  appShell: $("#app-shell"),
+  authGate: $("#auth-gate"),
+  authStatus: $("#auth-status"),
+  authEmail: $("#auth-email"),
+  authSignIn: $("#auth-sign-in"),
+  authSettings: $("#auth-settings"),
   fileInput: $("#file-input"),
   backupInput: $("#backup-input"),
   dropZone: $("#drop-zone"),
@@ -1465,15 +1480,20 @@ async function deleteEntry(id) {
   render();
 }
 
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function getSheetSyncConfig() {
   try {
     const parsed = JSON.parse(localStorage.getItem(SHEET_SYNC_CONFIG_KEY) || "{}");
     return {
       spreadsheetId: parsed.spreadsheetId || DEFAULT_SPREADSHEET_ID,
       clientId: parsed.clientId || "",
+      authorizedEmail: normalizeEmail(parsed.authorizedEmail || ""),
     };
   } catch {
-    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: "" };
+    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: "", authorizedEmail: "" };
   }
 }
 
@@ -1481,7 +1501,22 @@ function saveSheetSyncConfig(config) {
   localStorage.setItem(SHEET_SYNC_CONFIG_KEY, JSON.stringify({
     spreadsheetId: config.spreadsheetId || DEFAULT_SPREADSHEET_ID,
     clientId: config.clientId || "",
+    authorizedEmail: normalizeEmail(config.authorizedEmail || ""),
   }));
+}
+
+function resetGoogleSession(message = "請使用授權的 Google 帳號登入。") {
+  googleTokenClient = null;
+  googleAccessToken = "";
+  googleAccessTokenExpiresAt = 0;
+  state.auth = {
+    signedIn: false,
+    authorized: false,
+    email: "",
+    message,
+  };
+  setAppLocked(true);
+  renderAuthGate();
 }
 
 function configureSheetSync() {
@@ -1490,18 +1525,82 @@ function configureSheetSync() {
   if (spreadsheetId === null) return null;
   const clientId = prompt("Google OAuth Client ID（Web application）", current.clientId || "");
   if (clientId === null) return null;
+  const authorizedEmail = prompt("允許登入的 Google Email（必填）", current.authorizedEmail || "");
+  if (authorizedEmail === null) return null;
   const config = {
     spreadsheetId: spreadsheetId.trim() || DEFAULT_SPREADSHEET_ID,
     clientId: clientId.trim(),
+    authorizedEmail: normalizeEmail(authorizedEmail),
   };
   saveSheetSyncConfig(config);
-  googleTokenClient = null;
-  googleAccessToken = "";
-  googleAccessTokenExpiresAt = 0;
-  alert(config.clientId
-    ? "同步設定已儲存。第一次存取時會跳出 Google 授權。"
-    : "已儲存 Sheet ID；請補上 OAuth Client ID 後再同步。");
+  resetGoogleSession(config.clientId && config.authorizedEmail
+    ? "設定已儲存，請使用授權帳號登入。"
+    : "請補齊 OAuth Client ID 與允許登入的 Google Email。");
   return config;
+}
+
+function setAppLocked(locked) {
+  els.appShell?.classList.toggle("is-locked", locked);
+  if (els.authGate) els.authGate.hidden = !locked;
+}
+
+function renderAuthGate(message = "") {
+  if (!els.authGate) return;
+  const config = getSheetSyncConfig();
+  const status = message || state.auth.message || "請使用授權的 Google 帳號登入。";
+  els.authStatus.textContent = status;
+  els.authEmail.textContent = config.authorizedEmail
+    ? `允許帳號：${config.authorizedEmail}`
+    : "尚未設定允許登入的 Google Email";
+  els.authSignIn.disabled = !config.clientId || !config.authorizedEmail;
+  els.authSignIn.textContent = state.auth.authorized ? "已登入" : "使用 Google 登入";
+}
+
+function ensureAuthConfig() {
+  const config = getSheetSyncConfig();
+  if (config.clientId && config.authorizedEmail) return config;
+  const updated = configureSheetSync();
+  if (!updated?.clientId || !updated?.authorizedEmail) {
+    throw new Error("請先設定 OAuth Client ID 與允許登入的 Google Email");
+  }
+  return updated;
+}
+
+async function fetchGoogleProfile(token) {
+  const response = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.error || `Google profile ${response.status}`);
+  }
+  return payload;
+}
+
+function authorizeGoogleProfile(profile, config = getSheetSyncConfig()) {
+  const email = normalizeEmail(profile.email || "");
+  const allowed = normalizeEmail(config.authorizedEmail || "");
+  if (!email) throw new Error("Google 帳號沒有回傳 email，請重新登入。");
+  if (!allowed) throw new Error("尚未設定允許登入的 Google Email");
+  if (email !== allowed) {
+    state.auth = {
+      signedIn: true,
+      authorized: false,
+      email,
+      message: `此 Google 帳號未授權：${email}`,
+    };
+    setAppLocked(true);
+    renderAuthGate();
+    throw new Error(`此 Google 帳號未授權：${email}`);
+  }
+  state.auth = {
+    signedIn: true,
+    authorized: true,
+    email,
+    message: `已登入：${email}`,
+  };
+  renderAuthGate();
+  return email;
 }
 
 async function ensureGoogleIdentity() {
@@ -1520,33 +1619,35 @@ async function ensureGoogleIdentity() {
 }
 
 async function getGoogleAccessToken() {
-  const config = getSheetSyncConfig();
-  if (!config.clientId) {
-    const updated = configureSheetSync();
-    if (!updated?.clientId) throw new Error("尚未設定 Google OAuth Client ID");
-    throw new Error("同步設定已儲存，請再按一次執行 Google 授權。");
-  }
-  if (googleAccessToken && Date.now() < googleAccessTokenExpiresAt) return googleAccessToken;
+  const config = ensureAuthConfig();
+  if (googleAccessToken && Date.now() < googleAccessTokenExpiresAt && state.auth.authorized) return googleAccessToken;
 
   await ensureGoogleIdentity();
   const latestConfig = getSheetSyncConfig();
   if (!googleTokenClient) {
     googleTokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: latestConfig.clientId,
-      scope: GOOGLE_SHEETS_SCOPE,
+      scope: `${GOOGLE_AUTH_SCOPE} ${GOOGLE_SHEETS_SCOPE}`,
       callback: () => {},
     });
   }
 
   return new Promise((resolve, reject) => {
-    googleTokenClient.callback = (response) => {
-      if (response.error) {
-        reject(new Error(response.error_description || response.error));
-        return;
+    googleTokenClient.callback = async (response) => {
+      try {
+        if (response.error) {
+          throw new Error(response.error_description || response.error);
+        }
+        googleAccessToken = response.access_token;
+        googleAccessTokenExpiresAt = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
+        const profile = await fetchGoogleProfile(googleAccessToken);
+        authorizeGoogleProfile(profile, latestConfig);
+        resolve(googleAccessToken);
+      } catch (error) {
+        googleAccessToken = "";
+        googleAccessTokenExpiresAt = 0;
+        reject(error);
       }
-      googleAccessToken = response.access_token;
-      googleAccessTokenExpiresAt = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
-      resolve(googleAccessToken);
     };
     googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? "" : "consent" });
   });
@@ -1629,7 +1730,7 @@ async function readPublicSheetValues(sheetName) {
 }
 
 async function readCloudSheetValues(sheetName, range) {
-  return readPublicSheetValues(sheetName);
+  return readSheetValues(sheetName, range);
 }
 
 async function updateSheetValues(sheetName, range, values) {
@@ -2024,6 +2125,11 @@ function bindEvents() {
   });
   els.exportBackup.addEventListener("click", exportBackup);
   els.syncLatest.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  els.authSignIn?.addEventListener("click", signInAndLoadApp);
+  els.authSettings?.addEventListener("click", () => {
+    configureSheetSync();
+    renderAuthGate();
+  });
   els.closeDetail.addEventListener("click", closeDetail);
   document.querySelectorAll(".segment").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2035,6 +2141,31 @@ function bindEvents() {
   });
 }
 
+let appDataLoaded = false;
+
+async function signInAndLoadApp() {
+  if (els.authSignIn) {
+    els.authSignIn.disabled = true;
+    els.authSignIn.textContent = "登入中...";
+  }
+  try {
+    await getGoogleAccessToken();
+    setAppLocked(false);
+    if (!appDataLoaded) {
+      state.entries = await getAllEntries();
+      appDataLoaded = true;
+    }
+    renderCloudSnapshot();
+    render();
+    await loadLatestCloudSnapshot(false);
+  } catch (error) {
+    console.error(error);
+    resetGoogleSession(error.message || "Google 登入失敗");
+  } finally {
+    renderAuthGate();
+  }
+}
+
 async function init() {
   if (els.appVersion) {
     els.appVersion.textContent = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
@@ -2042,10 +2173,8 @@ async function init() {
   els.date.value = today();
   bindEvents();
   registerServiceWorker();
-  state.entries = await getAllEntries();
-  renderCloudSnapshot();
-  render();
-  loadLatestCloudSnapshot(false);
+  setAppLocked(true);
+  renderAuthGate();
 }
 
 function registerServiceWorker() {

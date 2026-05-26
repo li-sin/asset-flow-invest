@@ -39,6 +39,66 @@ textarea {
   grid-template-rows: auto 1fr auto;
 }
 
+
+
+.auth-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-gate[hidden] {
+  display: none;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.auth-eyebrow {
+  margin: 0 0 8px;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.auth-card h2 {
+  margin: 0 0 10px;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.auth-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.auth-email {
+  min-height: 22px;
+  word-break: break-word;
+}
+
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.app-shell.is-locked .topbar,
+.app-shell.is-locked .workspace,
+.app-shell.is-locked .app-footer,
+.app-shell.is-locked .detail-panel {
+  display: none;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -730,7 +790,9 @@ textarea {
 }
 
 @media (max-width: 860px) {
-  .topbar {
+  
+
+.topbar {
     align-items: flex-start;
     flex-direction: column;
   }

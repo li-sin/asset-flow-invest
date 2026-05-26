@@ -6,6 +6,10 @@ AssetFlow Invest is a lightweight personal investing companion for collecting Ar
 
 Open `index.html` in a browser, or serve the folder with a static server.
 
+## Google Access
+
+v0.9.3 requires Google sign-in before the app shell is shown. Cloud inventory reads and writes use the Google Sheets API with OAuth, so the `2026 Invest` sheet can stay private and shared only with the owner's Google account.
+
 ## Privacy
 
-Screenshots are stored in the browser's local IndexedDB. This static site does not upload screenshots to a backend.
+Screenshots are stored in the browser's local IndexedDB. This static site does not upload screenshots to a backend. Confirmed position snapshots can be written to the owner's Google Sheet after OAuth consent.

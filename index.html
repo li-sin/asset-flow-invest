@@ -6,10 +6,22 @@
   <meta name="theme-color" content="#2f7d5b">
   <title>AssetFlow Invest</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=0.9.2">
+  <link rel="stylesheet" href="./styles.css?v=0.9.3">
 </head>
 <body>
-  <div class="app-shell">
+  <div id="app-shell" class="app-shell is-locked">
+    <section id="auth-gate" class="auth-gate" aria-label="Google 登入">
+      <div class="auth-card">
+        <p class="auth-eyebrow">Private access</p>
+        <h2>使用 Google 帳號登入</h2>
+        <p id="auth-status">請使用授權的 Google 帳號登入。</p>
+        <p id="auth-email" class="auth-email"></p>
+        <div class="auth-actions">
+          <button id="auth-sign-in" class="button primary" type="button">使用 Google 登入</button>
+          <button id="auth-settings" class="button secondary" type="button">設定 OAuth</button>
+        </div>
+      </div>
+    </section>
     <header class="topbar">
       <div>
         <h1>AssetFlow Invest</h1>
@@ -32,7 +44,7 @@
     <main class="workspace">
       <section class="capture-panel" aria-label="新增截圖">
         <div class="notice">
-          App 會自動讀取 Google Sheet 內最近一次庫存快照；截圖仍只存在這台裝置。
+          App 會在你登入授權 Google 帳號後讀取最近一次庫存快照；截圖仍只存在這台裝置。
         </div>
         <div id="drop-zone" class="drop-zone" tabindex="0">
           <div class="drop-mark">+</div>
@@ -130,7 +142,7 @@
     </main>
 
     <footer class="app-footer">
-      <span id="app-version">AssetFlow Invest v0.9.2</span>
+      <span id="app-version">AssetFlow Invest v0.9.3</span>
     </footer>
 
     <aside id="detail-panel" class="detail-panel" aria-label="截圖內容">
@@ -139,6 +151,6 @@
     </aside>
   </div>
 
-  <script src="./app.js?v=0.9.2"></script>
+  <script src="./app.js?v=0.9.3"></script>
 </body>
 </html>
