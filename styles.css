@@ -85,6 +85,12 @@ textarea {
   word-break: break-word;
 }
 
+.auth-version {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .auth-actions {
   display: flex;
   flex-wrap: wrap;
