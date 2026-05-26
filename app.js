@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.9";
-const APP_VERSION_NOTE = "自動建立雲端表";
+const APP_VERSION = "v0.10.0";
+const APP_VERSION_NOTE = "合併快照";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -92,6 +92,7 @@ const els = {
   search: $("#search-input"),
   exportBackup: $("#export-backup"),
   syncLatest: $("#sync-latest"),
+  saveMergedSnapshot: $("#save-merged-snapshot"),
   cloudSnapshot: $("#cloud-snapshot"),
   appVersion: $("#app-version"),
   detail: $("#detail-panel"),
@@ -1783,27 +1784,43 @@ function validSnapshotRows(rows) {
   return (rows || []).filter((row) => row?.symbol && row?.shares !== null && row?.shares !== undefined && row?.avgCost !== null && row?.avgCost !== undefined);
 }
 
+function snapshotId(createdAt = new Date().toISOString()) {
+  return `snap_${createdAt.replace(/[-:.TZ]/g, "")}_${Math.random().toString(16).slice(2, 8)}`;
+}
+
 function buildSnapshotPayload(entry) {
   const rows = validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || ""));
   const createdAt = new Date().toISOString();
-  const snapshotId = `snap_${createdAt.replace(/[-:.TZ]/g, "")}_${Math.random().toString(16).slice(2, 8)}`;
+  const id = snapshotId(createdAt);
+  return buildSnapshotPayloadFromRows({
+    snapshotId: id,
+    createdAt,
+    date: entry.date || today(),
+    market: entry.market || "",
+    sourceEntryId: entry.id,
+    sourceTitle: entry.title || "",
+    rows,
+  });
+}
+
+function buildSnapshotPayloadFromRows({ snapshotId: id, createdAt, date, market, sourceEntryId, sourceTitle, rows }) {
   return {
-    snapshotId,
+    snapshotId: id,
     createdAt,
     snapshotRow: [
-      snapshotId,
+      id,
       createdAt,
-      entry.date || today(),
-      entry.market || "",
-      entry.id,
-      entry.title || "",
+      date || today(),
+      market || "",
+      sourceEntryId || "",
+      sourceTitle || "",
       rows.length,
       APP_VERSION,
     ],
     positionRows: rows.map((row) => [
-      snapshotId,
-      entry.date || today(),
-      entry.market || "",
+      id,
+      date || today(),
+      market || "",
       row.symbol || "",
       row.name || "",
       row.kind || "",
@@ -1815,6 +1832,107 @@ function buildSnapshotPayload(entry) {
   };
 }
 
+function mergeSnapshotEntries(entries) {
+  const candidates = entries
+    .filter((entry) => entry.kind === "ark_position" && ["reviewed", "imported"].includes(entry.status))
+    .map((entry) => ({
+      entry,
+      rows: validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "")),
+    }))
+    .filter((item) => item.rows.length > 0);
+
+  const bySymbol = new Map();
+  const conflicts = [];
+  for (const item of candidates) {
+    for (const row of item.rows) {
+      const symbol = String(row.symbol || "").trim();
+      if (!symbol || /待補/.test(symbol)) continue;
+      const existing = bySymbol.get(symbol);
+      const normalized = { ...row, source: `${item.entry.title || item.entry.id}` };
+      if (!existing) {
+        bySymbol.set(symbol, normalized);
+        continue;
+      }
+      const sameShares = Number(existing.shares) === Number(row.shares);
+      const sameAvgCost = Number(existing.avgCost) === Number(row.avgCost);
+      if (!sameShares || !sameAvgCost) {
+        conflicts.push(`${symbol}：${existing.shares}/${existing.avgCost} vs ${row.shares}/${row.avgCost}`);
+      }
+    }
+  }
+
+  const rows = [...bySymbol.values()].sort((a, b) => String(a.symbol).localeCompare(String(b.symbol)));
+  return { candidates, rows, conflicts };
+}
+
+async function saveMergedSnapshotToGoogleSheet() {
+  const { candidates, rows, conflicts } = mergeSnapshotEntries(state.entries);
+  if (!candidates.length) {
+    alert("目前沒有已確認或已匯入的方舟庫存截圖可合併。");
+    return;
+  }
+  if (!rows.length) {
+    alert("已確認截圖中沒有可合併的庫存列。請先確認 OCR 解析結果與股票代號。");
+    return;
+  }
+  if (conflicts.length) {
+    alert(`合併快照發現同代號衝突，請先修正後再存：\n\n${conflicts.slice(0, 8).join("\n")}`);
+    return;
+  }
+
+  const confirmed = confirm(`將 ${candidates.length} 張方舟庫存截圖合併成 1 個雲端快照，共 ${rows.length} 筆庫存。確定寫入 Google Sheet？`);
+  if (!confirmed) return;
+
+  const button = els.saveMergedSnapshot;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "合併寫入中...";
+  }
+
+  try {
+    const createdAt = new Date().toISOString();
+    const latestDate = candidates
+      .map((item) => item.entry.date)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || today();
+    const markets = [...new Set(candidates.map((item) => item.entry.market).filter(Boolean))];
+    const payload = buildSnapshotPayloadFromRows({
+      snapshotId: snapshotId(createdAt),
+      createdAt,
+      date: latestDate,
+      market: markets.length === 1 ? markets[0] : "ALL",
+      sourceEntryId: candidates.map((item) => item.entry.id).join(","),
+      sourceTitle: `合併快照：${candidates.length} 張截圖`,
+      rows,
+    });
+
+    await ensureCloudSheetTables();
+    await appendSheetValues(SHEET_NAMES.snapshots, "A:H", [payload.snapshotRow]);
+    await appendSheetValues(SHEET_NAMES.positions, "A:J", payload.positionRows);
+
+    for (const item of candidates) {
+      item.entry.status = "imported";
+      item.entry.sheetSnapshotId = payload.snapshotId;
+      item.entry.updatedAt = createdAt;
+    }
+    await txStore("readwrite", (store) => {
+      candidates.forEach((item) => store.put(item.entry));
+    });
+    state.entries = await getAllEntries();
+    await loadLatestCloudSnapshot(false);
+    render();
+    alert(`已合併存到 Google Sheet：${rows.length} 筆庫存`);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "合併寫入 Google Sheet 失敗");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "合併存雲端";
+    }
+  }
+}
 async function saveEntrySnapshotToGoogleSheet(id) {
   const entry = state.entries.find((item) => item.id === id);
   if (!entry) return;
@@ -2140,6 +2258,7 @@ function bindEvents() {
   });
   els.exportBackup.addEventListener("click", exportBackup);
   els.syncLatest.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  els.saveMergedSnapshot?.addEventListener("click", saveMergedSnapshotToGoogleSheet);
   els.authSignIn?.addEventListener("click", signInAndLoadApp);
   els.authSettings?.addEventListener("click", () => {
     configureSheetSync();
