@@ -8,7 +8,7 @@ Open `index.html` in a browser, or serve the folder with a static server.
 
 ## Google Access
 
-v0.9.3 requires Google sign-in before the app shell is shown. Cloud inventory reads and writes use the Google Sheets API with OAuth, so the `2026 Invest` sheet can stay private and shared only with the owner's Google account.
+v0.9.4 requires Google sign-in before the app shell is shown and includes the default Web OAuth Client ID. Cloud inventory reads and writes use the Google Sheets API with OAuth, so the `2026 Invest` sheet can stay private and shared only with the owner's Google account.
 
 ## Privacy
 

@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.9.3";
-const APP_VERSION_NOTE = "Google 帳號限制";
+const APP_VERSION = "v0.9.4";
+const APP_VERSION_NOTE = "預設 OAuth Client";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -13,6 +13,7 @@ const GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const GOOGLE_AUTH_SCOPE = "openid email profile";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
+const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-cccl087b251bejs1coa2oln1n6uddr35.apps.googleusercontent.com";
 const SHEET_SYNC_CONFIG_KEY = "assetflow_invest_sheet_sync";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
@@ -1489,18 +1490,18 @@ function getSheetSyncConfig() {
     const parsed = JSON.parse(localStorage.getItem(SHEET_SYNC_CONFIG_KEY) || "{}");
     return {
       spreadsheetId: parsed.spreadsheetId || DEFAULT_SPREADSHEET_ID,
-      clientId: parsed.clientId || "",
+      clientId: parsed.clientId || DEFAULT_GOOGLE_CLIENT_ID,
       authorizedEmail: normalizeEmail(parsed.authorizedEmail || ""),
     };
   } catch {
-    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: "", authorizedEmail: "" };
+    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: DEFAULT_GOOGLE_CLIENT_ID, authorizedEmail: "" };
   }
 }
 
 function saveSheetSyncConfig(config) {
   localStorage.setItem(SHEET_SYNC_CONFIG_KEY, JSON.stringify({
     spreadsheetId: config.spreadsheetId || DEFAULT_SPREADSHEET_ID,
-    clientId: config.clientId || "",
+    clientId: config.clientId || DEFAULT_GOOGLE_CLIENT_ID,
     authorizedEmail: normalizeEmail(config.authorizedEmail || ""),
   }));
 }
@@ -1523,7 +1524,7 @@ function configureSheetSync() {
   const current = getSheetSyncConfig();
   const spreadsheetId = prompt("Google Sheet ID", current.spreadsheetId || DEFAULT_SPREADSHEET_ID);
   if (spreadsheetId === null) return null;
-  const clientId = prompt("Google OAuth Client ID（Web application）", current.clientId || "");
+  const clientId = prompt("Google OAuth Client ID（Web application）", current.clientId || DEFAULT_GOOGLE_CLIENT_ID);
   if (clientId === null) return null;
   const authorizedEmail = prompt("允許登入的 Google Email（必填）", current.authorizedEmail || "");
   if (authorizedEmail === null) return null;
