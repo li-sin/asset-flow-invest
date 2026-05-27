@@ -656,6 +656,50 @@ textarea {
   background: #f4fbf6;
 }
 
+.row-line-review {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.row-line-stage {
+  position: relative;
+  width: min(360px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111;
+  overflow: hidden;
+}
+
+.row-line-stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.row-line-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ff5b5b;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 0 10px rgba(255, 91, 91, 0.9);
+  pointer-events: none;
+}
+
+.row-line-controls {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.row-line-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .meter {
   height: 10px;
   border-radius: 999px;

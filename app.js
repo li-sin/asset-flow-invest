@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.5";
-const APP_VERSION_NOTE = "逐列裁切 OCR";
+const APP_VERSION = "v0.13.6";
+const APP_VERSION_NOTE = "OCR 截取線校準";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -761,7 +761,27 @@ async function recognizeImage(image, onProgress, options = {}) {
     }
 
     const rowStartedAt = performance.now();
-    const rowResult = await recognizeArkRows(imageForOcr.dataUrl, full.lines || [], completeMarkers.markers || [], (progress, label) => {
+    const rowLineReview = await detectRowLineReview(imageForOcr.dataUrl, completeMarkers.markers || []);
+    if (rowLineReview.needsReview && !options.rowLinePercents?.length) {
+      return {
+        text: full.text,
+        mode: `${full.mode} + 截取線校準`,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        needsRowLineReview: true,
+        rowLineReview: {
+          ...rowLineReview,
+          fullText: full.text,
+          fullMode: full.mode,
+        },
+        completeCircleCount: completeMarkers.count,
+        completeCircleMarkers: completeMarkers.markers,
+      };
+    }
+
+    const calibratedRects = options.rowLinePercents?.length
+      ? await rectsFromHorizontalLinePercents(imageForOcr.dataUrl, options.rowLinePercents)
+      : rowLineReview.rects;
+    const rowResult = await recognizeArkRows(imageForOcr.dataUrl, full.lines || [], completeMarkers.markers || [], calibratedRects, (progress, label) => {
       onProgress?.(progress, label);
     });
     const rowRows = rowResult.rows || [];
@@ -832,15 +852,15 @@ function normalizeTesseractLines(lines) {
     .filter((line) => line && line.text && line.bbox.x1 > line.bbox.x0 && line.bbox.y1 > line.bbox.y0);
 }
 
-async function recognizeArkRows(dataUrl, fullLines, markers, onProgress) {
-  const rects = await detectArkRowRects(dataUrl, fullLines, markers);
+async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) {
+  const rowRects = rects?.length ? rects : await detectArkRowRects(dataUrl, fullLines, markers);
   const attempts = [{ lang: "chi_tra+eng", label: "橫列" }];
   const rows = [];
   const crops = [];
   const skipped = [];
 
-  for (let index = 0; index < rects.length; index += 1) {
-    const rect = rects[index];
+  for (let index = 0; index < rowRects.length; index += 1) {
+    const rect = rowRects[index];
     const crop = await cropImageDataUrl(dataUrl, rect);
     const label = rect.fallback ? `備援第 ${index + 1} 列` : `第 ${index + 1} 列`;
     const result = await recognizeDataUrl(crop, attempts, (progress) => {
@@ -867,6 +887,88 @@ async function recognizeArkRows(dataUrl, fullLines, markers, onProgress) {
   }
 
   return { rows, crops, skipped };
+}
+
+async function detectRowLineReview(dataUrl, markers) {
+  const image = await loadImage(dataUrl);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const markerCenters = (markers || [])
+    .map((marker) => Number(marker.centerY))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (markerCenters.length < 2) return { needsReview: false, rects: [] };
+
+  const separators = await detectArkRowSeparators(image);
+  const first = markerCenters[0];
+  const last = markerCenters[markerCenters.length - 1];
+  const innerLines = separators.filter((line) => line > first && line < last);
+  const expectedLines = markerCenters.length - 1;
+  const linePercents = normalizeRowLinePercents(
+    innerLines.length ? innerLines.map((line) => (line / height) * 100) : defaultRowLinePercents(markerCenters, height),
+    expectedLines,
+    markerCenters,
+    height
+  );
+  const rects = rectsFromHorizontalLines(linePercents.map((value) => (value / 100) * height), width, height);
+  return {
+    needsReview: innerLines.length !== expectedLines,
+    expectedLines,
+    detectedLines: innerLines.length,
+    linePercents,
+    imageDataUrl: dataUrl,
+    rects,
+  };
+}
+
+function normalizeRowLinePercents(linePercents, expectedLines, markerCenters, height) {
+  const fallback = defaultRowLinePercents(markerCenters, height);
+  const values = [...(linePercents || [])]
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+    .slice(0, expectedLines);
+  while (values.length < expectedLines) values.push(fallback[values.length] ?? 50);
+  return values.map((value, index) => {
+    const min = index > 0 ? values[index - 1] + 1.2 : 18;
+    const max = index < expectedLines - 1 ? values[index + 1] - 1.2 : 86;
+    return Math.max(min, Math.min(max, value));
+  });
+}
+
+function defaultRowLinePercents(markerCenters, height) {
+  return markerCenters.slice(0, -1).map((center, index) => ((center + markerCenters[index + 1]) / 2 / height) * 100);
+}
+
+async function rectsFromHorizontalLinePercents(dataUrl, linePercents) {
+  const image = await loadImage(dataUrl);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  return rectsFromHorizontalLines(linePercents.map((value) => (Number(value) / 100) * height), width, height);
+}
+
+function rectsFromHorizontalLines(lines, width, height) {
+  const sorted = [...(lines || [])].map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return [];
+  const gaps = sorted.slice(1).map((line, index) => line - sorted[index]).filter((gap) => gap > height * 0.035);
+  const rowHeight = gaps.length ? Math.max(height * 0.052, Math.min(height * 0.12, gaps[Math.floor(gaps.length / 2)] * 0.86)) : height * 0.074;
+  const boundaries = [
+    Math.max(height * 0.19, sorted[0] - rowHeight),
+    ...sorted,
+    Math.min(height * 0.84, sorted[sorted.length - 1] + rowHeight),
+  ];
+  return boundaries.slice(0, -1).map((top, index) => {
+    const bottom = boundaries[index + 1];
+    return {
+      x: 0.095,
+      y: top / height,
+      width: 0.87,
+      height: Math.max(1, bottom - top) / height,
+      top,
+      bottom,
+      lineBased: true,
+    };
+  }).filter((rect) => rect.height > 0.03);
 }
 
 async function detectArkRowRects(dataUrl, fullLines = [], markers = []) {
@@ -1272,6 +1374,15 @@ async function parseDraftImages() {
         maskEditButtons: els.kind.value === "ark_position",
         columnOcr: els.kind.value === "ark_position",
       });
+      if (result.needsRowLineReview) {
+        image.pendingRowLineReview = result.rowLineReview;
+        image.completeCircleCount = result.completeCircleCount || 0;
+        els.text.value = result.text.trim();
+        els.parsePreview.innerHTML = renderRowLineReview(result.rowLineReview, index);
+        bindRowLineReviewControls(index);
+        setOcrStatus(`需要調整截取線：紅圈 ${image.completeCircleCount} 個，偵測到 ${result.rowLineReview.detectedLines} 條線，應為 ${result.rowLineReview.expectedLines} 條`);
+        return;
+      }
       texts.push(result.text.trim());
       if (Array.isArray(result.rows)) {
         image.parsedRows = result.rows;
@@ -1308,6 +1419,91 @@ async function parseDraftImages() {
     alert(error.message || "截圖解析失敗，請重新整理後再試");
   } finally {
     els.parseDraft.disabled = state.draftImages.length === 0;
+  }
+}
+
+function renderRowLineReview(review, imageIndex) {
+  if (!review?.imageDataUrl) return "";
+  const lines = review.linePercents || [];
+  return `
+    <section class="row-line-review" data-row-line-review="${imageIndex}">
+      <div class="ocr-completeness warning">
+        <strong>請先調整截取線</strong>
+        <p>紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。拖曳下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
+      </div>
+      <div class="row-line-stage">
+        <img src="${review.imageDataUrl}" alt="截取線校準預覽">
+        ${lines.map((line, index) => `<span class="row-line-overlay" data-line-overlay="${index}" style="top:${line}%"></span>`).join("")}
+      </div>
+      <div class="row-line-controls">
+        ${lines.map((line, index) => `
+          <label>
+            線 ${index + 1}
+            <input type="range" min="18" max="86" step="0.1" value="${escapeHtml(line)}" data-row-line-input="${index}">
+          </label>
+        `).join("")}
+      </div>
+      <div class="form-actions">
+        <button id="apply-row-lines" class="button primary" type="button" data-image-index="${imageIndex}">用截取線擷取</button>
+      </div>
+    </section>
+  `;
+}
+
+function bindRowLineReviewControls(imageIndex) {
+  const container = els.parsePreview.querySelector(`[data-row-line-review="${imageIndex}"]`);
+  if (!container) return;
+  container.querySelectorAll("[data-row-line-input]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const overlay = container.querySelector(`[data-line-overlay="${input.dataset.rowLineInput}"]`);
+      if (overlay) overlay.style.top = `${input.value}%`;
+    });
+  });
+  container.querySelector("#apply-row-lines")?.addEventListener("click", () => parseDraftImageWithRowLines(imageIndex));
+}
+
+async function parseDraftImageWithRowLines(imageIndex) {
+  const image = state.draftImages[imageIndex];
+  const container = els.parsePreview.querySelector(`[data-row-line-review="${imageIndex}"]`);
+  if (!image || !container) return;
+  const linePercents = [...container.querySelectorAll("[data-row-line-input]")].map((input) => Number(input.value));
+  const button = container.querySelector("#apply-row-lines");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "擷取中...";
+  }
+  setOcrStatus("使用調整後截取線解析中...");
+  try {
+    const result = await recognizeImage(image, (progress, mode) => {
+      setOcrStatus(`使用調整線解析 ${progress}%（${mode}）`);
+    }, {
+      maskEditButtons: els.kind.value === "ark_position",
+      columnOcr: els.kind.value === "ark_position",
+      rowLinePercents: linePercents,
+    });
+    image.pendingRowLineReview = null;
+    image.parsedRows = result.rows || [];
+    image.ocrElapsedMs = result.elapsedMs;
+    image.rowOcrMs = result.rowOcrMs;
+    image.rowCrops = result.rowCrops || [];
+    image.skippedRowCrops = result.skippedRowCrops || [];
+    image.completeCircleCount = result.completeCircleCount || 0;
+    image.missingRowCount = result.missingRowCount || 0;
+    els.text.value = result.text.trim();
+    const parsedRows = dedupeRows(image.parsedRows || []);
+    els.parsePreview.innerHTML = [
+      renderOcrCompleteness(image.completeCircleCount || 0, parsedRows.length, Math.max(0, (image.completeCircleCount || 0) - parsedRows.length), "draft"),
+      renderParsedRows(parsedRows, "draft", "", [], image.rowCrops || [], image.skippedRowCrops || []),
+    ].join("");
+    setOcrStatus(`完成，完整圈 ${image.completeCircleCount || 0} 個，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(result.elapsedMs || 0)}）`);
+  } catch (error) {
+    console.error(error);
+    setOcrStatus("解析失敗");
+    alert(error.message || "截圖解析失敗，請重新整理後再試");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "用截取線擷取";
+    }
   }
 }
 
