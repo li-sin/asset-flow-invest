@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.9";
-const APP_VERSION_NOTE = "缺筆校準截取線";
+const APP_VERSION = "v0.13.10";
+const APP_VERSION_NOTE = "候補截取線";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1437,6 +1437,7 @@ async function parseDraftImages() {
         .map((image, imageIndex) => image.rowLineReview?.imageDataUrl ? renderRowLineReview({
           ...image.rowLineReview,
           reason: `總檔數顯示 ${expectedRows} 檔，目前合併解析 ${parsedRows.length} 筆，可能少 ${missingRows} 筆。`,
+          extraLineCount: Math.max(0, missingRows - 1),
         }, imageIndex) : "")
         .join("")
       : "";
@@ -1465,7 +1466,12 @@ async function parseDraftImages() {
 
 function renderRowLineReview(review, imageIndex) {
   if (!review?.imageDataUrl) return "";
-  const lines = review.linePercents || [];
+  const baseLines = review.linePercents || [];
+  const extraLines = buildExtraRowLinePercents(baseLines, review.extraLineCount || 0);
+  const lines = [
+    ...baseLines.map((value) => ({ value, extra: false })),
+    ...extraLines.map((value) => ({ value, extra: true })),
+  ].sort((a, b) => a.value - b.value);
   return `
     <section class="row-line-review" data-row-line-review="${imageIndex}">
       <div class="ocr-completeness warning">
@@ -1474,13 +1480,13 @@ function renderRowLineReview(review, imageIndex) {
       </div>
       <div class="row-line-stage">
         <img src="${review.imageDataUrl}" alt="截取線校準預覽">
-        ${lines.map((line, index) => `<span class="row-line-overlay" data-line-overlay="${index}" style="top:${line}%"></span>`).join("")}
+        ${lines.map((line, index) => `<span class="row-line-overlay${line.extra ? " candidate" : ""}" data-line-overlay="${index}" style="top:${line.value}%"></span>`).join("")}
       </div>
       <div class="row-line-controls">
         ${lines.map((line, index) => `
           <label>
-            線 ${index + 1}
-            <input type="range" min="18" max="86" step="0.1" value="${escapeHtml(line)}" data-row-line-input="${index}">
+            ${line.extra ? "候補線" : "線"} ${index + 1}
+            <input type="range" min="18" max="86" step="0.1" value="${escapeHtml(line.value)}" data-row-line-input="${index}">
           </label>
         `).join("")}
       </div>
@@ -1489,6 +1495,23 @@ function renderRowLineReview(review, imageIndex) {
       </div>
     </section>
   `;
+}
+
+function buildExtraRowLinePercents(lines, count) {
+  if (!count) return [];
+  const sorted = [...(lines || [])].map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length < 2) return [];
+  const gaps = sorted.slice(1)
+    .map((line, index) => ({ start: sorted[index], end: line, gap: line - sorted[index] }))
+    .sort((a, b) => b.gap - a.gap);
+  const extras = [];
+  for (let index = 0; index < count; index += 1) {
+    const target = gaps[index % gaps.length];
+    const parts = Math.floor(index / gaps.length) + 2;
+    const slot = (index % gaps.length) + 1;
+    extras.push(target.start + (target.gap * slot) / parts);
+  }
+  return extras;
 }
 
 function bindRowLineReviewControls(imageIndex) {

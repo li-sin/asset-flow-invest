@@ -687,6 +687,11 @@ textarea {
   pointer-events: none;
 }
 
+.row-line-overlay.candidate {
+  background: #46a6ff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75), 0 0 10px rgba(70, 166, 255, 0.9);
+}
+
 .row-line-controls {
   display: grid;
   gap: 8px;
