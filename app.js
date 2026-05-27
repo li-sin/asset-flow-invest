@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.11.3";
-const APP_VERSION_NOTE = "歷史水位";
+const APP_VERSION = "v0.12.0";
+const APP_VERSION_NOTE = "市場水位";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -80,6 +80,9 @@ const els = {
   authSettings: $("#auth-settings"),
   fileInput: $("#file-input"),
   backupInput: $("#backup-input"),
+  openCapture: $("#open-capture"),
+  capturePanel: $("#capture-panel"),
+  closeCapture: $("#close-capture"),
   dropZone: $("#drop-zone"),
   form: $("#entry-form"),
   date: $("#entry-date"),
@@ -305,12 +308,25 @@ function marketLabel(market) {
   return { TW: "台股", US: "美股", ALL: "全部" }[market] || market;
 }
 
+function normalizeMarketKey(market) {
+  const value = String(market || "").trim().toUpperCase();
+  if (["TW", "台股", "TAIWAN", "TPE", "TSE"].includes(value)) return "TW";
+  if (["US", "美股", "USA", "NYSE", "NASDAQ"].includes(value)) return "US";
+  return value;
+}
+
+function marketForPosition(row) {
+  const market = normalizeMarketKey(row?.market);
+  if (market === "TW" || market === "US") return market;
+  return /^\d/.test(String(row?.symbol || "")) ? "TW" : "US";
+}
+
 function loadTargetLevels() {
   try {
     const parsed = JSON.parse(localStorage.getItem(TARGET_LEVEL_STORAGE_KEY) || "{}");
     return Object.fromEntries(Object.entries(parsed)
-      .map(([symbol, value]) => [String(symbol).trim(), Number(value)])
-      .filter(([symbol, value]) => symbol && Number.isFinite(value)));
+      .map(([market, value]) => [normalizeMarketKey(market), Number(value)])
+      .filter(([market, value]) => ["TW", "US"].includes(market) && Number.isFinite(value)));
   } catch (error) {
     console.warn("target levels", error);
     return {};
@@ -321,16 +337,17 @@ function saveTargetLevels() {
   localStorage.setItem(TARGET_LEVEL_STORAGE_KEY, JSON.stringify(state.targetLevels));
 }
 
-function targetLevelForSymbol(symbol, snapshotDate = "") {
-  const value = state.targetLevels[String(symbol || "").trim()];
+function targetLevelForMarket(market, snapshotDate = "") {
+  const key = normalizeMarketKey(market);
+  const value = state.targetLevels[key];
   if (Number.isFinite(value)) return value;
-  const sheetValue = targetLevelFromHistory(symbol, snapshotDate);
+  const sheetValue = targetLevelFromHistory(key, snapshotDate);
   return sheetValue === null ? null : sheetValue;
 }
 
-function updateTargetLevel(symbol, value) {
-  const key = String(symbol || "").trim();
-  if (!key) return false;
+function updateTargetLevel(market, value) {
+  const key = normalizeMarketKey(market);
+  if (!["TW", "US"].includes(key)) return false;
   const text = String(value ?? "").replace("%", "").trim();
   if (!text) {
     delete state.targetLevels[key];
@@ -339,7 +356,7 @@ function updateTargetLevel(symbol, value) {
   }
   const number = Number(text);
   if (!Number.isFinite(number) || number < 0 || number > 100) {
-    alert("建議水位請輸入 0 到 100 的百分比");
+    alert("市場建議水位請輸入 0 到 100 的百分比");
     return false;
   }
   state.targetLevels[key] = number;
@@ -397,15 +414,23 @@ function looksLikePercent(value) {
   return text.includes("%") || (parsePercentValue(text) !== null && !isTwSymbol(text));
 }
 
+function marketFromText(value) {
+  const text = String(value || "").trim().toUpperCase();
+  if (!text) return "";
+  if (/(^|[^A-Z])TW([^A-Z]|$)|台股|臺股|台灣|臺灣/.test(text)) return "TW";
+  if (/(^|[^A-Z])US([^A-Z]|$)|美股|美國/.test(text)) return "US";
+  return "";
+}
+
 function inferLevelRow(row) {
-  const symbolIndex = row.findIndex((value) => isTwSymbol(String(value || "").trim()));
-  if (symbolIndex < 0) return null;
-  const targetIndex = row.findIndex((value, index) => index !== symbolIndex && looksLikePercent(value));
+  const marketIndex = row.findIndex((value) => marketFromText(value));
+  if (marketIndex < 0) return null;
+  const targetIndex = row.findIndex((value, index) => index !== marketIndex && looksLikePercent(value));
   if (targetIndex < 0) return null;
-  const dateValue = row.find((value, index) => index !== symbolIndex && index !== targetIndex && /\d{1,4}[/-]\d{1,2}/.test(String(value || ""))) || "";
+  const dateValue = row.find((value, index) => index !== marketIndex && index !== targetIndex && /\d{1,4}[/-]\d{1,2}/.test(String(value || ""))) || "";
   return {
     date: normalizeDateText(dateValue),
-    symbol: normalizeSymbolInput(row[symbolIndex]),
+    market: marketFromText(row[marketIndex]),
     targetLevel: parsePercentValue(row[targetIndex]),
     source: "水位",
   };
@@ -415,19 +440,19 @@ function parseTargetLevelRows(values) {
   if (!values?.length) return [];
   const headers = values[0] || [];
   const dateIndex = findHeaderIndex(headers, ["date", "日期", "時間", "快照日期", "建立日期", "更新日期"]);
-  const symbolIndex = findHeaderIndex(headers, ["symbol", "代號", "股票代號", "證券代號", "股號"]);
+  const marketIndex = findHeaderIndex(headers, ["market", "市場", "股市", "類別", "地區"]);
   const targetIndex = findTargetLevelIndex(headers);
-  const hasUsableHeader = symbolIndex >= 0 && targetIndex >= 0;
+  const hasUsableHeader = marketIndex >= 0 && targetIndex >= 0;
   const rows = hasUsableHeader ? values.slice(1) : values;
 
   return rows.map((row) => {
     if (!hasUsableHeader) return inferLevelRow(row);
-    const symbol = normalizeSymbolInput(row[symbolIndex]);
+    const market = marketFromText(row[marketIndex]);
     const targetLevel = parsePercentValue(row[targetIndex]);
-    if (!isTwSymbol(symbol) || targetLevel === null) return null;
+    if (!market || targetLevel === null) return null;
     return {
       date: normalizeDateText(dateIndex >= 0 ? row[dateIndex] : ""),
-      symbol,
+      market,
       targetLevel,
       source: "水位",
     };
@@ -445,11 +470,11 @@ async function loadTargetLevelHistory() {
   }
 }
 
-function targetLevelFromHistory(symbol, snapshotDate = "") {
-  const key = String(symbol || "").trim();
+function targetLevelFromHistory(market, snapshotDate = "") {
+  const key = normalizeMarketKey(market);
   const normalizedDate = normalizeDateText(snapshotDate);
   const candidates = (state.targetLevelHistory || [])
-    .filter((item) => item.symbol === key)
+    .filter((item) => item.market === key)
     .filter((item) => !normalizedDate || !item.date || item.date <= normalizedDate)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return candidates[0]?.targetLevel ?? null;
@@ -566,6 +591,7 @@ async function saveEntry(event) {
 
   state.entries.push(...entries);
   clearDraft();
+  closeCapturePanel();
   render();
 }
 
@@ -1669,6 +1695,14 @@ function closeDetail() {
   els.detail.classList.remove("is-open");
 }
 
+function openCapturePanel() {
+  els.capturePanel.hidden = false;
+}
+
+function closeCapturePanel() {
+  els.capturePanel.hidden = true;
+}
+
 async function updateStatus(id, status) {
   const entry = state.entries.find((item) => item.id === id);
   if (!entry) return;
@@ -2436,60 +2470,59 @@ function renderCloudSnapshot() {
     return;
   }
   const positions = cloud.positions || [];
-  const totalShares = positions.reduce((sum, row) => sum + Number(row.shares || 0), 0);
-  const totalCost = positions.reduce((sum, row) => sum + estimatedCost(row), 0);
-  const maxCost = Math.max(...positions.map(estimatedCost), 0);
-  const allocationRows = positions
-    .map((row) => ({
-      ...row,
-      cost: estimatedCost(row),
-      weight: totalCost ? (estimatedCost(row) / totalCost) * 100 : 0,
-    }))
-    .map((row) => {
-      const targetLevel = targetLevelForSymbol(row.symbol, cloud.snapshot.date);
-      return {
-        ...row,
-        targetLevel,
-        gap: targetLevel === null ? null : row.weight - targetLevel,
-      };
-    })
-    .sort((a, b) => b.cost - a.cost);
+  const positionsWithMarket = positions.map((row) => ({
+    ...row,
+    marketKey: marketForPosition(row),
+    cost: estimatedCost(row),
+  }));
+  const totalShares = positionsWithMarket.reduce((sum, row) => sum + Number(row.shares || 0), 0);
+  const totalCost = positionsWithMarket.reduce((sum, row) => sum + row.cost, 0);
+  const marketSummaries = ["TW", "US"].map((market) => {
+    const marketRows = positionsWithMarket
+      .filter((row) => row.marketKey === market)
+      .sort((a, b) => b.cost - a.cost);
+    const marketCost = marketRows.reduce((sum, row) => sum + row.cost, 0);
+    const marketShares = marketRows.reduce((sum, row) => sum + Number(row.shares || 0), 0);
+    return {
+      market,
+      rows: marketRows,
+      stockCount: marketRows.length,
+      totalShares: marketShares,
+      totalCost: marketCost,
+      targetLevel: targetLevelForMarket(market, cloud.snapshot.date),
+    };
+  });
   const history = (state.cloudHistory.snapshots || [])
     .slice(0, 10)
     .map(snapshotMetrics)
     .reverse();
   const maxHistoryCost = Math.max(...history.map((item) => item.totalCost), 0);
   const maxHistoryShares = Math.max(...history.map((item) => item.totalShares), 0);
-  const topAllocation = allocationRows.slice(0, 8);
-  const rows = allocationRows.map((row) => `
-    <tr>
-      <td>${escapeHtml(row.symbol)}</td>
-      <td>${escapeHtml(row.name)}</td>
-      <td>${escapeHtml(displayValue(row.shares))}</td>
-      <td>${escapeHtml(displayValue(row.avgCost))}</td>
-      <td>${escapeHtml(formatPercent(row.weight))}</td>
-      <td>
-        <input class="target-level-input" data-target-level-symbol="${escapeHtml(row.symbol)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(row.targetLevel ?? "")}" aria-label="${escapeHtml(row.symbol)} 建議水位">
-      </td>
-      <td><span class="target-gap ${targetGapClass(row.gap, row.targetLevel !== null)}">${row.targetLevel === null ? "未設定" : escapeHtml(formatSignedPercent(row.gap))}</span></td>
-    </tr>
-  `).join("");
-  const allocationBars = topAllocation.map((row) => `
-    <div class="allocation-row">
-      <div>
-        <strong>${escapeHtml(row.symbol)}</strong>
-        <span>${escapeHtml(row.name || "")}</span>
+  const maxMarketCost = Math.max(...marketSummaries.map((item) => item.totalCost), 0);
+  const marketCards = marketSummaries.map((item) => `
+    <section class="market-water-card">
+      <div class="card-heading">
+        <h3>${marketLabel(item.market)}</h3>
+        <span>${item.stockCount} 檔庫存</span>
       </div>
-      <div class="meter" aria-label="${escapeHtml(row.symbol)} 水位 ${formatPercent(row.weight)}">
-        <span style="width: ${widthPercent(row.cost, maxCost)}%"></span>
+      <div class="market-water-main">
+        <div>
+          <span>方舟建議總水位</span>
+          <strong>${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</strong>
+        </div>
+        <label>
+          調整建議水位
+          <input class="target-level-input" data-target-level-market="${item.market}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(item.targetLevel ?? "")}">
+        </label>
       </div>
-      <b>${formatPercent(row.weight)}</b>
-      <label>
-        建議
-        <input class="target-level-input" data-target-level-symbol="${escapeHtml(row.symbol)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(row.targetLevel ?? "")}">
-      </label>
-      <em class="target-gap ${targetGapClass(row.gap, row.targetLevel !== null)}">${row.targetLevel === null ? "未設定" : escapeHtml(formatSignedPercent(row.gap))}</em>
-    </div>
+      <div class="market-stats">
+        <span>估算投入成本 <b>${formatMoney(item.totalCost)}</b></span>
+        <span>總股數 <b>${formatNumber(item.totalShares, 3)}</b></span>
+      </div>
+      <div class="meter" aria-label="${marketLabel(item.market)} 估算投入成本">
+        <span style="width: ${widthPercent(item.totalCost, maxMarketCost)}%"></span>
+      </div>
+    </section>
   `).join("");
   const trendBars = history.map((item) => `
     <div class="trend-day">
@@ -2508,6 +2541,39 @@ function renderCloudSnapshot() {
       <td>${escapeHtml(formatMoney(item.totalCost))}</td>
     </tr>
   `).join("");
+  const marketDetailSections = marketSummaries.map((item) => {
+    const rows = item.rows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.symbol)}</td>
+        <td>${escapeHtml(row.name)}</td>
+        <td>${escapeHtml(displayValue(row.shares))}</td>
+        <td>${escapeHtml(displayValue(row.avgCost))}</td>
+        <td>${escapeHtml(formatMoney(row.cost))}</td>
+      </tr>
+    `).join("");
+    return `
+      <section class="market-detail-section">
+        <div class="card-heading">
+          <h3>${marketLabel(item.market)}明細</h3>
+          <span>建議水位 ${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</span>
+        </div>
+        <div class="table-scroll compact-table">
+          <table class="parsed-table">
+            <thead>
+              <tr>
+                <th>代號</th>
+                <th>名稱</th>
+                <th>股數</th>
+                <th>成交均價</th>
+                <th>估算成本</th>
+              </tr>
+            </thead>
+            <tbody>${rows || "<tr><td colspan=\"5\">沒有庫存</td></tr>"}</tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }).join("");
   els.cloudSnapshot.innerHTML = `
     <header class="dashboard-header">
       <div>
@@ -2547,10 +2613,10 @@ function renderCloudSnapshot() {
     <div class="dashboard-grid">
       <section class="dashboard-card">
         <div class="card-heading">
-          <h3>水位分布</h3>
-          <span>建議值讀取 Google Sheet「水位」tab，可手動覆蓋</span>
+          <h3>市場水位</h3>
+          <span>建議水位為各市場庫存占總資金的比例</span>
         </div>
-        <div class="allocation-chart">${allocationBars || "<p class=\"muted-text\">沒有可顯示的庫存。</p>"}</div>
+        <div class="market-water-grid">${marketCards}</div>
       </section>
 
       <section class="dashboard-card">
@@ -2585,31 +2651,16 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存</span>
+        <span>${positions.length} 筆庫存，依台股與美股分開</span>
       </div>
-      <div class="table-scroll compact-table">
-        <table class="parsed-table">
-          <thead>
-            <tr>
-              <th>代號</th>
-              <th>名稱</th>
-              <th>股數</th>
-              <th>成交均價</th>
-              <th>水位</th>
-              <th>建議水位</th>
-              <th>差距</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
+      <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
-  els.cloudSnapshot.querySelectorAll("[data-target-level-symbol]").forEach((input) => {
+  els.cloudSnapshot.querySelectorAll("[data-target-level-market]").forEach((input) => {
     input.addEventListener("change", () => {
-      if (updateTargetLevel(input.dataset.targetLevelSymbol, input.value)) {
+      if (updateTargetLevel(input.dataset.targetLevelMarket, input.value)) {
         renderCloudSnapshot();
       }
     });
@@ -2830,8 +2881,13 @@ async function importBackup(file) {
 }
 
 function bindEvents() {
-  els.fileInput.addEventListener("change", (event) => addFiles(event.target.files));
+  els.fileInput.addEventListener("change", (event) => {
+    addFiles(event.target.files);
+    event.target.value = "";
+  });
   els.backupInput.addEventListener("change", (event) => importBackup(event.target.files[0]));
+  els.openCapture?.addEventListener("click", openCapturePanel);
+  els.closeCapture?.addEventListener("click", closeCapturePanel);
   els.dropZone.addEventListener("click", () => els.fileInput.click());
   els.dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -2845,7 +2901,10 @@ function bindEvents() {
   });
   document.addEventListener("paste", (event) => {
     const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
-    if (files.length) addFiles(files);
+    if (files.length) {
+      openCapturePanel();
+      addFiles(files);
+    }
   });
   els.form.addEventListener("submit", saveEntry);
   els.clear.addEventListener("click", clearDraft);
