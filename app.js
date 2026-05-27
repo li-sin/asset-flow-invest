@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.3";
-const APP_VERSION_NOTE = "日期刪除快照";
+const APP_VERSION = "v0.13.4";
+const APP_VERSION_NOTE = "底部 tab 與滑動刪除";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -59,6 +59,7 @@ const state = {
     snapshots: [],
     positions: [],
   },
+  dashboardTab: "home",
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
   auth: {
@@ -384,6 +385,16 @@ function findTargetLevelIndex(headers) {
 
 function normalizeDateText(value) {
   const text = String(value || "").trim();
+  const number = Number(text);
+  if (/^\d+(\.\d+)?$/.test(text) && Number.isFinite(number) && number >= 30000 && number <= 70000) {
+    const date = new Date(Date.UTC(1899, 11, 30 + Math.floor(number)));
+    return date.toISOString().slice(0, 10);
+  }
+  const gvizDate = text.match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})\)$/);
+  if (gvizDate) {
+    const date = new Date(Date.UTC(Number(gvizDate[1]), Number(gvizDate[2]), Number(gvizDate[3])));
+    return date.toISOString().slice(0, 10);
+  }
   const matched = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
   if (matched) {
     return [
@@ -2495,6 +2506,34 @@ function renderSnapshotDeleteOptions(selectedDate = "") {
   `;
 }
 
+function renderCloudSnapshotSwipeList() {
+  const rows = [...(state.cloudHistory.snapshots || [])]
+    .sort((a, b) => snapshotSortValue(b).localeCompare(snapshotSortValue(a)))
+    .map(snapshotMetrics);
+  if (!rows.length) return "<p class=\"muted-text\">目前沒有雲端快照。</p>";
+  return `
+    <div class="snapshot-swipe-list">
+      ${rows.map((snapshot) => `
+        <div class="swipe-row" data-snapshot-id="${escapeHtml(snapshot.snapshotId)}">
+          <button class="swipe-delete-action" type="button" data-delete-snapshot-id="${escapeHtml(snapshot.snapshotId)}">刪除</button>
+          <div class="swipe-row-content">
+            <div>
+              <strong>${escapeHtml(snapshot.date || "")}</strong>
+              <span>${marketLabel(snapshot.market)} · ${formatNumber(snapshot.stockCount)} 檔 · ${formatMoney(snapshot.totalCost)}</span>
+            </div>
+            <small>${escapeHtml(snapshot.createdAt || "")}</small>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function dashboardTabButton(tab, label) {
+  const selected = state.dashboardTab === tab;
+  return `<button class="dashboard-tab${selected ? " is-active" : ""}" type="button" data-dashboard-tab="${tab}" aria-selected="${selected ? "true" : "false"}">${label}</button>`;
+}
+
 function snapshotToSheetRow(snapshot) {
   return [
     snapshot.snapshotId || "",
@@ -2696,7 +2735,7 @@ function parseSnapshotRows(values) {
   return (values || []).map((row) => ({
     snapshotId: row[0] || "",
     createdAt: row[1] || "",
-    date: row[2] || "",
+    date: normalizeDateText(row[2] || ""),
     market: row[3] || "",
     sourceEntryId: row[4] || "",
     sourceTitle: row[5] || "",
@@ -2708,7 +2747,7 @@ function parseSnapshotRows(values) {
 function parsePositionRows(values) {
   return (values || []).map((row) => ({
     snapshotId: row[0] || "",
-    date: row[1] || "",
+    date: normalizeDateText(row[1] || ""),
     market: row[2] || "",
     symbol: row[3] || "",
     name: row[4] || "",
@@ -3147,19 +3186,9 @@ function renderCloudSnapshot() {
       </section>
     `;
   }).join("");
-  els.cloudSnapshot.innerHTML = `
-    <header class="dashboard-header">
-      <div>
-        <p class="section-eyebrow">Dashboard</p>
-        <h2>目前庫存</h2>
-        <p>${escapeHtml(cloud.snapshot.date)} · ${marketLabel(cloud.snapshot.market)} · ${escapeHtml(cloud.snapshot.createdAt)}</p>
-      </div>
-      <div class="dashboard-actions">
-        <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
-        <button id="dashboard-refresh" class="button secondary compact" type="button">重新整理</button>
-      </div>
-    </header>
-
+  const validDashboardTabs = new Set(["home", "holdings", "snapshots", "capture"]);
+  if (!validDashboardTabs.has(state.dashboardTab)) state.dashboardTab = "home";
+  const homeContent = `
     <div class="metric-grid">
       <div class="metric">
         <span>庫存檔數</span>
@@ -3208,7 +3237,8 @@ function renderCloudSnapshot() {
       </div>
       <div class="water-cost-chart">${renderWaterCostAnalysis(layoutAnalysis)}</div>
     </section>
-
+  `;
+  const holdingsContent = `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>個股每日股數</h3>
@@ -3223,6 +3253,23 @@ function renderCloudSnapshot() {
         <span>今日庫存減前一份同市場快照</span>
       </div>
       ${renderLayoutDeltaTable(layoutAnalysis)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>目前明細</h3>
+        <span>${positions.length} 筆庫存，依台股與美股分開</span>
+      </div>
+      <div class="market-detail-grid">${marketDetailSections}</div>
+    </section>
+  `;
+  const snapshotsContent = `
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>雲端快照</h3>
+        <span>左滑快照列可刪除</span>
+      </div>
+      ${renderCloudSnapshotSwipeList()}
     </section>
 
     <section class="dashboard-card">
@@ -3243,26 +3290,60 @@ function renderCloudSnapshot() {
           <tbody>${dailyRows}</tbody>
         </table>
       </div>
-    </section>
-
-    <section class="dashboard-card snapshot-admin-card">
-      <div class="card-heading">
-        <h3>快照管理</h3>
-        <span>用日期與市場刪除雲端庫存快照</span>
+      <div class="snapshot-actions">
+        <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
       </div>
-      ${renderSnapshotDeleteOptions(cloud.snapshot.date)}
     </section>
-
-    <section class="dashboard-card">
+  `;
+  const captureContent = `
+    <section class="dashboard-card capture-tab-card">
       <div class="card-heading">
-        <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存，依台股與美股分開</span>
+        <h3>新增庫存截圖</h3>
+        <span>打開截圖入口後可貼上、拖放或選檔</span>
       </div>
-      <div class="market-detail-grid">${marketDetailSections}</div>
+      <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
+      <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
     </section>
+  `;
+  const tabContent = {
+    home: homeContent,
+    holdings: holdingsContent,
+    snapshots: snapshotsContent,
+    capture: captureContent,
+  }[state.dashboardTab];
+  els.cloudSnapshot.innerHTML = `
+    <header class="dashboard-header">
+      <div>
+        <p class="section-eyebrow">Dashboard</p>
+        <h2>目前庫存</h2>
+        <p>${escapeHtml(cloud.snapshot.date)} · ${marketLabel(cloud.snapshot.market)} · ${escapeHtml(cloud.snapshot.createdAt)}</p>
+      </div>
+      <div class="dashboard-actions">
+        <button id="dashboard-refresh" class="button secondary compact" type="button">重新整理</button>
+      </div>
+    </header>
+
+    <div class="dashboard-tab-content">${tabContent}</div>
+    <nav class="dashboard-tabs" role="tablist" aria-label="AssetFlow Invest">
+      ${dashboardTabButton("home", "首頁")}
+      ${dashboardTabButton("holdings", "庫存")}
+      ${dashboardTabButton("snapshots", "快照")}
+      ${dashboardTabButton("capture", "新增")}
+    </nav>
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
+  els.cloudSnapshot.querySelector("#dashboard-open-capture")?.addEventListener("click", openCapturePanel);
+  els.cloudSnapshot.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.dashboardTab = button.dataset.dashboardTab || "home";
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-delete-snapshot-id]").forEach((button) => {
+    button.addEventListener("click", () => deleteCloudSnapshotById(button.dataset.deleteSnapshotId, button));
+  });
+  bindSwipeDeleteRows(els.cloudSnapshot);
   const deleteDate = els.cloudSnapshot.querySelector("#delete-snapshot-date");
   const deleteMarket = els.cloudSnapshot.querySelector("#delete-snapshot-market");
   const deletePreview = els.cloudSnapshot.querySelector("#delete-snapshot-preview");
@@ -3281,6 +3362,104 @@ function renderCloudSnapshot() {
     });
   });
   renderSummaryLine();
+}
+
+function bindSwipeDeleteRows(root) {
+  root?.querySelectorAll(".swipe-row").forEach((row) => {
+    let startX = 0;
+    let currentX = 0;
+    let dragging = false;
+    const content = row.querySelector(".swipe-row-content");
+    if (!content) return;
+
+    const setOffset = (offset) => {
+      const value = Math.max(-92, Math.min(0, offset));
+      content.style.transform = `translateX(${value}px)`;
+      row.classList.toggle("is-open", value < -44);
+    };
+
+    row.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("button")) return;
+      dragging = true;
+      startX = event.clientX;
+      currentX = row.classList.contains("is-open") ? -92 : 0;
+      content.style.transition = "none";
+      row.setPointerCapture?.(event.pointerId);
+    });
+
+    row.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      setOffset(currentX + event.clientX - startX);
+    });
+
+    row.addEventListener("pointerup", (event) => {
+      if (!dragging) return;
+      dragging = false;
+      content.style.transition = "";
+      const delta = event.clientX - startX;
+      setOffset(delta < -42 || (row.classList.contains("is-open") && delta < 24) ? -92 : 0);
+    });
+
+    row.addEventListener("pointercancel", () => {
+      dragging = false;
+      content.style.transition = "";
+      setOffset(row.classList.contains("is-open") ? -92 : 0);
+    });
+  });
+}
+
+async function deleteCloudSnapshotById(snapshotId, button) {
+  if (!snapshotId) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "檢查";
+  }
+  try {
+    await ensureCloudSheetTables();
+    const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
+    const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots));
+    const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
+    const target = snapshots.find((snapshot) => snapshot.snapshotId === snapshotId);
+    if (!target) {
+      alert("這筆快照已不存在，將重新整理。");
+      await loadLatestCloudSnapshot(false);
+      return;
+    }
+    const positionCount = positions.filter((row) => row.snapshotId === snapshotId).length;
+    const confirmed = confirm([
+      `確定刪除 ${target.date} ${marketLabel(target.market)} 快照？`,
+      "",
+      `${target.rowCount || positionCount} 檔庫存 · ${target.createdAt}`,
+      "",
+      "刪除後會同步移除這筆快照的庫存明細。",
+    ].join("\n"));
+    if (!confirmed) return;
+
+    if (button) button.textContent = "刪除";
+    const keptSnapshots = snapshots.filter((snapshot) => snapshot.snapshotId !== snapshotId);
+    const keptPositions = positions.filter((row) => row.snapshotId !== snapshotId);
+
+    await clearSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    await clearSheetValues(SHEET_NAMES.positions, "A2:J");
+    if (keptSnapshots.length) {
+      await updateSheetValues(SHEET_NAMES.snapshots, "A2:H", keptSnapshots.map(snapshotToSheetRow));
+    }
+    if (keptPositions.length) {
+      await updateSheetValues(SHEET_NAMES.positions, "A2:J", keptPositions.map(positionToSheetRow));
+    }
+
+    await loadLatestCloudSnapshot(false);
+    alert("已刪除雲端快照。");
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "刪除雲端快照失敗");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "刪除";
+    }
+  }
 }
 
 async function deleteSelectedCloudSnapshots() {

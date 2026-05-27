@@ -8,7 +8,7 @@ Open `index.html` in a browser, or serve the folder with a static server.
 
 ## Google Access
 
-v0.13.3 keeps Google sign-in before the app shell is shown, then automatically loads the latest cloud inventory into a dashboard-first home screen. The first snapshot per Taiwan/US market per day is unique: if a same-day market snapshot already exists, the app lists stock-level differences and asks whether to replace the old snapshot with the latest one. The dashboard separates Taiwan and US holdings, shows market-level Ark suggested water levels from the `水位` sheet tab, a daily water-level/layout-cost chart, per-stock daily share history, and position details. Snapshot management can delete cloud inventory snapshots by date and market. The UI adapts for desktop, iPad, and phone widths, and screenshot OCR checks the count of full leading circle markers against parsed rows.
+v0.13.4 keeps Google sign-in before the app shell is shown, then automatically loads the latest cloud inventory into a dashboard-first home screen. Numeric Google Sheets date serials are normalized back to `YYYY-MM-DD`. The dashboard uses bottom tabs for home, holdings, cloud snapshots, and capture entry. Cloud snapshot rows support swipe-to-delete while still confirming before removing snapshot and position rows from Google Sheets. The first snapshot per Taiwan/US market per day is unique, and the dashboard separates Taiwan and US holdings, market-level Ark suggested water levels, water-level/layout-cost analysis, per-stock daily share history, and position details.
 
 ## Privacy
 

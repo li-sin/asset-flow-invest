@@ -346,6 +346,41 @@ textarea {
   gap: 12px;
 }
 
+.dashboard-tab-content {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 76px;
+}
+
+.dashboard-tabs {
+  position: sticky;
+  bottom: 10px;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 254, 250, 0.96);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+.dashboard-tab {
+  border: 0;
+  border-radius: 6px;
+  min-height: 40px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.dashboard-tab.is-active {
+  background: var(--green);
+  color: #fff;
+}
+
 .dashboard-card {
   padding: 14px;
 }
@@ -724,6 +759,76 @@ textarea {
   background: #fff7f7;
   color: var(--red);
   padding: 10px 12px;
+}
+
+.snapshot-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.snapshot-swipe-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7e6e6;
+  touch-action: pan-y;
+}
+
+.swipe-row-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  background: #fffefa;
+  padding: 12px;
+  transition: transform 180ms ease;
+}
+
+.swipe-row-content div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.swipe-row-content strong,
+.swipe-row-content span,
+.swipe-row-content small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swipe-row-content span,
+.swipe-row-content small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.swipe-delete-action {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 92px;
+  border: 0;
+  background: var(--red);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.capture-tab-card {
+  display: grid;
+  gap: 12px;
 }
 
 .table-scroll {
@@ -1370,6 +1475,10 @@ textarea {
 
   .snapshot-delete-form {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-tabs {
+    bottom: 6px;
   }
 
   .capture-panel,
