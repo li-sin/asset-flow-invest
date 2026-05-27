@@ -694,6 +694,38 @@ textarea {
   white-space: nowrap;
 }
 
+.snapshot-admin-card {
+  display: grid;
+  gap: 12px;
+}
+
+.snapshot-delete-form {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.snapshot-delete-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snapshot-delete-form select {
+  min-height: 36px;
+  padding: 7px 9px;
+}
+
+.snapshot-delete-preview {
+  border: 1px solid #efd4d4;
+  border-radius: 8px;
+  background: #fff7f7;
+  color: var(--red);
+  padding: 10px 12px;
+}
+
 .table-scroll {
   width: 100%;
   overflow: auto;
@@ -1333,6 +1365,10 @@ textarea {
 
   .market-water-grid,
   .market-water-main {
+    grid-template-columns: 1fr;
+  }
+
+  .snapshot-delete-form {
     grid-template-columns: 1fr;
   }
 

@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.2";
-const APP_VERSION_NOTE = "每日唯一快照";
+const APP_VERSION = "v0.13.3";
+const APP_VERSION_NOTE = "日期刪除快照";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2432,6 +2432,69 @@ function findDuplicateSnapshotGroups(snapshots, positions) {
     .map((group) => group.sort((a, b) => String(b.snapshot.createdAt).localeCompare(String(a.snapshot.createdAt))));
 }
 
+function cloudSnapshotDates() {
+  return [...new Set((state.cloudHistory.snapshots || [])
+    .map((snapshot) => normalizeDateText(snapshot.date))
+    .filter(Boolean))]
+    .sort((a, b) => b.localeCompare(a));
+}
+
+function snapshotsForDeletion(snapshots, date, market) {
+  const normalizedDate = normalizeDateText(date);
+  const normalizedMarket = normalizeMarketKey(market);
+  if (!normalizedDate) return [];
+  return (snapshots || []).filter((snapshot) => {
+    const sameDate = normalizeDateText(snapshot.date) === normalizedDate;
+    const sameMarket = normalizedMarket === "ALL" || normalizeMarketKey(snapshot.market) === normalizedMarket;
+    return sameDate && sameMarket;
+  });
+}
+
+function findSnapshotsForDeletion(date, market) {
+  return snapshotsForDeletion(state.cloudHistory.snapshots, date, market);
+}
+
+function snapshotDeletePreviewText(date, market) {
+  const targets = findSnapshotsForDeletion(date, market);
+  if (!date) return "請先選擇日期。";
+  if (!targets.length) return "這個日期與市場沒有雲端快照。";
+  const positionCount = targets.reduce((sum, snapshot) => (
+    sum + snapshotPositionsFromList(snapshot.snapshotId, state.cloudHistory.positions).length
+  ), 0);
+  const marketSummary = [...new Set(targets.map((snapshot) => marketLabel(snapshot.market)))].join(" / ");
+  return `將刪除 ${targets.length} 筆 ${marketSummary} 快照與 ${positionCount} 筆庫存明細。`;
+}
+
+function renderSnapshotDeleteOptions(selectedDate = "") {
+  const dates = cloudSnapshotDates();
+  if (!dates.length) {
+    return "<p class=\"muted-text\">目前沒有可刪除的雲端快照。</p>";
+  }
+  const currentDate = normalizeDateText(selectedDate) || normalizeDateText(state.cloudSnapshot?.snapshot?.date) || dates[0];
+  const currentMarket = normalizeMarketKey(state.cloudSnapshot?.snapshot?.market) || "TW";
+  const dateOptions = dates.map((date) => (
+    `<option value="${escapeHtml(date)}"${date === currentDate ? " selected" : ""}>${escapeHtml(date)}</option>`
+  )).join("");
+  return `
+    <div class="snapshot-delete-form">
+      <label>
+        日期
+        <select id="delete-snapshot-date">${dateOptions}</select>
+      </label>
+      <label>
+        市場
+        <select id="delete-snapshot-market">
+          <option value="TW"${currentMarket === "TW" ? " selected" : ""}>台股</option>
+          <option value="US"${currentMarket === "US" ? " selected" : ""}>美股</option>
+          <option value="ALL">該日期全部市場</option>
+        </select>
+      </label>
+      <button id="delete-cloud-snapshot" class="button ghost danger compact" type="button">刪除快照</button>
+    </div>
+    <p id="delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText(currentDate, currentMarket))}</p>
+  `;
+}
+
 function snapshotToSheetRow(snapshot) {
   return [
     snapshot.snapshotId || "",
@@ -3182,6 +3245,14 @@ function renderCloudSnapshot() {
       </div>
     </section>
 
+    <section class="dashboard-card snapshot-admin-card">
+      <div class="card-heading">
+        <h3>快照管理</h3>
+        <span>用日期與市場刪除雲端庫存快照</span>
+      </div>
+      ${renderSnapshotDeleteOptions(cloud.snapshot.date)}
+    </section>
+
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>目前明細</h3>
@@ -3192,6 +3263,16 @@ function renderCloudSnapshot() {
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
+  const deleteDate = els.cloudSnapshot.querySelector("#delete-snapshot-date");
+  const deleteMarket = els.cloudSnapshot.querySelector("#delete-snapshot-market");
+  const deletePreview = els.cloudSnapshot.querySelector("#delete-snapshot-preview");
+  const updateDeletePreview = () => {
+    if (!deletePreview || !deleteDate || !deleteMarket) return;
+    deletePreview.textContent = snapshotDeletePreviewText(deleteDate.value, deleteMarket.value);
+  };
+  deleteDate?.addEventListener("change", updateDeletePreview);
+  deleteMarket?.addEventListener("change", updateDeletePreview);
+  els.cloudSnapshot.querySelector("#delete-cloud-snapshot")?.addEventListener("click", deleteSelectedCloudSnapshots);
   els.cloudSnapshot.querySelectorAll("[data-target-level-market]").forEach((input) => {
     input.addEventListener("change", () => {
       if (updateTargetLevel(input.dataset.targetLevelMarket, input.value)) {
@@ -3200,6 +3281,76 @@ function renderCloudSnapshot() {
     });
   });
   renderSummaryLine();
+}
+
+async function deleteSelectedCloudSnapshots() {
+  const button = els.cloudSnapshot?.querySelector("#delete-cloud-snapshot");
+  const dateInput = els.cloudSnapshot?.querySelector("#delete-snapshot-date");
+  const marketInput = els.cloudSnapshot?.querySelector("#delete-snapshot-market");
+  const date = normalizeDateText(dateInput?.value);
+  const market = normalizeMarketKey(marketInput?.value);
+
+  if (!date) {
+    alert("請先選擇要刪除的日期。");
+    return;
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "檢查中...";
+  }
+  try {
+    await ensureCloudSheetTables();
+    const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
+    const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots));
+    const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
+    const targets = snapshotsForDeletion(snapshots, date, market);
+    const targetIds = new Set(targets.map((snapshot) => snapshot.snapshotId));
+    const targetPositionCount = positions.filter((row) => targetIds.has(row.snapshotId)).length;
+
+    if (!targets.length) {
+      alert("這個日期與市場沒有雲端快照。");
+      return;
+    }
+
+    const targetLines = targets
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      .map((snapshot) => `- ${snapshot.date} ${marketLabel(snapshot.market)} · ${snapshot.rowCount || 0} 檔 · ${snapshot.createdAt}`)
+      .join("\n");
+    const confirmed = confirm([
+      `確定刪除 ${targets.length} 筆快照與 ${targetPositionCount} 筆庫存明細？`,
+      "",
+      targetLines,
+      "",
+      "刪除後會直接重寫 Google Sheet 的雲端快照資料。",
+    ].join("\n"));
+    if (!confirmed) return;
+
+    if (button) button.textContent = "刪除中...";
+    const keptSnapshots = snapshots.filter((snapshot) => !targetIds.has(snapshot.snapshotId));
+    const keptPositions = positions.filter((row) => !targetIds.has(row.snapshotId));
+
+    await clearSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    await clearSheetValues(SHEET_NAMES.positions, "A2:J");
+    if (keptSnapshots.length) {
+      await updateSheetValues(SHEET_NAMES.snapshots, "A2:H", keptSnapshots.map(snapshotToSheetRow));
+    }
+    if (keptPositions.length) {
+      await updateSheetValues(SHEET_NAMES.positions, "A2:J", keptPositions.map(positionToSheetRow));
+    }
+
+    await loadLatestCloudSnapshot(false);
+    alert(`已刪除 ${targets.length} 筆雲端快照。`);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "刪除雲端快照失敗");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "刪除快照";
+    }
+  }
 }
 
 async function cleanupDuplicateCloudSnapshots() {
