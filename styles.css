@@ -21,6 +21,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  overflow-x: hidden;
   font-family: "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif;
   background: var(--bg);
   color: var(--ink);
@@ -107,6 +108,7 @@ textarea {
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -134,8 +136,14 @@ textarea {
 .form-actions,
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.topbar-actions .button,
+.topbar-actions .file-button {
+  flex: 0 0 auto;
 }
 
 .button {
@@ -583,6 +591,36 @@ textarea {
   color: var(--blue);
 }
 
+.ocr-completeness {
+  display: grid;
+  gap: 4px;
+}
+
+.ocr-completeness strong {
+  font-size: 15px;
+}
+
+.ocr-completeness p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ocr-completeness.warning {
+  border-color: #dec9a9;
+  background: #fff8ec;
+}
+
+.ocr-completeness.warning strong {
+  color: var(--amber);
+}
+
+.ocr-completeness.complete {
+  border-color: #b8d7c3;
+  background: #f4fbf6;
+}
+
 .meter {
   height: 10px;
   border-radius: 999px;
@@ -660,6 +698,7 @@ textarea {
   width: 100%;
   overflow: auto;
   margin-top: 8px;
+  overscroll-behavior-x: contain;
 }
 
 .column-crops {
@@ -1253,6 +1292,10 @@ textarea {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
+
+  .market-water-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1265,7 +1308,8 @@ textarea {
     width: 100%;
   }
 
-  .topbar-actions .button {
+  .topbar-actions .button,
+  .topbar-actions .file-button {
     flex: 1;
   }
 
@@ -1290,6 +1334,11 @@ textarea {
   .market-water-grid,
   .market-water-main {
     grid-template-columns: 1fr;
+  }
+
+  .capture-panel,
+  .detail-panel {
+    inset: 8px;
   }
 
   .water-cost-row {
@@ -1320,6 +1369,37 @@ textarea {
 }
 
 @media (max-width: 520px) {
+  .topbar {
+    padding: 14px;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .topbar-actions .button,
+  .topbar-actions .file-button,
+  .topbar-actions .file-button .button {
+    width: 100%;
+  }
+
+  .capture-panel,
+  .detail-panel {
+    inset: 4px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .capture-panel .section-heading {
+    padding-top: 50px;
+  }
+
+  .dashboard-card,
+  .library-panel {
+    padding: 12px;
+  }
+
   .field-grid,
   .detail-grid,
   .metric-grid {
@@ -1328,5 +1408,23 @@ textarea {
 
   .entry-list {
     grid-template-columns: 1fr;
+  }
+
+  .drop-zone {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .market-water-main strong,
+  .metric strong {
+    font-size: 24px;
+  }
+
+  .share-matrix table {
+    min-width: 620px;
+  }
+
+  .parsed-table {
+    min-width: 900px;
   }
 }

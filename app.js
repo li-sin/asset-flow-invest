@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.0";
-const APP_VERSION_NOTE = "布局差異";
+const APP_VERSION = "v0.13.1";
+const APP_VERSION_NOTE = "圈數檢查";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -594,6 +594,8 @@ async function saveEntry(event) {
     columnCrops: image.columnCrops || [],
     rowCrops: image.rowCrops || [],
     skippedRowCrops: image.skippedRowCrops || [],
+    completeCircleCount: image.completeCircleCount || 0,
+    missingRowCount: image.missingRowCount || 0,
   }));
 
   await txStore("readwrite", (store) => {
@@ -638,6 +640,7 @@ function openDetail(id) {
         <button class="button primary" type="button" data-action="save-cloud-snapshot">存到 Google Sheet</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
       </div>
+      ${renderOcrCompleteness(entry.completeCircleCount || 0, (entry.parsedRows || []).length || parseHoldings(entry.text || "").length, entry.missingRowCount || 0, "detail")}
       ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-grid">
         <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
@@ -715,8 +718,17 @@ async function ensureTesseract() {
 
 async function recognizeImage(image, onProgress, options = {}) {
   const startedAt = performance.now();
+  const baseImage = await prepareImageForOcr(image, { ...options, maskEditButtons: false });
+  const completeMarkers = options.columnOcr ? await detectCompleteCircleMarkers(baseImage.dataUrl) : { count: 0, markers: [] };
+  const imageForOcr = options.maskEditButtons
+    ? {
+      ...baseImage,
+      dataUrl: await maskArkEditButtons(baseImage.dataUrl),
+      type: "image/png",
+      maskedForOcr: true,
+    }
+    : baseImage;
   await ensureTesseract();
-  const imageForOcr = await prepareImageForOcr(image, options);
 
   const attempts = [
     { lang: "chi_tra+eng", label: "繁中/英文" },
@@ -745,6 +757,7 @@ async function recognizeImage(image, onProgress, options = {}) {
     const fullRows = parseHoldings(full.text);
     const rows = rowRows.length ? dedupeRows(rowRows) : [];
     const rowText = renderRowOcrText(rowResult);
+    const missingRowCount = completeMarkers.count ? Math.max(0, completeMarkers.count - rows.length) : 0;
 
     return {
       text: [full.text.trim(), rowText].filter(Boolean).join("\n\n--- 橫列 OCR ---\n\n"),
@@ -755,6 +768,9 @@ async function recognizeImage(image, onProgress, options = {}) {
       rowCrops: rowResult.crops || [],
       skippedRowCrops: rowResult.skipped || [],
       fallbackRows: fullRows,
+      completeCircleCount: completeMarkers.count,
+      completeCircleMarkers: completeMarkers.markers,
+      missingRowCount,
     };
   }
 
@@ -942,6 +958,85 @@ async function detectArkRowSeparators(image) {
     .filter((y, index, items) => index === 0 || y - items[index - 1] >= minGap);
 
   return separators;
+}
+
+async function detectCompleteCircleMarkers(dataUrl) {
+  const image = await loadImage(dataUrl);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, width, height).data;
+  const xStart = Math.round(width * 0.012);
+  const xEnd = Math.round(width * 0.092);
+  const yStart = Math.round(height * 0.18);
+  const yEnd = Math.round(height * 0.88);
+  const rowScores = [];
+
+  for (let y = yStart; y < yEnd; y += 1) {
+    let active = 0;
+    for (let x = xStart; x < xEnd; x += 1) {
+      const index = (y * width + x) * 4;
+      const red = imageData[index];
+      const green = imageData[index + 1];
+      const blue = imageData[index + 2];
+      const brightness = (red + green + blue) / 3;
+      const spread = Math.max(red, green, blue) - Math.min(red, green, blue);
+      const isColorMarker = spread > 22 && brightness > 35 && brightness < 245;
+      const isDarkMarker = spread <= 22 && brightness > 30 && brightness < 185;
+      const isGrayMarker = spread <= 18 && brightness >= 185 && brightness < 224;
+      const isMarker = isColorMarker || isDarkMarker || isGrayMarker;
+      if (isMarker) active += 1;
+    }
+    rowScores.push({ y, active });
+  }
+
+  const threshold = Math.max(4, Math.round((xEnd - xStart) * 0.09));
+  const bands = [];
+  let current = [];
+  for (const score of rowScores) {
+    if (score.active >= threshold) {
+      current.push(score);
+      continue;
+    }
+    if (current.length) {
+      bands.push(current);
+      current = [];
+    }
+  }
+  if (current.length) bands.push(current);
+
+  const minHeight = height * 0.016;
+  const maxHeight = height * 0.08;
+  const markers = bands.map((band) => {
+    const top = band[0].y;
+    const bottom = band[band.length - 1].y;
+    const maxActive = Math.max(...band.map((item) => item.active));
+    return {
+      top,
+      bottom,
+      centerY: Math.round((top + bottom) / 2),
+      height: bottom - top + 1,
+      maxActive,
+    };
+  }).filter((marker) => marker.height >= minHeight && marker.height <= maxHeight);
+
+  const deduped = [];
+  const minGap = height * 0.035;
+  for (const marker of markers) {
+    const previous = deduped[deduped.length - 1];
+    if (previous && marker.centerY - previous.centerY < minGap) {
+      if (marker.maxActive > previous.maxActive) deduped[deduped.length - 1] = marker;
+      continue;
+    }
+    deduped.push(marker);
+  }
+
+  return { count: deduped.length, markers: deduped };
 }
 
 function extractNumbersAfterHolding(text) {
@@ -1137,6 +1232,8 @@ async function parseDraftImages() {
         image.columnCrops = result.columnCrops || [];
         image.rowCrops = result.rowCrops || [];
         image.skippedRowCrops = result.skippedRowCrops || [];
+        image.completeCircleCount = result.completeCircleCount || 0;
+        image.missingRowCount = result.missingRowCount || 0;
       }
     }
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
@@ -1146,9 +1243,16 @@ async function parseDraftImages() {
     const columnCrops = state.draftImages.flatMap((image) => image.columnCrops || []);
     const rowCrops = state.draftImages.flatMap((image) => image.rowCrops || []);
     const skippedRowCrops = state.draftImages.flatMap((image) => image.skippedRowCrops || []);
-    els.parsePreview.innerHTML = renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops);
+    const expectedRows = state.draftImages.reduce((sum, image) => sum + (image.completeCircleCount || 0), 0);
+    const missingRows = expectedRows ? Math.max(0, expectedRows - parsedRows.length) : 0;
+    els.parsePreview.innerHTML = [
+      renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft"),
+      renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops),
+    ].join("");
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
-    setOcrStatus(parsedRows.length ? `完成，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(elapsed)}）` : `完成，未抓到庫存列（${formatDuration(elapsed)}）`);
+    const countText = expectedRows ? `完整圈 ${expectedRows} 個，` : "";
+    const missingText = missingRows ? `，可能少 ${missingRows} 筆` : "";
+    setOcrStatus(parsedRows.length ? `完成，${countText}抓到 ${parsedRows.length} 筆候選庫存${missingText}（${formatDuration(elapsed)}）` : `完成，${countText}未抓到庫存列${missingText}（${formatDuration(elapsed)}）`);
   } catch (error) {
     console.error(error);
     setOcrStatus("解析失敗");
@@ -1179,6 +1283,8 @@ async function parseExistingEntry(id) {
     entry.columnCrops = result.columnCrops || [];
     entry.rowCrops = result.rowCrops || [];
     entry.skippedRowCrops = result.skippedRowCrops || [];
+    entry.completeCircleCount = result.completeCircleCount || 0;
+    entry.missingRowCount = result.missingRowCount || 0;
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
     render();
@@ -1572,6 +1678,19 @@ function renderOcrTiming(entry) {
   const cropLabel = entry.rowOcrMs ? "橫列" : "欄位";
   const columnText = cropMs ? `，${cropLabel} ${formatDuration(cropMs)}` : "";
   return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
+}
+
+function renderOcrCompleteness(expectedRows, parsedRows, missingRows, context) {
+  if (!expectedRows) return "";
+  const complete = missingRows <= 0;
+  const className = `${context === "detail" ? "detail-field" : "parsed-card"} ocr-completeness ${complete ? "complete" : "warning"}`;
+  return `
+    <div class="${className}">
+      <span>完整圈數檢查</span>
+      <strong>${complete ? "解析筆數符合" : `可能少 ${missingRows} 筆`}</strong>
+      <p>截圖前方完整圓圈 ${expectedRows} 個，目前解析 ${parsedRows} 筆。</p>
+    </div>
+  `;
 }
 
 function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrops = [], skippedRowCrops = []) {
