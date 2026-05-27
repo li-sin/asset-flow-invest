@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.11.2";
-const APP_VERSION_NOTE = "建議水位";
+const APP_VERSION = "v0.11.3";
+const APP_VERSION_NOTE = "歷史水位";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -23,6 +23,7 @@ const SHEET_SYNC_CONFIG_KEY = "assetflow_invest_sheet_sync";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
   positions: "AssetFlowPositions",
+  levels: "水位",
 };
 const SHEET_HEADERS = {
   snapshots: ["snapshot_id", "created_at", "date", "market", "source_entry_id", "source_title", "row_count", "app_version"],
@@ -59,6 +60,7 @@ const state = {
     positions: [],
   },
   targetLevels: loadTargetLevels(),
+  targetLevelHistory: [],
   auth: {
     signedIn: false,
     authorized: false,
@@ -319,9 +321,11 @@ function saveTargetLevels() {
   localStorage.setItem(TARGET_LEVEL_STORAGE_KEY, JSON.stringify(state.targetLevels));
 }
 
-function targetLevelForSymbol(symbol) {
+function targetLevelForSymbol(symbol, snapshotDate = "") {
   const value = state.targetLevels[String(symbol || "").trim()];
-  return Number.isFinite(value) ? value : null;
+  if (Number.isFinite(value)) return value;
+  const sheetValue = targetLevelFromHistory(symbol, snapshotDate);
+  return sheetValue === null ? null : sheetValue;
 }
 
 function updateTargetLevel(symbol, value) {
@@ -341,6 +345,114 @@ function updateTargetLevel(symbol, value) {
   state.targetLevels[key] = number;
   saveTargetLevels();
   return true;
+}
+
+function normalizeHeaderText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[：:_-]/g, "");
+}
+
+function findHeaderIndex(headers, candidates) {
+  const normalized = headers.map(normalizeHeaderText);
+  return normalized.findIndex((header) => candidates.some((candidate) => header.includes(normalizeHeaderText(candidate))));
+}
+
+function findTargetLevelIndex(headers) {
+  const preferred = findHeaderIndex(headers, ["方舟建議水位", "建議水位", "目標水位", "建議%", "targetlevel", "target"]);
+  return preferred >= 0 ? preferred : findHeaderIndex(headers, ["水位"]);
+}
+
+function normalizeDateText(value) {
+  const text = String(value || "").trim();
+  const matched = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (matched) {
+    return [
+      matched[1],
+      matched[2].padStart(2, "0"),
+      matched[3].padStart(2, "0"),
+    ].join("-");
+  }
+  const shortMatched = text.match(/^(\d{1,2})[/-](\d{1,2})$/);
+  if (shortMatched) {
+    return [
+      today().slice(0, 4),
+      shortMatched[1].padStart(2, "0"),
+      shortMatched[2].padStart(2, "0"),
+    ].join("-");
+  }
+  return text;
+}
+
+function parsePercentValue(value) {
+  const text = String(value ?? "").replace("％", "%").trim();
+  const number = Number(text.replace("%", "").replace(/,/g, ""));
+  return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
+}
+
+function looksLikePercent(value) {
+  const text = String(value ?? "").replace("％", "%").trim();
+  return text.includes("%") || (parsePercentValue(text) !== null && !isTwSymbol(text));
+}
+
+function inferLevelRow(row) {
+  const symbolIndex = row.findIndex((value) => isTwSymbol(String(value || "").trim()));
+  if (symbolIndex < 0) return null;
+  const targetIndex = row.findIndex((value, index) => index !== symbolIndex && looksLikePercent(value));
+  if (targetIndex < 0) return null;
+  const dateValue = row.find((value, index) => index !== symbolIndex && index !== targetIndex && /\d{1,4}[/-]\d{1,2}/.test(String(value || ""))) || "";
+  return {
+    date: normalizeDateText(dateValue),
+    symbol: normalizeSymbolInput(row[symbolIndex]),
+    targetLevel: parsePercentValue(row[targetIndex]),
+    source: "水位",
+  };
+}
+
+function parseTargetLevelRows(values) {
+  if (!values?.length) return [];
+  const headers = values[0] || [];
+  const dateIndex = findHeaderIndex(headers, ["date", "日期", "時間", "快照日期", "建立日期", "更新日期"]);
+  const symbolIndex = findHeaderIndex(headers, ["symbol", "代號", "股票代號", "證券代號", "股號"]);
+  const targetIndex = findTargetLevelIndex(headers);
+  const hasUsableHeader = symbolIndex >= 0 && targetIndex >= 0;
+  const rows = hasUsableHeader ? values.slice(1) : values;
+
+  return rows.map((row) => {
+    if (!hasUsableHeader) return inferLevelRow(row);
+    const symbol = normalizeSymbolInput(row[symbolIndex]);
+    const targetLevel = parsePercentValue(row[targetIndex]);
+    if (!isTwSymbol(symbol) || targetLevel === null) return null;
+    return {
+      date: normalizeDateText(dateIndex >= 0 ? row[dateIndex] : ""),
+      symbol,
+      targetLevel,
+      source: "水位",
+    };
+  }).filter(Boolean);
+}
+
+async function loadTargetLevelHistory() {
+  try {
+    const values = await readCloudSheetValues(SHEET_NAMES.levels, "A1:Z");
+    state.targetLevelHistory = parseTargetLevelRows(values)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  } catch (error) {
+    console.warn("target level history", error);
+    state.targetLevelHistory = [];
+  }
+}
+
+function targetLevelFromHistory(symbol, snapshotDate = "") {
+  const key = String(symbol || "").trim();
+  const normalizedDate = normalizeDateText(snapshotDate);
+  const candidates = (state.targetLevelHistory || [])
+    .filter((item) => item.symbol === key)
+    .filter((item) => !normalizedDate || !item.date || item.date <= normalizedDate)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return candidates[0]?.targetLevel ?? null;
 }
 
 function filteredEntries() {
@@ -2217,6 +2329,7 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
     const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
+    await loadTargetLevelHistory();
     state.cloudHistory = { snapshots, positions };
     if (!snapshots.length) {
       state.cloudSnapshot = null;
@@ -2333,7 +2446,7 @@ function renderCloudSnapshot() {
       weight: totalCost ? (estimatedCost(row) / totalCost) * 100 : 0,
     }))
     .map((row) => {
-      const targetLevel = targetLevelForSymbol(row.symbol);
+      const targetLevel = targetLevelForSymbol(row.symbol, cloud.snapshot.date);
       return {
         ...row,
         targetLevel,
@@ -2425,13 +2538,17 @@ function renderCloudSnapshot() {
         <span>雲端快照</span>
         <strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong>
       </div>
+      <div class="metric">
+        <span>歷史建議水位</span>
+        <strong>${formatNumber(state.targetLevelHistory.length)}</strong>
+      </div>
     </div>
 
     <div class="dashboard-grid">
       <section class="dashboard-card">
         <div class="card-heading">
           <h3>水位分布</h3>
-          <span>以股數 × 成交均價估算</span>
+          <span>建議值讀取 Google Sheet「水位」tab，可手動覆蓋</span>
         </div>
         <div class="allocation-chart">${allocationBars || "<p class=\"muted-text\">沒有可顯示的庫存。</p>"}</div>
       </section>
