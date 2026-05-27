@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.10";
-const APP_VERSION_NOTE = "候補截取線";
+const APP_VERSION = "v0.13.11";
+const APP_VERSION_NOTE = "多圖截取線";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1398,13 +1398,19 @@ async function parseDraftImages() {
       });
       if (result.needsRowLineReview) {
         image.pendingRowLineReview = result.rowLineReview;
+        image.rowLineReview = result.rowLineReview;
         image.expectedTotalCount = result.expectedTotalCount || 0;
         image.completeCircleCount = result.completeCircleCount || 0;
-        els.text.value = result.text.trim();
-        els.parsePreview.innerHTML = renderRowLineReview(result.rowLineReview, index);
-        bindRowLineReviewControls(index);
-        setOcrStatus(`需要調整截取線：紅圈 ${image.completeCircleCount} 個，偵測到 ${result.rowLineReview.detectedLines} 條線，應為 ${result.rowLineReview.expectedLines} 條`);
-        return;
+        texts.push(result.text.trim());
+        if (state.draftImages.length === 1) {
+          els.text.value = result.text.trim();
+          els.parsePreview.innerHTML = renderRowLineReview(result.rowLineReview, index);
+          bindRowLineReviewControls(index);
+          renderRowLineApplyAction();
+          setOcrStatus(`需要調整截取線：紅圈 ${image.completeCircleCount} 個，偵測到 ${result.rowLineReview.detectedLines} 條線，應為 ${result.rowLineReview.expectedLines} 條`);
+          return;
+        }
+        continue;
       }
       texts.push(result.text.trim());
       if (Array.isArray(result.rows)) {
@@ -1450,6 +1456,7 @@ async function parseDraftImages() {
       state.draftImages.forEach((image, imageIndex) => {
         if (image.rowLineReview?.imageDataUrl) bindRowLineReviewControls(imageIndex);
       });
+      renderRowLineApplyAction();
     }
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
@@ -1490,11 +1497,18 @@ function renderRowLineReview(review, imageIndex) {
           </label>
         `).join("")}
       </div>
-      <div class="form-actions">
-        <button id="apply-row-lines" class="button primary" type="button" data-image-index="${imageIndex}">用截取線擷取</button>
-      </div>
     </section>
   `;
+}
+
+function renderRowLineApplyAction() {
+  if (!els.parsePreview.querySelector("[data-row-line-review]")) return;
+  if (els.parsePreview.querySelector("[data-row-line-apply-all]")) return;
+  const actions = document.createElement("div");
+  actions.className = "row-line-global-actions";
+  actions.innerHTML = '<button class="button primary" type="button" data-row-line-apply-all>用截取線擷取</button>';
+  els.parsePreview.appendChild(actions);
+  actions.querySelector("[data-row-line-apply-all]")?.addEventListener("click", parseDraftImagesWithRowLines);
 }
 
 function buildExtraRowLinePercents(lines, count) {
@@ -1523,7 +1537,79 @@ function bindRowLineReviewControls(imageIndex) {
       if (overlay) overlay.style.top = `${input.value}%`;
     });
   });
-  container.querySelector("#apply-row-lines")?.addEventListener("click", () => parseDraftImageWithRowLines(imageIndex));
+}
+
+function collectDraftRowLinePercents() {
+  return [...els.parsePreview.querySelectorAll("[data-row-line-review]")]
+    .map((container) => {
+      const imageIndex = Number(container.dataset.rowLineReview);
+      const linePercents = [...container.querySelectorAll("[data-row-line-input]")]
+        .map((input) => Number(input.value))
+        .filter(Number.isFinite);
+      return Number.isInteger(imageIndex) && linePercents.length ? { imageIndex, linePercents } : null;
+    })
+    .filter(Boolean);
+}
+
+async function parseDraftImagesWithRowLines() {
+  const calibrations = collectDraftRowLinePercents();
+  if (!calibrations.length) return;
+  const button = els.parsePreview.querySelector("[data-row-line-apply-all]");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "擷取中...";
+  }
+  setOcrStatus("使用調整後截取線解析所有圖片中...");
+  try {
+    const resultTextParts = [];
+    for (let order = 0; order < calibrations.length; order += 1) {
+      const { imageIndex, linePercents } = calibrations[order];
+      const image = state.draftImages[imageIndex];
+      if (!image) continue;
+      const result = await recognizeImage(image, (progress, mode) => {
+        setOcrStatus(`截取線解析 ${order + 1}/${calibrations.length}：${progress}%（${mode}）`);
+      }, {
+        maskEditButtons: els.kind.value === "ark_position",
+        columnOcr: els.kind.value === "ark_position",
+        rowLinePercents: linePercents,
+      });
+      image.pendingRowLineReview = null;
+      image.parsedRows = result.rows || [];
+      image.ocrElapsedMs = result.elapsedMs;
+      image.rowOcrMs = result.rowOcrMs;
+      image.rowCrops = result.rowCrops || [];
+      image.skippedRowCrops = result.skippedRowCrops || [];
+      image.expectedTotalCount = result.expectedTotalCount || image.expectedTotalCount || 0;
+      image.completeCircleCount = result.completeCircleCount || image.completeCircleCount || 0;
+      image.missingRowCount = result.missingRowCount || 0;
+      image.rowLineReview = result.rowLineReview || image.rowLineReview || null;
+      resultTextParts.push(result.text.trim());
+    }
+
+    const combinedText = resultTextParts.filter(Boolean).join("\n\n---\n\n");
+    els.text.value = combinedText;
+    const rows = state.draftImages.flatMap((image) => image.parsedRows || []);
+    const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value);
+    const rowCrops = state.draftImages.flatMap((image) => image.rowCrops || []);
+    const skippedRowCrops = state.draftImages.flatMap((image) => image.skippedRowCrops || []);
+    const expectedTotal = Math.max(...state.draftImages.map((image) => image.expectedTotalCount || 0), 0);
+    const expectedRows = expectedTotal || state.draftImages.reduce((sum, image) => sum + (image.completeCircleCount || 0), 0);
+    const missingRows = expectedRows ? Math.max(0, expectedRows - parsedRows.length) : 0;
+    els.parsePreview.innerHTML = [
+      renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
+      renderParsedRows(parsedRows, "draft", "", [], rowCrops, skippedRowCrops),
+    ].join("");
+    const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
+    setOcrStatus(`截圖解析完成，應有 ${expectedRows || "?"} 筆，目前解析 ${parsedRows.length} 筆${missingRows ? `，可能少 ${missingRows} 筆` : ""}（${formatDuration(elapsed)}）`);
+  } catch (error) {
+    console.error(error);
+    setOcrStatus("截取線解析失敗");
+    alert(error.message || "截取線解析失敗，請重新調整後再試。");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "用截取線擷取";
+    }
+  }
 }
 
 async function parseDraftImageWithRowLines(imageIndex) {
@@ -4149,8 +4235,10 @@ function bindEvents() {
 }
 
 let appDataLoaded = false;
+let authFlowInProgress = false;
 
 async function signInAndLoadApp() {
+  authFlowInProgress = true;
   if (els.authSignIn) {
     els.authSignIn.disabled = true;
     els.authSignIn.textContent = "登入中...";
@@ -4169,6 +4257,7 @@ async function signInAndLoadApp() {
     console.error(error);
     resetGoogleSession(error.message || "Google 登入失敗");
   } finally {
+    authFlowInProgress = false;
     renderAuthGate();
   }
 }
@@ -4189,6 +4278,7 @@ function registerServiceWorker() {
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshing) return;
+    if (authFlowInProgress || state.auth.signedIn || googleAccessToken) return;
     refreshing = true;
     window.location.reload();
   });

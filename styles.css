@@ -705,6 +705,16 @@ textarea {
   font-size: 12px;
 }
 
+.row-line-global-actions {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 0 0;
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0), var(--panel) 42%);
+}
+
 .meter {
   height: 10px;
   border-radius: 999px;
