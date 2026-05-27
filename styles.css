@@ -355,7 +355,7 @@ textarea {
 
 .allocation-row {
   display: grid;
-  grid-template-columns: minmax(120px, 0.95fr) minmax(120px, 1.4fr) 52px;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(120px, 1.2fr) 52px minmax(74px, 0.55fr) 64px;
   align-items: center;
   gap: 10px;
 }
@@ -382,6 +382,49 @@ textarea {
   color: var(--green-dark);
   font-size: 13px;
   text-align: right;
+}
+
+.allocation-row label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.target-level-input {
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.target-gap {
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 58px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.target-gap.neutral {
+  background: #edf0ed;
+  color: var(--muted);
+}
+
+.target-gap.balanced {
+  background: #e2f0e7;
+  color: var(--green-dark);
+}
+
+.target-gap.high {
+  background: #f7ead8;
+  color: var(--amber);
+}
+
+.target-gap.low {
+  background: #e6eef6;
+  color: var(--blue);
 }
 
 .meter {
@@ -1059,7 +1102,12 @@ textarea {
   }
 
   .allocation-row {
-    grid-template-columns: minmax(92px, 0.9fr) minmax(86px, 1fr) 48px;
+    grid-template-columns: minmax(96px, 0.8fr) minmax(86px, 1fr) 48px;
+  }
+
+  .allocation-row label,
+  .allocation-row .target-gap {
+    grid-column: 2 / -1;
   }
 
   .toolbar {

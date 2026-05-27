@@ -1,8 +1,9 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.11.1";
-const APP_VERSION_NOTE = "重複快照清理";
+const APP_VERSION = "v0.11.2";
+const APP_VERSION_NOTE = "建議水位";
+const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -57,6 +58,7 @@ const state = {
     snapshots: [],
     positions: [],
   },
+  targetLevels: loadTargetLevels(),
   auth: {
     signedIn: false,
     authorized: false,
@@ -299,6 +301,46 @@ function statusLabel(status) {
 
 function marketLabel(market) {
   return { TW: "台股", US: "美股", ALL: "全部" }[market] || market;
+}
+
+function loadTargetLevels() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TARGET_LEVEL_STORAGE_KEY) || "{}");
+    return Object.fromEntries(Object.entries(parsed)
+      .map(([symbol, value]) => [String(symbol).trim(), Number(value)])
+      .filter(([symbol, value]) => symbol && Number.isFinite(value)));
+  } catch (error) {
+    console.warn("target levels", error);
+    return {};
+  }
+}
+
+function saveTargetLevels() {
+  localStorage.setItem(TARGET_LEVEL_STORAGE_KEY, JSON.stringify(state.targetLevels));
+}
+
+function targetLevelForSymbol(symbol) {
+  const value = state.targetLevels[String(symbol || "").trim()];
+  return Number.isFinite(value) ? value : null;
+}
+
+function updateTargetLevel(symbol, value) {
+  const key = String(symbol || "").trim();
+  if (!key) return false;
+  const text = String(value ?? "").replace("%", "").trim();
+  if (!text) {
+    delete state.targetLevels[key];
+    saveTargetLevels();
+    return true;
+  }
+  const number = Number(text);
+  if (!Number.isFinite(number) || number < 0 || number > 100) {
+    alert("建議水位請輸入 0 到 100 的百分比");
+    return false;
+  }
+  state.targetLevels[key] = number;
+  saveTargetLevels();
+  return true;
 }
 
 function filteredEntries() {
@@ -2227,6 +2269,12 @@ function formatPercent(value) {
   return `${number.toFixed(1)}%`;
 }
 
+function formatSignedPercent(value) {
+  const number = Number(value || 0);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toFixed(1)}%`;
+}
+
 function snapshotPositions(snapshotId) {
   return (state.cloudHistory.positions || []).filter((row) => row.snapshotId === snapshotId);
 }
@@ -2247,6 +2295,13 @@ function snapshotMetrics(snapshot) {
 function widthPercent(value, max) {
   if (!value || !max) return 0;
   return Math.max(2, Math.min(100, (value / max) * 100));
+}
+
+function targetGapClass(gap, hasTarget) {
+  if (!hasTarget) return "neutral";
+  if (gap > 0.5) return "high";
+  if (gap < -0.5) return "low";
+  return "balanced";
 }
 
 function renderCloudSnapshot() {
@@ -2277,6 +2332,14 @@ function renderCloudSnapshot() {
       cost: estimatedCost(row),
       weight: totalCost ? (estimatedCost(row) / totalCost) * 100 : 0,
     }))
+    .map((row) => {
+      const targetLevel = targetLevelForSymbol(row.symbol);
+      return {
+        ...row,
+        targetLevel,
+        gap: targetLevel === null ? null : row.weight - targetLevel,
+      };
+    })
     .sort((a, b) => b.cost - a.cost);
   const history = (state.cloudHistory.snapshots || [])
     .slice(0, 10)
@@ -2292,6 +2355,10 @@ function renderCloudSnapshot() {
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
       <td>${escapeHtml(formatPercent(row.weight))}</td>
+      <td>
+        <input class="target-level-input" data-target-level-symbol="${escapeHtml(row.symbol)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(row.targetLevel ?? "")}" aria-label="${escapeHtml(row.symbol)} 建議水位">
+      </td>
+      <td><span class="target-gap ${targetGapClass(row.gap, row.targetLevel !== null)}">${row.targetLevel === null ? "未設定" : escapeHtml(formatSignedPercent(row.gap))}</span></td>
     </tr>
   `).join("");
   const allocationBars = topAllocation.map((row) => `
@@ -2304,6 +2371,11 @@ function renderCloudSnapshot() {
         <span style="width: ${widthPercent(row.cost, maxCost)}%"></span>
       </div>
       <b>${formatPercent(row.weight)}</b>
+      <label>
+        建議
+        <input class="target-level-input" data-target-level-symbol="${escapeHtml(row.symbol)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(row.targetLevel ?? "")}">
+      </label>
+      <em class="target-gap ${targetGapClass(row.gap, row.targetLevel !== null)}">${row.targetLevel === null ? "未設定" : escapeHtml(formatSignedPercent(row.gap))}</em>
     </div>
   `).join("");
   const trendBars = history.map((item) => `
@@ -2407,6 +2479,8 @@ function renderCloudSnapshot() {
               <th>股數</th>
               <th>成交均價</th>
               <th>水位</th>
+              <th>建議水位</th>
+              <th>差距</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -2416,6 +2490,13 @@ function renderCloudSnapshot() {
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
+  els.cloudSnapshot.querySelectorAll("[data-target-level-symbol]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (updateTargetLevel(input.dataset.targetLevelSymbol, input.value)) {
+        renderCloudSnapshot();
+      }
+    });
+  });
   renderSummaryLine();
 }
 
