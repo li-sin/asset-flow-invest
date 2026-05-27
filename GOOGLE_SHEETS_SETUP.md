@@ -1,6 +1,6 @@
 # AssetFlow Invest Google Sheets Sync
 
-AssetFlow Invest v0.10.1 起改為必須先使用 Google 帳號登入，才會顯示主畫面與讀取雲端庫存。`2026 Invest` 不需要開啟「知道連結的人可檢視」；建議只分享給自己的 Google 帳號。
+AssetFlow Invest v0.11.0 起改為登入後自動載入雲端庫存儀表板，並仍須先使用 Google 帳號登入才會顯示主畫面。`2026 Invest` 不需要開啟「知道連結的人可檢視」；建議只分享給自己的 Google 帳號。
 
 ## 需要準備
 

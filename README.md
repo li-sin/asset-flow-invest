@@ -8,7 +8,7 @@ Open `index.html` in a browser, or serve the folder with a static server.
 
 ## Google Access
 
-v0.10.1 keeps Google sign-in before the app shell is shown, includes the default Web OAuth Client ID, and fixes the allowed account to lovelisa00000@gmail.com. Screenshot details now open in a wide modal, and parsed position rows can be corrected for symbol, shares, and average cost before cloud merge. Cloud inventory reads and writes use the Google Sheets API with OAuth, so the `2026 Invest` sheet can stay private and shared only with the owner's Google account.
+v0.11.0 keeps Google sign-in before the app shell is shown, then automatically loads the latest cloud inventory into a dashboard-first home screen. Screenshot cards are now treated as the snapshot vault, while the dashboard shows current holdings, estimated cost water levels, recent snapshot trends, daily layout totals, and position details. Cloud inventory reads and writes use the Google Sheets API with OAuth, so the `2026 Invest` sheet can stay private and shared only with the owner's Google account.
 
 ## Privacy
 

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#2f7d5b">
   <title>AssetFlow Invest</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=0.10.1">
+  <link rel="stylesheet" href="./styles.css?v=0.11.0">
 </head>
 <body>
   <div id="app-shell" class="app-shell is-locked">
@@ -16,7 +16,7 @@
         <h2>使用 Google 帳號登入</h2>
         <p id="auth-status">請使用授權的 Google 帳號登入。</p>
         <p id="auth-email" class="auth-email"></p>
-        <p id="auth-version" class="auth-version">AssetFlow Invest v0.10.1</p>
+        <p id="auth-version" class="auth-version">AssetFlow Invest v0.11.0</p>
         <div class="auth-actions">
           <button id="auth-sign-in" class="button primary" type="button">使用 Google 登入</button>
           <button id="auth-settings" class="button secondary" type="button">設定 OAuth</button>
@@ -26,7 +26,7 @@
     <header class="topbar">
       <div>
         <h1>AssetFlow Invest</h1>
-        <p id="summary-line">0 張截圖</p>
+        <p id="summary-line">登入後自動載入雲端庫存</p>
       </div>
       <div class="topbar-actions">
         <button id="sync-latest" class="button secondary" type="button">重新整理雲端庫存</button>
@@ -44,9 +44,46 @@
     </header>
 
     <main class="workspace">
-      <section class="capture-panel" aria-label="新增截圖">
+      <section class="library-panel" aria-label="投資儀表板">
+        <div id="cloud-snapshot" class="cloud-snapshot" aria-live="polite"></div>
+
+        <section class="snapshot-section" aria-label="快照庫">
+          <div class="section-heading">
+            <div>
+              <p class="section-eyebrow">Snapshot vault</p>
+              <h2>快照庫</h2>
+            </div>
+            <p>用來保存每天庫存、水位與布局的原始截圖。</p>
+          </div>
+
+          <div class="toolbar">
+            <div class="segmented" role="tablist" aria-label="篩選">
+              <button class="segment is-active" type="button" data-filter="all">全部</button>
+              <button class="segment" type="button" data-filter="new">未整理</button>
+              <button class="segment" type="button" data-filter="reviewed">已確認</button>
+              <button class="segment" type="button" data-filter="imported">已匯入</button>
+            </div>
+            <input id="search-input" class="search" type="search" placeholder="搜尋代號或備註">
+          </div>
+
+          <div id="empty-state" class="empty-state">
+            <h2>還沒有快照</h2>
+            <p>新增第一張方舟或券商庫存畫面</p>
+          </div>
+
+          <div id="entry-list" class="entry-list"></div>
+        </section>
+      </section>
+
+      <section class="capture-panel" aria-label="新增快照">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-eyebrow">Capture</p>
+            <h2>新增快照</h2>
+          </div>
+        </div>
         <div class="notice">
-          App 會在你登入授權 Google 帳號後讀取最近一次庫存快照；截圖仍只存在這台裝置。
+          這裡主要用來保存方舟庫存截圖。確認後可合併存到 Google Sheet，儀表板會讀取最新雲端庫存。
         </div>
         <div id="drop-zone" class="drop-zone" tabindex="0">
           <div class="drop-mark">+</div>
@@ -121,30 +158,10 @@
           </div>
         </form>
       </section>
-
-      <section class="library-panel" aria-label="截圖清單">
-        <div class="toolbar">
-          <div class="segmented" role="tablist" aria-label="篩選">
-            <button class="segment is-active" type="button" data-filter="all">全部</button>
-            <button class="segment" type="button" data-filter="new">未整理</button>
-            <button class="segment" type="button" data-filter="reviewed">已確認</button>
-            <button class="segment" type="button" data-filter="imported">已匯入</button>
-          </div>
-          <input id="search-input" class="search" type="search" placeholder="搜尋代號或備註">
-        </div>
-
-        <div id="cloud-snapshot" class="cloud-snapshot"></div>
-        <div id="empty-state" class="empty-state">
-          <h2>還沒有截圖</h2>
-          <p>新增第一張方舟或券商畫面</p>
-        </div>
-
-        <div id="entry-list" class="entry-list"></div>
-      </section>
     </main>
 
     <footer class="app-footer">
-      <span id="app-version">AssetFlow Invest v0.10.1</span>
+      <span id="app-version">AssetFlow Invest v0.11.0</span>
     </footer>
 
     <aside id="detail-panel" class="detail-panel" aria-label="截圖內容">
@@ -153,6 +170,6 @@
     </aside>
   </div>
 
-  <script src="./app.js?v=0.10.1"></script>
+  <script src="./app.js?v=0.11.0"></script>
 </body>
 </html>

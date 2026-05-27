@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.10.1";
-const APP_VERSION_NOTE = "明細修正";
+const APP_VERSION = "v0.11.0";
+const APP_VERSION_NOTE = "儀表板首頁";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -52,6 +52,11 @@ const state = {
   filter: "all",
   query: "",
   cloudSnapshot: null,
+  cloudLoading: false,
+  cloudHistory: {
+    snapshots: [],
+    positions: [],
+  },
   auth: {
     signedIn: false,
     authorized: false,
@@ -314,9 +319,10 @@ function render() {
   const entries = filteredEntries();
   els.list.innerHTML = "";
   els.empty.classList.toggle("is-hidden", entries.length > 0);
-  els.summary.textContent = `${state.entries.length} 張截圖`;
+  renderSummaryLine();
 
   for (const entry of entries) {
+    const parsedCount = (entry.parsedRows || []).filter((row) => row.symbol).length;
     const card = document.createElement("article");
     card.className = "entry-card";
     card.tabIndex = 0;
@@ -331,7 +337,7 @@ function render() {
           <span class="chip ${entry.status}">${statusLabel(entry.status)}</span>
         </div>
         <h3>${escapeHtml(entry.title || "未命名截圖")}</h3>
-        <p>${escapeHtml(entry.text || entry.note || entry.date)}</p>
+        <p>${escapeHtml(parsedCount ? `${entry.date} · ${parsedCount} 筆庫存資料` : entry.text || entry.note || entry.date)}</p>
       </div>
     `;
     card.addEventListener("click", () => openDetail(entry.id));
@@ -343,6 +349,19 @@ function render() {
     });
     els.list.appendChild(card);
   }
+}
+
+function renderSummaryLine() {
+  if (!els.summary) return;
+  const positions = state.cloudSnapshot?.positions || [];
+  const date = state.cloudSnapshot?.snapshot?.date;
+  if (positions.length) {
+    els.summary.textContent = `${date || "最新"} · ${positions.length} 檔庫存 · ${state.entries.length} 張快照`;
+    return;
+  }
+  els.summary.textContent = state.auth.authorized
+    ? `尚未讀到雲端庫存 · ${state.entries.length} 張快照`
+    : "登入後自動載入雲端庫存";
 }
 
 function escapeHtml(value) {
@@ -2026,24 +2045,33 @@ function parsePositionRows(values) {
 }
 
 async function loadLatestCloudSnapshot(showAlert = true) {
+  state.cloudLoading = true;
+  renderCloudSnapshot();
   try {
     await ensureCloudSheetTables();
     const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
     const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
+    const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
+    state.cloudHistory = { snapshots, positions };
     if (!snapshots.length) {
       state.cloudSnapshot = null;
+      state.cloudLoading = false;
       renderCloudSnapshot();
       if (showAlert) alert("Google Sheet 目前還沒有庫存快照。");
       return;
     }
     const latest = snapshots[0];
-    const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
-    const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions)).filter((row) => row.snapshotId === latest.snapshotId);
-    state.cloudSnapshot = { snapshot: latest, positions };
+    const latestPositions = positions.filter((row) => row.snapshotId === latest.snapshotId);
+    state.cloudSnapshot = { snapshot: latest, positions: latestPositions };
+    state.cloudLoading = false;
     renderCloudSnapshot();
-    if (showAlert) alert(`已讀取雲端庫存：${positions.length} 筆`);
+    renderSummaryLine();
+    if (showAlert) alert(`已讀取雲端庫存：${latestPositions.length} 筆`);
   } catch (error) {
     console.error(error);
+    state.cloudLoading = false;
+    renderCloudSnapshot();
     if (showAlert) alert(error.message || "讀取 Google Sheet 失敗");
   }
 }
@@ -2055,43 +2083,214 @@ function stripHeaderRow(values, headers) {
   return sameHeader ? values.slice(1) : values;
 }
 
+function estimatedCost(row) {
+  const shares = Number(row?.shares || 0);
+  const avgCost = Number(row?.avgCost || 0);
+  return Number.isFinite(shares * avgCost) ? shares * avgCost : 0;
+}
+
+function formatNumber(value, digits = 0) {
+  const number = Number(value || 0);
+  return number.toLocaleString("zh-Hant-TW", {
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatMoney(value) {
+  return formatNumber(value, 0);
+}
+
+function formatPercent(value) {
+  const number = Number(value || 0);
+  return `${number.toFixed(1)}%`;
+}
+
+function snapshotPositions(snapshotId) {
+  return (state.cloudHistory.positions || []).filter((row) => row.snapshotId === snapshotId);
+}
+
+function snapshotMetrics(snapshot) {
+  const positions = snapshotPositions(snapshot.snapshotId);
+  const totalShares = positions.reduce((sum, row) => sum + Number(row.shares || 0), 0);
+  const totalCost = positions.reduce((sum, row) => sum + estimatedCost(row), 0);
+  return {
+    ...snapshot,
+    positions,
+    stockCount: positions.length,
+    totalShares,
+    totalCost,
+  };
+}
+
+function widthPercent(value, max) {
+  if (!value || !max) return 0;
+  return Math.max(2, Math.min(100, (value / max) * 100));
+}
+
 function renderCloudSnapshot() {
   if (!els.cloudSnapshot) return;
   const cloud = state.cloudSnapshot;
   if (!cloud?.snapshot) {
-    els.cloudSnapshot.innerHTML = "";
+    const title = state.cloudLoading ? "正在載入雲端庫存" : "登入後會自動載入目前庫存";
+    const body = state.cloudLoading
+      ? "正在讀取 Google Sheet 的最新快照與歷史資料。"
+      : "目前還沒有雲端快照。先把確認後的庫存截圖「合併存雲端」，這裡就會變成每天看庫存、水位和趨勢的首頁。";
+    els.cloudSnapshot.innerHTML = `
+      <div class="dashboard-empty">
+        <p class="section-eyebrow">Dashboard</p>
+        <h2>${escapeHtml(title)}</h2>
+        <p>${escapeHtml(body)}</p>
+      </div>
+    `;
+    renderSummaryLine();
     return;
   }
-  const rows = cloud.positions.map((row) => `
+  const positions = cloud.positions || [];
+  const totalShares = positions.reduce((sum, row) => sum + Number(row.shares || 0), 0);
+  const totalCost = positions.reduce((sum, row) => sum + estimatedCost(row), 0);
+  const maxCost = Math.max(...positions.map(estimatedCost), 0);
+  const allocationRows = positions
+    .map((row) => ({
+      ...row,
+      cost: estimatedCost(row),
+      weight: totalCost ? (estimatedCost(row) / totalCost) * 100 : 0,
+    }))
+    .sort((a, b) => b.cost - a.cost);
+  const history = (state.cloudHistory.snapshots || [])
+    .slice(0, 10)
+    .map(snapshotMetrics)
+    .reverse();
+  const maxHistoryCost = Math.max(...history.map((item) => item.totalCost), 0);
+  const maxHistoryShares = Math.max(...history.map((item) => item.totalShares), 0);
+  const topAllocation = allocationRows.slice(0, 8);
+  const rows = allocationRows.map((row) => `
     <tr>
       <td>${escapeHtml(row.symbol)}</td>
       <td>${escapeHtml(row.name)}</td>
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
+      <td>${escapeHtml(formatPercent(row.weight))}</td>
+    </tr>
+  `).join("");
+  const allocationBars = topAllocation.map((row) => `
+    <div class="allocation-row">
+      <div>
+        <strong>${escapeHtml(row.symbol)}</strong>
+        <span>${escapeHtml(row.name || "")}</span>
+      </div>
+      <div class="meter" aria-label="${escapeHtml(row.symbol)} 水位 ${formatPercent(row.weight)}">
+        <span style="width: ${widthPercent(row.cost, maxCost)}%"></span>
+      </div>
+      <b>${formatPercent(row.weight)}</b>
+    </div>
+  `).join("");
+  const trendBars = history.map((item) => `
+    <div class="trend-day">
+      <div class="trend-bars">
+        <span class="trend-cost" style="height: ${widthPercent(item.totalCost, maxHistoryCost)}%"></span>
+        <span class="trend-shares" style="height: ${widthPercent(item.totalShares, maxHistoryShares)}%"></span>
+      </div>
+      <small>${escapeHtml(item.date?.slice(5) || item.createdAt?.slice(5, 10) || "")}</small>
+    </div>
+  `).join("");
+  const dailyRows = history.slice().reverse().map((item) => `
+    <tr>
+      <td>${escapeHtml(item.date || "")}</td>
+      <td>${escapeHtml(formatNumber(item.stockCount))}</td>
+      <td>${escapeHtml(formatNumber(item.totalShares, 3))}</td>
+      <td>${escapeHtml(formatMoney(item.totalCost))}</td>
     </tr>
   `).join("");
   els.cloudSnapshot.innerHTML = `
-    <header>
+    <header class="dashboard-header">
       <div>
-        <h2>雲端庫存</h2>
+        <p class="section-eyebrow">Dashboard</p>
+        <h2>目前庫存</h2>
         <p>${escapeHtml(cloud.snapshot.date)} · ${marketLabel(cloud.snapshot.market)} · ${escapeHtml(cloud.snapshot.createdAt)}</p>
       </div>
-      <p>${cloud.positions.length} 筆</p>
+      <button id="dashboard-refresh" class="button secondary compact" type="button">重新整理</button>
     </header>
-    <div class="table-scroll">
-      <table class="parsed-table">
-        <thead>
-          <tr>
-            <th>代號</th>
-            <th>名稱</th>
-            <th>股數</th>
-            <th>成交均價</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+
+    <div class="metric-grid">
+      <div class="metric">
+        <span>庫存檔數</span>
+        <strong>${formatNumber(positions.length)}</strong>
+      </div>
+      <div class="metric">
+        <span>總股數</span>
+        <strong>${formatNumber(totalShares, 3)}</strong>
+      </div>
+      <div class="metric">
+        <span>估算投入成本</span>
+        <strong>${formatMoney(totalCost)}</strong>
+      </div>
+      <div class="metric">
+        <span>雲端快照</span>
+        <strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong>
+      </div>
     </div>
+
+    <div class="dashboard-grid">
+      <section class="dashboard-card">
+        <div class="card-heading">
+          <h3>水位分布</h3>
+          <span>以股數 × 成交均價估算</span>
+        </div>
+        <div class="allocation-chart">${allocationBars || "<p class=\"muted-text\">沒有可顯示的庫存。</p>"}</div>
+      </section>
+
+      <section class="dashboard-card">
+        <div class="card-heading">
+          <h3>近幾次快照趨勢</h3>
+          <span>綠色為成本，藍色為股數</span>
+        </div>
+        <div class="trend-chart">${trendBars || "<p class=\"muted-text\">尚無歷史快照。</p>"}</div>
+      </section>
+    </div>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>每日布局</h3>
+        <span>最近 ${history.length} 次雲端快照</span>
+      </div>
+      <div class="table-scroll compact-table">
+        <table class="parsed-table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>檔數</th>
+              <th>總股數</th>
+              <th>估算投入成本</th>
+            </tr>
+          </thead>
+          <tbody>${dailyRows}</tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>目前明細</h3>
+        <span>${positions.length} 筆庫存</span>
+      </div>
+      <div class="table-scroll compact-table">
+        <table class="parsed-table">
+          <thead>
+            <tr>
+              <th>代號</th>
+              <th>名稱</th>
+              <th>股數</th>
+              <th>成交均價</th>
+              <th>水位</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
   `;
+  els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  renderSummaryLine();
 }
 
 function exportBackup() {
