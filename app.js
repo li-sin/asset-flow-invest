@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.7";
-const APP_VERSION_NOTE = "總檔數完整性檢查";
+const APP_VERSION = "v0.13.8";
+const APP_VERSION_NOTE = "名稱反查代號";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1613,10 +1613,10 @@ function parseArkRowCropText(text, cropDataUrl, label) {
   const avgCost = normalizeArkAvgCost(rawAvgCost);
   if (shares === null || avgCost === null) return null;
 
-  const symbol = findKnownSymbolInText(normalized);
-  const officialName = lookupSymbolName(symbol);
   const beforeHolding = holdingIndex >= 0 ? normalized.slice(0, holdingIndex) : normalized;
   const ocrName = cleanArkNamePart(beforeHolding);
+  const symbol = findKnownSymbolInText(normalized) || findSymbolByOcrName(ocrName || normalized);
+  const officialName = lookupSymbolName(symbol);
 
   return {
     symbol,
@@ -1653,6 +1653,53 @@ function findKnownSymbolInText(text) {
   const compact = compactText(text).replace(/[^\dA-Za-z]/g, "").toUpperCase();
   const symbols = Object.keys(SYMBOL_NAMES).sort((a, b) => b.length - a.length);
   return symbols.find((symbol) => compact.includes(symbol)) || "";
+}
+
+function findSymbolByOcrName(text) {
+  const normalized = normalizeStockNameForMatch(text);
+  if (!normalized) return "";
+  const aliases = {
+    SO: "0053",
+    S0: "0053",
+    水: "2330",
+  };
+  if (aliases[normalized]) return aliases[normalized];
+  const entries = Object.entries(SYMBOL_NAMES)
+    .map(([symbol, name]) => ({ symbol, name, normalized: normalizeStockNameForMatch(name) }))
+    .sort((a, b) => b.normalized.length - a.normalized.length);
+  const exact = entries.find((item) => normalized.includes(item.normalized) || item.normalized.includes(normalized));
+  if (exact) return exact.symbol;
+  const scored = entries.map((item) => ({
+    ...item,
+    score: longestCommonSubsequenceLength(normalized, item.normalized) / Math.max(item.normalized.length, 1),
+  })).sort((a, b) => b.score - a.score);
+  return scored[0]?.score >= 0.72 ? scored[0].symbol : "";
+}
+
+function normalizeStockNameForMatch(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, "")
+    .replace(/[臺台]/g, "台")
+    .replace(/[脊驢]/g, "能")
+    .replace(/[寓]/g, "富")
+    .replace(/[一]/g, "5")
+    .toUpperCase();
+}
+
+function longestCommonSubsequenceLength(a, b) {
+  const previous = new Array(b.length + 1).fill(0);
+  const current = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = a[i - 1] === b[j - 1]
+        ? previous[j - 1] + 1
+        : Math.max(previous[j], current[j - 1]);
+    }
+    previous.splice(0, previous.length, ...current);
+    current.fill(0);
+  }
+  return previous[b.length] || 0;
 }
 
 function renderRowOcrText(result) {
