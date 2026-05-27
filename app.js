@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.8";
-const APP_VERSION_NOTE = "名稱反查代號";
+const APP_VERSION = "v0.13.9";
+const APP_VERSION_NOTE = "缺筆校準截取線";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -803,6 +803,7 @@ async function recognizeImage(image, onProgress, options = {}) {
       skippedRowCrops: rowResult.skipped || [],
       fallbackRows: fullRows,
       expectedTotalCount,
+      rowLineReview,
       completeCircleCount: completeMarkers.count,
       completeCircleMarkers: completeMarkers.markers,
       missingRowCount,
@@ -1415,6 +1416,7 @@ async function parseDraftImages() {
         image.rowCrops = result.rowCrops || [];
         image.skippedRowCrops = result.skippedRowCrops || [];
         image.expectedTotalCount = result.expectedTotalCount || 0;
+        image.rowLineReview = result.rowLineReview || null;
         image.completeCircleCount = result.completeCircleCount || 0;
         image.missingRowCount = result.missingRowCount || 0;
       }
@@ -1429,10 +1431,25 @@ async function parseDraftImages() {
     const expectedTotal = Math.max(...state.draftImages.map((image) => image.expectedTotalCount || 0), 0);
     const expectedRows = expectedTotal || state.draftImages.reduce((sum, image) => sum + (image.completeCircleCount || 0), 0);
     const missingRows = expectedRows ? Math.max(0, expectedRows - parsedRows.length) : 0;
+    const needsCalibration = missingRows > 0 && state.draftImages.some((image) => image.rowLineReview?.imageDataUrl);
+    const calibrationBlocks = needsCalibration
+      ? state.draftImages
+        .map((image, imageIndex) => image.rowLineReview?.imageDataUrl ? renderRowLineReview({
+          ...image.rowLineReview,
+          reason: `總檔數顯示 ${expectedRows} 檔，目前合併解析 ${parsedRows.length} 筆，可能少 ${missingRows} 筆。`,
+        }, imageIndex) : "")
+        .join("")
+      : "";
     els.parsePreview.innerHTML = [
       renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
       renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops),
+      calibrationBlocks,
     ].join("");
+    if (needsCalibration) {
+      state.draftImages.forEach((image, imageIndex) => {
+        if (image.rowLineReview?.imageDataUrl) bindRowLineReviewControls(imageIndex);
+      });
+    }
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
     const missingText = missingRows ? `，可能少 ${missingRows} 筆` : "";
@@ -1453,7 +1470,7 @@ function renderRowLineReview(review, imageIndex) {
     <section class="row-line-review" data-row-line-review="${imageIndex}">
       <div class="ocr-completeness warning">
         <strong>請先調整截取線</strong>
-        <p>紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。拖曳下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
+        <p>${escapeHtml(review.reason || `紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。`)}拖曳下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
       </div>
       <div class="row-line-stage">
         <img src="${review.imageDataUrl}" alt="截取線校準預覽">
