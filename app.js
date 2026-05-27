@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.6";
-const APP_VERSION_NOTE = "OCR 截取線校準";
+const APP_VERSION = "v0.13.7";
+const APP_VERSION_NOTE = "總檔數完整性檢查";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -651,7 +651,7 @@ function openDetail(id) {
         <button class="button primary" type="button" data-action="save-cloud-snapshot">存到 Google Sheet</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
       </div>
-      ${renderOcrCompleteness(entry.completeCircleCount || 0, (entry.parsedRows || []).length || parseHoldings(entry.text || "").length, entry.missingRowCount || 0, "detail")}
+      ${renderOcrCompleteness(entry.expectedTotalCount || entry.completeCircleCount || 0, (entry.parsedRows || []).length || parseHoldings(entry.text || "").length, entry.missingRowCount || 0, "detail", entry.expectedTotalCount ? "total" : "circle")}
       ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-grid">
         <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
@@ -750,6 +750,7 @@ async function recognizeImage(image, onProgress, options = {}) {
   const full = await recognizeDataUrl(imageForOcr.dataUrl, attempts, (progress, label) => {
     onProgress?.(progress, label);
   }, errors);
+  const expectedTotalCount = extractExpectedHoldingCount(full.text);
 
   if (full.text.trim()) {
     if (!options.columnOcr) {
@@ -773,6 +774,7 @@ async function recognizeImage(image, onProgress, options = {}) {
           fullText: full.text,
           fullMode: full.mode,
         },
+        expectedTotalCount,
         completeCircleCount: completeMarkers.count,
         completeCircleMarkers: completeMarkers.markers,
       };
@@ -788,7 +790,8 @@ async function recognizeImage(image, onProgress, options = {}) {
     const fullRows = parseHoldings(full.text);
     const rows = rowRows.length ? dedupeRows(rowRows) : [];
     const rowText = renderRowOcrText(rowResult);
-    const missingRowCount = completeMarkers.count ? Math.max(0, completeMarkers.count - rows.length) : 0;
+    const expectedCount = expectedTotalCount || completeMarkers.count || 0;
+    const missingRowCount = expectedCount ? Math.max(0, expectedCount - rows.length) : 0;
 
     return {
       text: [full.text.trim(), rowText].filter(Boolean).join("\n\n--- 橫列 OCR ---\n\n"),
@@ -799,6 +802,7 @@ async function recognizeImage(image, onProgress, options = {}) {
       rowCrops: rowResult.crops || [],
       skippedRowCrops: rowResult.skipped || [],
       fallbackRows: fullRows,
+      expectedTotalCount,
       completeCircleCount: completeMarkers.count,
       completeCircleMarkers: completeMarkers.markers,
       missingRowCount,
@@ -806,6 +810,23 @@ async function recognizeImage(image, onProgress, options = {}) {
   }
 
   throw new Error(`OCR 無法完成。${errors.join("；")}`);
+}
+
+function extractExpectedHoldingCount(text) {
+  const normalized = normalizeOcrText(text);
+  const compact = normalized.replace(/\s+/g, "");
+  const patterns = [
+    /總共(\d{1,3})檔/,
+    /共(\d{1,3})檔/,
+    /(\d{1,3})檔$/,
+  ];
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    if (!match) continue;
+    const count = Number(match[1]);
+    if (Number.isInteger(count) && count > 0 && count < 300) return count;
+  }
+  return 0;
 }
 
 async function recognizeDataUrl(dataUrl, attempts, onProgress, errors = []) {
@@ -1376,6 +1397,7 @@ async function parseDraftImages() {
       });
       if (result.needsRowLineReview) {
         image.pendingRowLineReview = result.rowLineReview;
+        image.expectedTotalCount = result.expectedTotalCount || 0;
         image.completeCircleCount = result.completeCircleCount || 0;
         els.text.value = result.text.trim();
         els.parsePreview.innerHTML = renderRowLineReview(result.rowLineReview, index);
@@ -1392,6 +1414,7 @@ async function parseDraftImages() {
         image.columnCrops = result.columnCrops || [];
         image.rowCrops = result.rowCrops || [];
         image.skippedRowCrops = result.skippedRowCrops || [];
+        image.expectedTotalCount = result.expectedTotalCount || 0;
         image.completeCircleCount = result.completeCircleCount || 0;
         image.missingRowCount = result.missingRowCount || 0;
       }
@@ -1403,14 +1426,15 @@ async function parseDraftImages() {
     const columnCrops = state.draftImages.flatMap((image) => image.columnCrops || []);
     const rowCrops = state.draftImages.flatMap((image) => image.rowCrops || []);
     const skippedRowCrops = state.draftImages.flatMap((image) => image.skippedRowCrops || []);
-    const expectedRows = state.draftImages.reduce((sum, image) => sum + (image.completeCircleCount || 0), 0);
+    const expectedTotal = Math.max(...state.draftImages.map((image) => image.expectedTotalCount || 0), 0);
+    const expectedRows = expectedTotal || state.draftImages.reduce((sum, image) => sum + (image.completeCircleCount || 0), 0);
     const missingRows = expectedRows ? Math.max(0, expectedRows - parsedRows.length) : 0;
     els.parsePreview.innerHTML = [
-      renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft"),
+      renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
       renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops),
     ].join("");
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
-    const countText = expectedRows ? `完整圈 ${expectedRows} 個，` : "";
+    const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
     const missingText = missingRows ? `，可能少 ${missingRows} 筆` : "";
     setOcrStatus(parsedRows.length ? `完成，${countText}抓到 ${parsedRows.length} 筆候選庫存${missingText}（${formatDuration(elapsed)}）` : `完成，${countText}未抓到庫存列${missingText}（${formatDuration(elapsed)}）`);
   } catch (error) {
@@ -1487,15 +1511,17 @@ async function parseDraftImageWithRowLines(imageIndex) {
     image.rowOcrMs = result.rowOcrMs;
     image.rowCrops = result.rowCrops || [];
     image.skippedRowCrops = result.skippedRowCrops || [];
+    image.expectedTotalCount = result.expectedTotalCount || 0;
     image.completeCircleCount = result.completeCircleCount || 0;
     image.missingRowCount = result.missingRowCount || 0;
     els.text.value = result.text.trim();
     const parsedRows = dedupeRows(image.parsedRows || []);
+    const expectedRows = image.expectedTotalCount || image.completeCircleCount || 0;
     els.parsePreview.innerHTML = [
-      renderOcrCompleteness(image.completeCircleCount || 0, parsedRows.length, Math.max(0, (image.completeCircleCount || 0) - parsedRows.length), "draft"),
+      renderOcrCompleteness(expectedRows, parsedRows.length, Math.max(0, expectedRows - parsedRows.length), "draft", image.expectedTotalCount ? "total" : "circle"),
       renderParsedRows(parsedRows, "draft", "", [], image.rowCrops || [], image.skippedRowCrops || []),
     ].join("");
-    setOcrStatus(`完成，完整圈 ${image.completeCircleCount || 0} 個，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(result.elapsedMs || 0)}）`);
+    setOcrStatus(`完成，${image.expectedTotalCount ? `總共 ${image.expectedTotalCount} 檔` : `完整圈 ${image.completeCircleCount || 0} 個`}，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(result.elapsedMs || 0)}）`);
   } catch (error) {
     console.error(error);
     setOcrStatus("解析失敗");
@@ -1528,6 +1554,7 @@ async function parseExistingEntry(id) {
     entry.columnCrops = result.columnCrops || [];
     entry.rowCrops = result.rowCrops || [];
     entry.skippedRowCrops = result.skippedRowCrops || [];
+    entry.expectedTotalCount = result.expectedTotalCount || 0;
     entry.completeCircleCount = result.completeCircleCount || 0;
     entry.missingRowCount = result.missingRowCount || 0;
     entry.updatedAt = new Date().toISOString();
@@ -1925,15 +1952,19 @@ function renderOcrTiming(entry) {
   return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
 }
 
-function renderOcrCompleteness(expectedRows, parsedRows, missingRows, context) {
+function renderOcrCompleteness(expectedRows, parsedRows, missingRows, context, source = "circle") {
   if (!expectedRows) return "";
   const complete = missingRows <= 0;
   const className = `${context === "detail" ? "detail-field" : "parsed-card"} ocr-completeness ${complete ? "complete" : "warning"}`;
+  const label = source === "total" ? "總檔數檢查" : "完整圈數檢查";
+  const body = source === "total"
+    ? `畫面顯示總共 ${expectedRows} 檔，目前解析 ${parsedRows} 筆。`
+    : `截圖前方完整圓圈 ${expectedRows} 個，目前解析 ${parsedRows} 筆。`;
   return `
     <div class="${className}">
-      <span>完整圈數檢查</span>
+      <span>${label}</span>
       <strong>${complete ? "解析筆數符合" : `可能少 ${missingRows} 筆`}</strong>
-      <p>截圖前方完整圓圈 ${expectedRows} 個，目前解析 ${parsedRows} 筆。</p>
+      <p>${body}</p>
     </div>
   `;
 }
