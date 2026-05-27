@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.12.0";
-const APP_VERSION_NOTE = "市場水位";
+const APP_VERSION = "v0.13.0";
+const APP_VERSION_NOTE = "布局差異";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -440,6 +440,17 @@ function parseTargetLevelRows(values) {
   if (!values?.length) return [];
   const headers = values[0] || [];
   const dateIndex = findHeaderIndex(headers, ["date", "日期", "時間", "快照日期", "建立日期", "更新日期"]);
+  const twLevelIndex = findHeaderIndex(headers, ["台股水位", "台股建議水位", "台股建議", "tw水位", "twtarget"]);
+  const usLevelIndex = findHeaderIndex(headers, ["美股水位", "美股建議水位", "美股建議", "us水位", "ustarget"]);
+  if (twLevelIndex >= 0 || usLevelIndex >= 0) {
+    return values.slice(1).flatMap((row) => {
+      const date = normalizeDateText(dateIndex >= 0 ? row[dateIndex] : "");
+      return [
+        twLevelIndex >= 0 ? { date, market: "TW", targetLevel: parsePercentValue(row[twLevelIndex]), source: "水位" } : null,
+        usLevelIndex >= 0 ? { date, market: "US", targetLevel: parsePercentValue(row[usLevelIndex]), source: "水位" } : null,
+      ].filter((item) => item && item.targetLevel !== null);
+    });
+  }
   const marketIndex = findHeaderIndex(headers, ["market", "市場", "股市", "類別", "地區"]);
   const targetIndex = findTargetLevelIndex(headers);
   const hasUsableHeader = marketIndex >= 0 && targetIndex >= 0;
@@ -2411,6 +2422,18 @@ function formatMoney(value) {
   return formatNumber(value, 0);
 }
 
+function formatSignedMoney(value) {
+  const number = Number(value || 0);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${formatMoney(number)}`;
+}
+
+function formatSignedNumber(value, digits = 3) {
+  const number = Number(value || 0);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${formatNumber(number, digits)}`;
+}
+
 function formatPercent(value) {
   const number = Number(value || 0);
   return `${number.toFixed(1)}%`;
@@ -2437,6 +2460,200 @@ function snapshotMetrics(snapshot) {
     totalShares,
     totalCost,
   };
+}
+
+function snapshotSortValue(snapshot) {
+  return `${snapshot.date || ""} ${snapshot.createdAt || ""} ${snapshot.snapshotId || ""}`;
+}
+
+function rowsBySymbol(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    if (!row.symbol) continue;
+    map.set(row.symbol, row);
+  }
+  return map;
+}
+
+function buildLayoutAnalysis() {
+  const orderedSnapshots = [...(state.cloudHistory.snapshots || [])]
+    .sort((a, b) => snapshotSortValue(a).localeCompare(snapshotSortValue(b)));
+  const previousByMarket = { TW: null, US: null };
+  const points = [];
+
+  for (const snapshot of orderedSnapshots) {
+    const snapshotRows = snapshotPositionsFromList(snapshot.snapshotId, state.cloudHistory.positions)
+      .map((row) => ({
+        ...row,
+        marketKey: marketForPosition(row),
+        cost: estimatedCost(row),
+      }));
+
+    for (const market of ["TW", "US"]) {
+      const rows = snapshotRows.filter((row) => row.marketKey === market);
+      const currentMap = rowsBySymbol(rows);
+      const previousMap = previousByMarket[market];
+      if (!rows.length && !previousMap) continue;
+
+      const deltas = [];
+      if (previousMap) {
+        const symbols = new Set([...previousMap.keys(), ...currentMap.keys()]);
+        for (const symbol of symbols) {
+          const current = currentMap.get(symbol);
+          const previous = previousMap.get(symbol);
+          const currentShares = Number(current?.shares || 0);
+          const previousShares = Number(previous?.shares || 0);
+          const deltaShares = currentShares - previousShares;
+          if (Math.abs(deltaShares) < 0.000001) continue;
+          const avgCost = Number(current?.avgCost || previous?.avgCost || 0);
+          deltas.push({
+            symbol,
+            name: current?.name || previous?.name || "",
+            shares: currentShares,
+            previousShares,
+            deltaShares,
+            avgCost,
+            layoutCost: deltaShares * avgCost,
+          });
+        }
+      }
+
+      const buyCost = deltas.filter((row) => row.layoutCost > 0).reduce((sum, row) => sum + row.layoutCost, 0);
+      const sellCost = Math.abs(deltas.filter((row) => row.layoutCost < 0).reduce((sum, row) => sum + row.layoutCost, 0));
+      points.push({
+        snapshot,
+        market,
+        date: snapshot.date || snapshot.createdAt?.slice(0, 10) || "",
+        isInitial: !previousMap,
+        rows,
+        stockCount: rows.length,
+        totalShares: rows.reduce((sum, row) => sum + Number(row.shares || 0), 0),
+        totalCost: rows.reduce((sum, row) => sum + row.cost, 0),
+        targetLevel: targetLevelForMarket(market, snapshot.date),
+        deltas: deltas.sort((a, b) => Math.abs(b.layoutCost) - Math.abs(a.layoutCost)),
+        buyCost,
+        sellCost,
+        netLayoutCost: buyCost - sellCost,
+      });
+      previousByMarket[market] = currentMap;
+    }
+  }
+
+  return points;
+}
+
+function renderWaterCostAnalysis(points) {
+  const recent = points.slice(-12);
+  const maxAbsCost = Math.max(...recent.map((item) => Math.abs(item.netLayoutCost)), 0);
+  if (!recent.length) return "<p class=\"muted-text\">尚無足夠快照建立布局分析。</p>";
+  return recent.map((item) => {
+    const barClass = item.netLayoutCost >= 0 ? "buy" : "sell";
+    return `
+      <div class="water-cost-row">
+        <div>
+          <strong>${escapeHtml(item.date)}</strong>
+          <span>${marketLabel(item.market)}${item.isInitial ? " · 初始庫存" : ` · ${item.deltas.length} 檔變動`}</span>
+        </div>
+        <span>${item.targetLevel === null ? "水位未設定" : formatPercent(item.targetLevel)}</span>
+        <div class="layout-cost-meter ${barClass}">
+          <span style="width: ${widthPercent(Math.abs(item.netLayoutCost), maxAbsCost)}%"></span>
+        </div>
+        <b>${item.isInitial ? "基準" : formatSignedMoney(item.netLayoutCost)}</b>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderDailyShareMatrix(points) {
+  const recent = points.slice(-8);
+  const symbols = new Map();
+  for (const point of recent) {
+    for (const row of point.rows) {
+      const item = symbols.get(row.symbol) || {
+        symbol: row.symbol,
+        name: row.name || "",
+        market: point.market,
+        score: 0,
+      };
+      item.score = Math.max(item.score, estimatedCost(row));
+      symbols.set(row.symbol, item);
+    }
+  }
+  const selected = [...symbols.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12);
+  if (!selected.length || !recent.length) return "<p class=\"muted-text\">尚無個股股數時間序列。</p>";
+  const maxShares = Math.max(...recent.flatMap((point) => point.rows.map((row) => Number(row.shares || 0))), 0);
+  const head = recent.map((point) => `<th>${escapeHtml(point.date.slice(5) || point.date)}<br><small>${marketLabel(point.market)}</small></th>`).join("");
+  const body = selected.map((symbol) => {
+    const cells = recent.map((point) => {
+      const row = point.rows.find((item) => item.symbol === symbol.symbol);
+      const shares = Number(row?.shares || 0);
+      return `
+        <td>
+          <div class="share-cell">
+            <span style="width: ${widthPercent(shares, maxShares)}%"></span>
+            <b>${shares ? formatNumber(shares, 3) : "-"}</b>
+          </div>
+        </td>
+      `;
+    }).join("");
+    return `
+      <tr>
+        <th>${escapeHtml(symbol.symbol)}<br><small>${escapeHtml(symbol.name)}</small></th>
+        ${cells}
+      </tr>
+    `;
+  }).join("");
+  return `
+    <div class="table-scroll share-matrix">
+      <table>
+        <thead><tr><th>個股</th>${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderLayoutDeltaTable(points) {
+  const rows = points
+    .slice()
+    .reverse()
+    .flatMap((point) => point.deltas.map((delta) => ({
+      ...delta,
+      date: point.date,
+      market: point.market,
+    })))
+    .slice(0, 40);
+  if (!rows.length) return "<p class=\"muted-text\">目前還沒有快照差異可計算。</p>";
+  return `
+    <div class="table-scroll compact-table">
+      <table class="parsed-table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>市場</th>
+            <th>代號</th>
+            <th>名稱</th>
+            <th>布局股數</th>
+            <th>估算成本</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.date)}</td>
+              <td>${marketLabel(row.market)}</td>
+              <td>${escapeHtml(row.symbol)}</td>
+              <td>${escapeHtml(row.name)}</td>
+              <td>${formatSignedNumber(row.deltaShares, 3)}</td>
+              <td>${formatSignedMoney(row.layoutCost)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function widthPercent(value, max) {
@@ -2499,6 +2716,7 @@ function renderCloudSnapshot() {
   const maxHistoryCost = Math.max(...history.map((item) => item.totalCost), 0);
   const maxHistoryShares = Math.max(...history.map((item) => item.totalShares), 0);
   const maxMarketCost = Math.max(...marketSummaries.map((item) => item.totalCost), 0);
+  const layoutAnalysis = buildLayoutAnalysis();
   const marketCards = marketSummaries.map((item) => `
     <section class="market-water-card">
       <div class="card-heading">
@@ -2630,7 +2848,31 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>每日布局</h3>
+        <h3>每日水位與布局成本</h3>
+        <span>第一筆為初始庫存，後續以今日庫存減前一份快照</span>
+      </div>
+      <div class="water-cost-chart">${renderWaterCostAnalysis(layoutAnalysis)}</div>
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>個股每日股數</h3>
+        <span>最近快照的持股股數時間序列</span>
+      </div>
+      ${renderDailyShareMatrix(layoutAnalysis)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>每日布局股數差異</h3>
+        <span>今日庫存減前一份同市場快照</span>
+      </div>
+      ${renderLayoutDeltaTable(layoutAnalysis)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>每日庫存總覽</h3>
         <span>最近 ${history.length} 次雲端快照</span>
       </div>
       <div class="table-scroll compact-table">

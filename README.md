@@ -8,7 +8,7 @@ Open `index.html` in a browser, or serve the folder with a static server.
 
 ## Google Access
 
-v0.12.0 keeps Google sign-in before the app shell is shown, then automatically loads the latest cloud inventory into a dashboard-first home screen. Screenshot cards are now treated as the snapshot vault, while the dashboard separates Taiwan and US holdings, shows market-level Ark suggested water levels from the `水位` sheet tab, recent snapshot trends, daily layout totals, and position details. Adding screenshots opens a focused input panel instead of occupying the home screen. The app blocks duplicate same-day snapshots and can clean existing duplicate cloud snapshots while keeping the newest copy.
+v0.13.0 keeps Google sign-in before the app shell is shown, then automatically loads the latest cloud inventory into a dashboard-first home screen. The first snapshot per market is treated as the initial inventory, and later snapshots are compared with the previous snapshot to calculate daily layout share changes and estimated layout cost. The dashboard separates Taiwan and US holdings, shows market-level Ark suggested water levels from the `水位` sheet tab, a daily water-level/layout-cost chart, per-stock daily share history, and position details.
 
 ## Privacy
 
