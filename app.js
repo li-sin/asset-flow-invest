@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.4";
-const APP_VERSION_NOTE = "底部 tab 與滑動刪除";
+const APP_VERSION = "v0.13.5";
+const APP_VERSION_NOTE = "逐列裁切 OCR";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -761,7 +761,7 @@ async function recognizeImage(image, onProgress, options = {}) {
     }
 
     const rowStartedAt = performance.now();
-    const rowResult = await recognizeArkRows(imageForOcr.dataUrl, full.lines || [], (progress, label) => {
+    const rowResult = await recognizeArkRows(imageForOcr.dataUrl, full.lines || [], completeMarkers.markers || [], (progress, label) => {
       onProgress?.(progress, label);
     });
     const rowRows = rowResult.rows || [];
@@ -832,8 +832,8 @@ function normalizeTesseractLines(lines) {
     .filter((line) => line && line.text && line.bbox.x1 > line.bbox.x0 && line.bbox.y1 > line.bbox.y0);
 }
 
-async function recognizeArkRows(dataUrl, fullLines, onProgress) {
-  const rects = await detectArkRowRects(dataUrl, fullLines);
+async function recognizeArkRows(dataUrl, fullLines, markers, onProgress) {
+  const rects = await detectArkRowRects(dataUrl, fullLines, markers);
   const attempts = [{ lang: "chi_tra+eng", label: "橫列" }];
   const rows = [];
   const crops = [];
@@ -869,18 +869,56 @@ async function recognizeArkRows(dataUrl, fullLines, onProgress) {
   return { rows, crops, skipped };
 }
 
-async function detectArkRowRects(dataUrl) {
+async function detectArkRowRects(dataUrl, fullLines = [], markers = []) {
   const image = await loadImage(dataUrl);
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
   const left = 0.095;
   const right = 0.965;
+  const markerRects = rectsFromCircleMarkers(markers, width, height, left, right);
+  if (markerRects.length) return markerRects;
+
   const separators = await detectArkRowSeparators(image);
   const minHeight = height * 0.052;
   const maxHeight = height * 0.145;
   const rects = rectsFromSeparators(separators, width, height, left, right, minHeight, maxHeight);
 
   return rects.length ? rects : fallbackArkRowRects(width, height, left, right);
+}
+
+function rectsFromCircleMarkers(markers, width, height, left, right) {
+  const centers = (markers || [])
+    .map((marker) => Number(marker.centerY))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (!centers.length) return [];
+
+  const gaps = centers
+    .slice(1)
+    .map((center, index) => center - centers[index])
+    .filter((gap) => gap > height * 0.035 && gap < height * 0.12)
+    .sort((a, b) => a - b);
+  const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : height * 0.074;
+  const rowHeight = Math.max(height * 0.052, Math.min(height * 0.115, medianGap * 0.88));
+  const topLimit = height * 0.19;
+  const bottomLimit = height * 0.84;
+
+  return centers.map((center, index) => {
+    const top = Math.max(topLimit, center - rowHeight * 0.48);
+    const bottom = Math.min(bottomLimit, center + rowHeight * 0.58);
+    const visibleHeight = bottom - top;
+    return {
+      x: left,
+      y: top / height,
+      width: right - left,
+      height: visibleHeight / height,
+      top,
+      bottom,
+      markerBased: true,
+      fallback: visibleHeight < rowHeight * 0.72,
+      markerIndex: index + 1,
+    };
+  }).filter((rect) => rect.height > 0.03);
 }
 
 function rectsFromSeparators(separators, width, height, left, right, minHeight, maxHeight) {
