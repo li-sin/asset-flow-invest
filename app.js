@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.11.0";
-const APP_VERSION_NOTE = "儀表板首頁";
+const APP_VERSION = "v0.11.1";
+const APP_VERSION_NOTE = "重複快照清理";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -1801,6 +1801,13 @@ async function appendSheetValues(sheetName, range, values) {
   });
 }
 
+async function clearSheetValues(sheetName, range) {
+  return sheetsFetch(`/values/${sheetRange(sheetName, range)}:clear`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 async function ensureSheetTables() {
   const metadata = await sheetsFetch("?fields=sheets.properties.title");
   const titles = new Set((metadata.sheets || []).map((sheet) => sheet.properties?.title).filter(Boolean));
@@ -1875,6 +1882,84 @@ function buildSnapshotPayloadFromRows({ snapshotId: id, createdAt, date, market,
       createdAt,
     ]),
   };
+}
+
+function normalizeSnapshotNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toFixed(6) : "0.000000";
+}
+
+function positionSignature(rows) {
+  return (rows || [])
+    .filter((row) => row?.symbol)
+    .map((row) => [
+      String(row.symbol || "").trim(),
+      normalizeSnapshotNumber(row.shares),
+      normalizeSnapshotNumber(row.avgCost),
+    ].join(":"))
+    .sort()
+    .join("|");
+}
+
+function snapshotDuplicateKey(snapshot, rows) {
+  return [
+    String(snapshot?.date || "").trim(),
+    String(snapshot?.market || "").trim(),
+    positionSignature(rows),
+  ].join("::");
+}
+
+function snapshotPositionsFromList(snapshotId, positions) {
+  return (positions || []).filter((row) => row.snapshotId === snapshotId);
+}
+
+function findExistingDuplicateSnapshot({ date, market, rows }) {
+  const targetKey = snapshotDuplicateKey({ date, market }, rows);
+  return (state.cloudHistory.snapshots || []).find((snapshot) => {
+    const rowsForSnapshot = snapshotPositionsFromList(snapshot.snapshotId, state.cloudHistory.positions);
+    return snapshotDuplicateKey(snapshot, rowsForSnapshot) === targetKey;
+  });
+}
+
+function findDuplicateSnapshotGroups(snapshots, positions) {
+  const groups = new Map();
+  for (const snapshot of snapshots || []) {
+    const rows = snapshotPositionsFromList(snapshot.snapshotId, positions);
+    const key = snapshotDuplicateKey(snapshot, rows);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ snapshot, rows });
+  }
+  return [...groups.values()]
+    .filter((group) => group.length > 1)
+    .map((group) => group.sort((a, b) => String(b.snapshot.createdAt).localeCompare(String(a.snapshot.createdAt))));
+}
+
+function snapshotToSheetRow(snapshot) {
+  return [
+    snapshot.snapshotId || "",
+    snapshot.createdAt || "",
+    snapshot.date || "",
+    snapshot.market || "",
+    snapshot.sourceEntryId || "",
+    snapshot.sourceTitle || "",
+    snapshot.rowCount ?? "",
+    snapshot.appVersion || "",
+  ];
+}
+
+function positionToSheetRow(row) {
+  return [
+    row.snapshotId || "",
+    row.date || "",
+    row.market || "",
+    row.symbol || "",
+    row.name || "",
+    row.kind || "",
+    row.shares ?? "",
+    row.avgCost ?? "",
+    row.source || "",
+    row.createdAt || "",
+  ];
 }
 
 function mergeSnapshotEntries(entries) {
@@ -1953,6 +2038,26 @@ async function saveMergedSnapshotToGoogleSheet() {
     });
 
     await ensureCloudSheetTables();
+    await loadLatestCloudSnapshot(false);
+    const duplicate = findExistingDuplicateSnapshot({
+      date: latestDate,
+      market: markets.length === 1 ? markets[0] : "ALL",
+      rows,
+    });
+    if (duplicate) {
+      for (const item of candidates) {
+        item.entry.status = "imported";
+        item.entry.sheetSnapshotId = duplicate.snapshotId;
+        item.entry.updatedAt = createdAt;
+      }
+      await txStore("readwrite", (store) => {
+        candidates.forEach((item) => store.put(item.entry));
+      });
+      state.entries = await getAllEntries();
+      render();
+      alert(`雲端已存在同日、同市場、同內容的快照，未重複寫入。\n已保留：${duplicate.date} ${duplicate.createdAt}`);
+      return;
+    }
     await appendSheetValues(SHEET_NAMES.snapshots, "A:H", [payload.snapshotRow]);
     await appendSheetValues(SHEET_NAMES.positions, "A:J", payload.positionRows);
 
@@ -1995,6 +2100,23 @@ async function saveEntrySnapshotToGoogleSheet(id) {
 
   try {
     await ensureCloudSheetTables();
+    await loadLatestCloudSnapshot(false);
+    const duplicate = findExistingDuplicateSnapshot({
+      date: payload.snapshotRow[2],
+      market: payload.snapshotRow[3],
+      rows: validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "")),
+    });
+    if (duplicate) {
+      entry.status = "imported";
+      entry.sheetSnapshotId = duplicate.snapshotId;
+      entry.updatedAt = new Date().toISOString();
+      await txStore("readwrite", (store) => store.put(entry));
+      state.entries = await getAllEntries();
+      render();
+      openDetail(id);
+      alert(`雲端已存在同日、同市場、同內容的快照，未重複寫入。\n已保留：${duplicate.date} ${duplicate.createdAt}`);
+      return;
+    }
     await appendSheetValues(SHEET_NAMES.snapshots, "A:H", [payload.snapshotRow]);
     await appendSheetValues(SHEET_NAMES.positions, "A:J", payload.positionRows);
     entry.status = "imported";
@@ -2208,7 +2330,10 @@ function renderCloudSnapshot() {
         <h2>目前庫存</h2>
         <p>${escapeHtml(cloud.snapshot.date)} · ${marketLabel(cloud.snapshot.market)} · ${escapeHtml(cloud.snapshot.createdAt)}</p>
       </div>
-      <button id="dashboard-refresh" class="button secondary compact" type="button">重新整理</button>
+      <div class="dashboard-actions">
+        <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
+        <button id="dashboard-refresh" class="button secondary compact" type="button">重新整理</button>
+      </div>
     </header>
 
     <div class="metric-grid">
@@ -2290,7 +2415,57 @@ function renderCloudSnapshot() {
     </section>
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
   renderSummaryLine();
+}
+
+async function cleanupDuplicateCloudSnapshots() {
+  const button = els.cloudSnapshot?.querySelector("#cleanup-duplicates");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "檢查中...";
+  }
+  try {
+    await ensureCloudSheetTables();
+    const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
+    const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots));
+    const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
+    const duplicateGroups = findDuplicateSnapshotGroups(snapshots, positions);
+    const duplicateIds = new Set(duplicateGroups.flatMap((group) => group.slice(1).map((item) => item.snapshot.snapshotId)));
+
+    if (!duplicateIds.size) {
+      alert("沒有找到同日、同市場、同內容的重複快照。");
+      return;
+    }
+
+    const confirmed = confirm(`找到 ${duplicateGroups.length} 組重複快照，將刪除 ${duplicateIds.size} 筆較舊快照與其庫存明細，保留每組最新建立的一份。確定清理？`);
+    if (!confirmed) return;
+
+    if (button) button.textContent = "清理中...";
+    const keptSnapshots = snapshots.filter((snapshot) => !duplicateIds.has(snapshot.snapshotId));
+    const keptPositions = positions.filter((row) => !duplicateIds.has(row.snapshotId));
+
+    await clearSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    await clearSheetValues(SHEET_NAMES.positions, "A2:J");
+    if (keptSnapshots.length) {
+      await updateSheetValues(SHEET_NAMES.snapshots, "A2:H", keptSnapshots.map(snapshotToSheetRow));
+    }
+    if (keptPositions.length) {
+      await updateSheetValues(SHEET_NAMES.positions, "A2:J", keptPositions.map(positionToSheetRow));
+    }
+
+    await loadLatestCloudSnapshot(false);
+    alert(`已清理 ${duplicateIds.size} 筆重複快照。`);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "清理重複快照失敗");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "清理重複";
+    }
+  }
 }
 
 function exportBackup() {

@@ -249,6 +249,13 @@ textarea {
   gap: 10px;
 }
 
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .section-heading {
   margin-bottom: 14px;
 }
