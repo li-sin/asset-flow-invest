@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.1";
-const APP_VERSION_NOTE = "圈數檢查";
+const APP_VERSION = "v0.13.2";
+const APP_VERSION_NOTE = "每日唯一快照";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2173,6 +2173,43 @@ function buildSnapshotPayload(entry) {
   });
 }
 
+function splitRowsByMarket(rows, fallbackMarket = "") {
+  const fallbackKey = normalizeMarketKey(fallbackMarket);
+  const groups = { TW: [], US: [] };
+  for (const row of rows || []) {
+    const market = ["TW", "US"].includes(fallbackKey) ? fallbackKey : marketForPosition(row);
+    if (!["TW", "US"].includes(market)) continue;
+    groups[market].push({ ...row, market });
+  }
+  return Object.entries(groups)
+    .filter(([, groupRows]) => groupRows.length)
+    .map(([market, groupRows]) => ({ market, rows: groupRows }));
+}
+
+function buildMarketSnapshotPayloadsFromRows({ createdAt, date, market, sourceEntryId, sourceTitle, rows }) {
+  return splitRowsByMarket(rows, market).map((group) => buildSnapshotPayloadFromRows({
+    snapshotId: snapshotId(createdAt),
+    createdAt,
+    date,
+    market: group.market,
+    sourceEntryId,
+    sourceTitle,
+    rows: group.rows,
+  }));
+}
+
+function buildMarketSnapshotPayloads(entry) {
+  const rows = validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || ""));
+  return buildMarketSnapshotPayloadsFromRows({
+    createdAt: new Date().toISOString(),
+    date: entry.date || today(),
+    market: entry.market || "",
+    sourceEntryId: entry.id,
+    sourceTitle: entry.title || "",
+    rows,
+  });
+}
+
 function buildSnapshotPayloadFromRows({ snapshotId: id, createdAt, date, market, sourceEntryId, sourceTitle, rows }) {
   return {
     snapshotId: id,
@@ -2237,6 +2274,149 @@ function findExistingDuplicateSnapshot({ date, market, rows }) {
     const rowsForSnapshot = snapshotPositionsFromList(snapshot.snapshotId, state.cloudHistory.positions);
     return snapshotDuplicateKey(snapshot, rowsForSnapshot) === targetKey;
   });
+}
+
+function findDailySnapshots(date, market) {
+  const normalizedDate = normalizeDateText(date);
+  const normalizedMarket = normalizeMarketKey(market);
+  return (state.cloudHistory.snapshots || []).filter((snapshot) => (
+    normalizeDateText(snapshot.date) === normalizedDate
+    && normalizeMarketKey(snapshot.market) === normalizedMarket
+  ));
+}
+
+function compareSnapshotRows(existingRows, newRows) {
+  const existingMap = rowsBySymbol(existingRows);
+  const newMap = rowsBySymbol(newRows);
+  const symbols = [...new Set([...existingMap.keys(), ...newMap.keys()])].sort();
+  const added = [];
+  const removed = [];
+  const changed = [];
+
+  for (const symbol of symbols) {
+    const previous = existingMap.get(symbol);
+    const current = newMap.get(symbol);
+    if (!previous && current) {
+      added.push(current);
+      continue;
+    }
+    if (previous && !current) {
+      removed.push(previous);
+      continue;
+    }
+    const previousShares = Number(previous?.shares || 0);
+    const currentShares = Number(current?.shares || 0);
+    const previousCost = Number(previous?.avgCost || 0);
+    const currentCost = Number(current?.avgCost || 0);
+    if (normalizeSnapshotNumber(previousShares) !== normalizeSnapshotNumber(currentShares)
+      || normalizeSnapshotNumber(previousCost) !== normalizeSnapshotNumber(currentCost)) {
+      changed.push({
+        symbol,
+        name: current?.name || previous?.name || "",
+        previousShares,
+        currentShares,
+        previousCost,
+        currentCost,
+      });
+    }
+  }
+
+  return { added, removed, changed };
+}
+
+function snapshotDiffLine(row) {
+  return `${row.symbol}${row.name ? ` ${row.name}` : ""}：${formatNumber(row.shares, 3)} 股 / ${formatNumber(row.avgCost, 3)}`;
+}
+
+function formatSnapshotDiff(diff, limit = 18) {
+  const lines = [];
+  for (const row of diff.added) lines.push(`新增 ${snapshotDiffLine(row)}`);
+  for (const row of diff.removed) lines.push(`移除 ${snapshotDiffLine(row)}`);
+  for (const row of diff.changed) {
+    lines.push(`變更 ${row.symbol}${row.name ? ` ${row.name}` : ""}：股數 ${formatNumber(row.previousShares, 3)} → ${formatNumber(row.currentShares, 3)}，均價 ${formatNumber(row.previousCost, 3)} → ${formatNumber(row.currentCost, 3)}`);
+  }
+  if (lines.length > limit) {
+    return [...lines.slice(0, limit), `...另有 ${lines.length - limit} 筆差異`].join("\n");
+  }
+  return lines.join("\n");
+}
+
+async function writeMarketSnapshotPayloads(payloads) {
+  const actions = [];
+  const skipped = [];
+
+  for (const payload of payloads) {
+    const date = payload.snapshotRow[2];
+    const market = payload.snapshotRow[3];
+    const newRows = payload.positionRows.map((row) => ({
+      snapshotId: row[0],
+      date: row[1],
+      market: row[2],
+      symbol: row[3],
+      name: row[4],
+      kind: row[5],
+      shares: Number(row[6] || 0),
+      avgCost: Number(row[7] || 0),
+      source: row[8],
+      createdAt: row[9],
+    }));
+    const existingSnapshots = findDailySnapshots(date, market);
+    if (!existingSnapshots.length) {
+      actions.push({ type: "insert", payload, existingSnapshots: [] });
+      continue;
+    }
+
+    const existingRows = existingSnapshots.flatMap((snapshot) => snapshotPositionsFromList(snapshot.snapshotId, state.cloudHistory.positions));
+    const diff = compareSnapshotRows(existingRows, newRows);
+    const diffText = formatSnapshotDiff(diff);
+    if (!diffText) {
+      skipped.push({ payload, existingSnapshot: existingSnapshots[0] });
+      continue;
+    }
+
+    const confirmed = confirm([
+      `雲端已存在 ${date} ${marketLabel(market)} 快照 ${existingSnapshots.length} 筆。`,
+      "差異：",
+      diffText,
+      "",
+      "是否用這次最新快照取代同日同市場的舊快照？",
+    ].join("\n"));
+    if (!confirmed) return { cancelled: true, written: [], skipped };
+    actions.push({ type: "replace", payload, existingSnapshots });
+  }
+
+  if (!actions.length) return { cancelled: false, written: [], skipped };
+
+  const replaceIds = new Set(actions
+    .filter((action) => action.type === "replace")
+    .flatMap((action) => action.existingSnapshots.map((snapshot) => snapshot.snapshotId)));
+  const hasReplacement = replaceIds.size > 0;
+
+  if (hasReplacement) {
+    const keptSnapshots = (state.cloudHistory.snapshots || [])
+      .filter((snapshot) => !replaceIds.has(snapshot.snapshotId))
+      .map(snapshotToSheetRow);
+    const keptPositions = (state.cloudHistory.positions || [])
+      .filter((row) => !replaceIds.has(row.snapshotId))
+      .map(positionToSheetRow);
+    const nextSnapshots = [...keptSnapshots, ...actions.map((action) => action.payload.snapshotRow)];
+    const nextPositions = [...keptPositions, ...actions.flatMap((action) => action.payload.positionRows)];
+
+    await clearSheetValues(SHEET_NAMES.snapshots, "A2:H");
+    await clearSheetValues(SHEET_NAMES.positions, "A2:J");
+    if (nextSnapshots.length) await updateSheetValues(SHEET_NAMES.snapshots, "A2:H", nextSnapshots);
+    if (nextPositions.length) await updateSheetValues(SHEET_NAMES.positions, "A2:J", nextPositions);
+  } else {
+    await appendSheetValues(SHEET_NAMES.snapshots, "A:H", actions.map((action) => action.payload.snapshotRow));
+    await appendSheetValues(SHEET_NAMES.positions, "A:J", actions.flatMap((action) => action.payload.positionRows));
+  }
+
+  return {
+    cancelled: false,
+    written: actions.map((action) => action.payload),
+    skipped,
+    replacedCount: replaceIds.size,
+  };
 }
 
 function findDuplicateSnapshotGroups(snapshots, positions) {
@@ -2328,7 +2508,9 @@ async function saveMergedSnapshotToGoogleSheet() {
     return;
   }
 
-  const confirmed = confirm(`將 ${candidates.length} 張方舟庫存截圖合併成 1 個雲端快照，共 ${rows.length} 筆庫存。確定寫入 Google Sheet？`);
+  const markets = [...new Set(candidates.map((item) => item.entry.market).filter(Boolean))];
+  const marketGroups = splitRowsByMarket(rows, markets.length === 1 ? markets[0] : "");
+  const confirmed = confirm(`將 ${candidates.length} 張方舟庫存截圖合併成 ${marketGroups.length} 個市場快照，共 ${rows.length} 筆庫存。若同日同市場已有快照，會先列出差異再詢問是否取代。確定繼續？`);
   if (!confirmed) return;
 
   const button = els.saveMergedSnapshot;
@@ -2344,12 +2526,10 @@ async function saveMergedSnapshotToGoogleSheet() {
       .filter(Boolean)
       .sort()
       .at(-1) || today();
-    const markets = [...new Set(candidates.map((item) => item.entry.market).filter(Boolean))];
-    const payload = buildSnapshotPayloadFromRows({
-      snapshotId: snapshotId(createdAt),
+    const payloads = buildMarketSnapshotPayloadsFromRows({
       createdAt,
       date: latestDate,
-      market: markets.length === 1 ? markets[0] : "ALL",
+      market: markets.length === 1 ? markets[0] : "",
       sourceEntryId: candidates.map((item) => item.entry.id).join(","),
       sourceTitle: `合併快照：${candidates.length} 張截圖`,
       rows,
@@ -2357,15 +2537,13 @@ async function saveMergedSnapshotToGoogleSheet() {
 
     await ensureCloudSheetTables();
     await loadLatestCloudSnapshot(false);
-    const duplicate = findExistingDuplicateSnapshot({
-      date: latestDate,
-      market: markets.length === 1 ? markets[0] : "ALL",
-      rows,
-    });
-    if (duplicate) {
+    const result = await writeMarketSnapshotPayloads(payloads);
+    if (result.cancelled) return;
+    const sheetSnapshotIds = [...result.written.map((payload) => payload.snapshotId), ...result.skipped.map((item) => item.existingSnapshot.snapshotId)];
+    if (!result.written.length && result.skipped.length) {
       for (const item of candidates) {
         item.entry.status = "imported";
-        item.entry.sheetSnapshotId = duplicate.snapshotId;
+        item.entry.sheetSnapshotId = sheetSnapshotIds.join(",");
         item.entry.updatedAt = createdAt;
       }
       await txStore("readwrite", (store) => {
@@ -2373,15 +2551,13 @@ async function saveMergedSnapshotToGoogleSheet() {
       });
       state.entries = await getAllEntries();
       render();
-      alert(`雲端已存在同日、同市場、同內容的快照，未重複寫入。\n已保留：${duplicate.date} ${duplicate.createdAt}`);
+      alert("雲端已存在同日、同市場、同內容的快照，未重複寫入。");
       return;
     }
-    await appendSheetValues(SHEET_NAMES.snapshots, "A:H", [payload.snapshotRow]);
-    await appendSheetValues(SHEET_NAMES.positions, "A:J", payload.positionRows);
 
     for (const item of candidates) {
       item.entry.status = "imported";
-      item.entry.sheetSnapshotId = payload.snapshotId;
+      item.entry.sheetSnapshotId = sheetSnapshotIds.join(",");
       item.entry.updatedAt = createdAt;
     }
     await txStore("readwrite", (store) => {
@@ -2390,7 +2566,7 @@ async function saveMergedSnapshotToGoogleSheet() {
     state.entries = await getAllEntries();
     await loadLatestCloudSnapshot(false);
     render();
-    alert(`已合併存到 Google Sheet：${rows.length} 筆庫存`);
+    alert(`已合併存到 Google Sheet：${rows.length} 筆庫存，${result.written.length} 個市場快照${result.replacedCount ? `，取代 ${result.replacedCount} 筆舊快照` : ""}`);
   } catch (error) {
     console.error(error);
     alert(error.message || "合併寫入 Google Sheet 失敗");
@@ -2404,8 +2580,9 @@ async function saveMergedSnapshotToGoogleSheet() {
 async function saveEntrySnapshotToGoogleSheet(id) {
   const entry = state.entries.find((item) => item.id === id);
   if (!entry) return;
-  const payload = buildSnapshotPayload(entry);
-  if (!payload.positionRows.length) {
+  const payloads = buildMarketSnapshotPayloads(entry);
+  const rowCount = payloads.reduce((sum, payload) => sum + payload.positionRows.length, 0);
+  if (!rowCount) {
     alert("目前沒有可存入 Google Sheet 的庫存列。");
     return;
   }
@@ -2419,32 +2596,28 @@ async function saveEntrySnapshotToGoogleSheet(id) {
   try {
     await ensureCloudSheetTables();
     await loadLatestCloudSnapshot(false);
-    const duplicate = findExistingDuplicateSnapshot({
-      date: payload.snapshotRow[2],
-      market: payload.snapshotRow[3],
-      rows: validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "")),
-    });
-    if (duplicate) {
+    const result = await writeMarketSnapshotPayloads(payloads);
+    if (result.cancelled) return;
+    const sheetSnapshotIds = [...result.written.map((payload) => payload.snapshotId), ...result.skipped.map((item) => item.existingSnapshot.snapshotId)];
+    if (!result.written.length && result.skipped.length) {
       entry.status = "imported";
-      entry.sheetSnapshotId = duplicate.snapshotId;
+      entry.sheetSnapshotId = sheetSnapshotIds.join(",");
       entry.updatedAt = new Date().toISOString();
       await txStore("readwrite", (store) => store.put(entry));
       state.entries = await getAllEntries();
       render();
       openDetail(id);
-      alert(`雲端已存在同日、同市場、同內容的快照，未重複寫入。\n已保留：${duplicate.date} ${duplicate.createdAt}`);
+      alert("雲端已存在同日、同市場、同內容的快照，未重複寫入。");
       return;
     }
-    await appendSheetValues(SHEET_NAMES.snapshots, "A:H", [payload.snapshotRow]);
-    await appendSheetValues(SHEET_NAMES.positions, "A:J", payload.positionRows);
     entry.status = "imported";
-    entry.sheetSnapshotId = payload.snapshotId;
+    entry.sheetSnapshotId = sheetSnapshotIds.join(",");
     entry.updatedAt = new Date().toISOString();
     await txStore("readwrite", (store) => store.put(entry));
     await loadLatestCloudSnapshot(false);
     render();
     openDetail(id);
-    alert(`已存到 Google Sheet：${payload.positionRows.length} 筆庫存`);
+    alert(`已存到 Google Sheet：${rowCount} 筆庫存，${result.written.length} 個市場快照${result.replacedCount ? `，取代 ${result.replacedCount} 筆舊快照` : ""}`);
   } catch (error) {
     console.error(error);
     alert(error.message || "寫入 Google Sheet 失敗");
