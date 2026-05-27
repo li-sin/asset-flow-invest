@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.10.0";
-const APP_VERSION_NOTE = "合併快照";
+const APP_VERSION = "v0.10.1";
+const APP_VERSION_NOTE = "明細修正";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
 const OCR_CORE_URL = "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js";
@@ -452,11 +452,17 @@ function openDetail(id) {
   els.detailContent.querySelector('[data-action="mark-imported"]').addEventListener("click", () => updateStatus(id, "imported"));
   els.detailContent.querySelector('[data-action="save-cloud-snapshot"]').addEventListener("click", () => saveEntrySnapshotToGoogleSheet(id));
   els.detailContent.querySelector('[data-action="delete"]').addEventListener("click", () => deleteEntry(id));
-  els.detailContent.querySelectorAll('[data-action="apply-symbol"]').forEach((button) => {
+  els.detailContent.querySelectorAll('[data-action="apply-row-fix"]').forEach((button) => {
     button.addEventListener("click", () => {
       const rowIndex = Number(button.dataset.rowIndex);
-      const input = els.detailContent.querySelector(`[data-symbol-input="${rowIndex}"]`);
-      applyManualSymbol(id, rowIndex, input?.value || "");
+      const symbolInput = els.detailContent.querySelector(`[data-symbol-input="${rowIndex}"]`);
+      const sharesInput = els.detailContent.querySelector(`[data-shares-input="${rowIndex}"]`);
+      const avgCostInput = els.detailContent.querySelector(`[data-avg-cost-input="${rowIndex}"]`);
+      applyManualRowFix(id, rowIndex, {
+        symbol: symbolInput?.value || "",
+        shares: sharesInput?.value || "",
+        avgCost: avgCostInput?.value || "",
+      });
     });
   });
 }
@@ -846,13 +852,20 @@ function renderColumnOcrText(column) {
   ].join("\n").trim();
 }
 
-async function applyManualSymbol(entryId, rowIndex, value) {
+async function applyManualRowFix(entryId, rowIndex, values) {
   const entry = state.entries.find((item) => item.id === entryId);
   if (!entry?.parsedRows?.[rowIndex]) return;
 
-  const symbol = normalizeSymbolInput(value);
+  const symbol = normalizeSymbolInput(values.symbol);
   if (!isTwSymbol(symbol)) {
     alert("請輸入有效代號，例如 0050、2330、00988A");
+    return;
+  }
+
+  const shares = parseManualNumber(values.shares);
+  const avgCost = parseManualNumber(values.avgCost);
+  if (shares === null || avgCost === null) {
+    alert("請輸入有效股數與成交均價");
     return;
   }
 
@@ -862,14 +875,25 @@ async function applyManualSymbol(entryId, rowIndex, value) {
     ...row,
     symbol,
     name: officialName || row.ocrName || row.name || "",
+    shares,
+    avgCost,
     needsReview: !officialName,
     reviewReason: officialName ? "" : "名稱待補",
     manualSymbol: true,
+    manualShares: true,
+    manualAvgCost: true,
   };
   entry.updatedAt = new Date().toISOString();
   await txStore("readwrite", (store) => store.put(entry));
   render();
   openDetail(entryId);
+}
+
+function parseManualNumber(value) {
+  const text = String(value || "").replace(/,/g, "").trim();
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
 }
 
 function normalizeSymbolInput(value) {
@@ -1366,7 +1390,7 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
       <td>${escapeHtml(row.needsReview ? row.reviewReason || "待確認" : "")}</td>
-      <td>${renderSymbolFixCell(row, index, context, entryId)}</td>
+      <td>${renderRowFixCell(row, index, context, entryId)}</td>
       <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
     </tr>
   `).join("");
@@ -1456,12 +1480,14 @@ function renderColumnCrops(crops) {
   `;
 }
 
-function renderSymbolFixCell(row, index, context, entryId) {
-  if (context !== "detail" || !entryId || !row.needsReview) return "";
+function renderRowFixCell(row, index, context, entryId) {
+  if (context !== "detail" || !entryId) return "";
   return `
-    <div class="symbol-fix">
-      <input data-symbol-input="${index}" type="text" inputmode="text" placeholder="代號" value="${escapeHtml(row.symbol || "")}">
-      <button class="button secondary compact" type="button" data-action="apply-symbol" data-row-index="${index}">套用</button>
+    <div class="row-fix">
+      <label>代號<input data-symbol-input="${index}" type="text" inputmode="text" value="${escapeHtml(row.symbol || "")}"></label>
+      <label>股數<input data-shares-input="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.shares ?? "")}"></label>
+      <label>均價<input data-avg-cost-input="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.avgCost ?? "")}"></label>
+      <button class="button secondary compact" type="button" data-action="apply-row-fix" data-row-index="${index}">套用</button>
     </div>
   `;
 }
@@ -1876,7 +1902,7 @@ async function saveMergedSnapshotToGoogleSheet() {
     return;
   }
   if (conflicts.length) {
-    alert(`合併快照發現同代號衝突，請先修正後再存：\n\n${conflicts.slice(0, 8).join("\n")}`);
+    alert(`合併快照發現同代號衝突，請打開截圖明細，在解析庫存表的修正欄調整股數或成交均價後再存：\n\n${conflicts.slice(0, 8).join("\n")}`);
     return;
   }
 
