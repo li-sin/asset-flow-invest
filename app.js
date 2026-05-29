@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.15";
-const APP_VERSION_NOTE = "修正水位存 Sheet";
+const APP_VERSION = "v0.13.16";
+const APP_VERSION_NOTE = "水位存台股美股 tab + 水位趨勢圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -369,31 +369,24 @@ function updateTargetLevel(market, value) {
 async function saveTargetLevelToSheet(market, level) {
   if (!googleAccessToken || !state.auth.authorized) return;
   try {
-    await ensureLevelsSheet();
-    const row = [today(), market, level];
-    await appendSheetValues(SHEET_NAMES.levels, "A:C", [row]);
+    const tabName = market === "TW" ? "台股" : "美股";
+    const values = await readSheetValues(tabName, "A:B");
+    const todayStr = today();
+    // row index in values array (0-based); row 0 is header
+    const existingIdx = values.findIndex((row, i) => i > 0 && normalizeDateText(row[0]) === todayStr);
+    if (existingIdx >= 0) {
+      // overwrite existing row (existingIdx+1 because Sheets rows are 1-based)
+      await updateSheetValues(tabName, `B${existingIdx + 1}`, [[level]]);
+    } else {
+      await appendSheetValues(tabName, "A:B", [[todayStr, level]]);
+    }
     state.targetLevelHistory = [
-      { date: today(), market, targetLevel: level, source: "水位" },
-      ...state.targetLevelHistory.filter((item) => !(item.date === today() && item.market === market)),
+      { date: todayStr, market, targetLevel: level, source: "水位" },
+      ...state.targetLevelHistory.filter((item) => !(item.date === todayStr && item.market === market)),
     ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   } catch (error) {
     console.warn("saveTargetLevelToSheet", error);
   }
-}
-
-let levelsSheetReady = false;
-async function ensureLevelsSheet() {
-  if (levelsSheetReady) return;
-  const metadata = await sheetsFetch("?fields=sheets.properties.title");
-  const titles = new Set((metadata.sheets || []).map((sheet) => sheet.properties?.title).filter(Boolean));
-  if (!titles.has(SHEET_NAMES.levels)) {
-    await sheetsFetch(":batchUpdate", {
-      method: "POST",
-      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_NAMES.levels } } }] }),
-    });
-    await updateSheetValues(SHEET_NAMES.levels, "A1:C1", [["日期", "市場", "建議水位"]]);
-  }
-  levelsSheetReady = true;
 }
 
 function normalizeHeaderText(value) {
@@ -3483,6 +3476,59 @@ function renderDailyShareMatrix(points) {
   }).join("");
 }
 
+function renderTargetLevelChart(history) {
+  const markets = ["TW", "US"];
+  const allDates = [...new Set(history.map((item) => item.date))].sort();
+  const recent = allDates.slice(-20);
+  if (!recent.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
+  const colors = { TW: "var(--green)", US: "var(--accent, #4f8ef7)" };
+  const minVal = Math.max(0, Math.floor(Math.min(...history.map((i) => i.targetLevel)) / 10) * 10 - 10);
+  const maxVal = Math.min(100, Math.ceil(Math.max(...history.map((i) => i.targetLevel)) / 10) * 10 + 10);
+  const range = maxVal - minVal || 10;
+  const toY = (v) => (1 - (v - minVal) / range) * 100;
+  const W = 600;
+  const H = 160;
+  const PAD_L = 32;
+  const PAD_R = 8;
+  const PAD_T = 8;
+  const PAD_B = 24;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+  const xPos = (i) => PAD_L + (i / (recent.length - 1 || 1)) * chartW;
+  const yPos = (v) => PAD_T + (toY(v) / 100) * chartH;
+  const yGridLines = [];
+  for (let v = minVal; v <= maxVal; v += 10) {
+    const y = yPos(v);
+    yGridLines.push(`<line x1="${PAD_L}" y1="${y}" x2="${W - PAD_R}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    yGridLines.push(`<text x="${PAD_L - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${v}%</text>`);
+  }
+  const xLabels = recent.map((d, i) => {
+    if (i % Math.max(1, Math.floor(recent.length / 5)) !== 0 && i !== recent.length - 1) return "";
+    return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
+  }).join("");
+  const lines = markets.map((market) => {
+    const pts = recent.map((d, i) => {
+      const found = history.find((item) => item.market === market && item.date === d);
+      return found ? { i, v: found.targetLevel } : null;
+    }).filter(Boolean);
+    if (!pts.length) return "";
+    const polyline = pts.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ");
+    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="3" fill="${colors[market]}"><title>${marketLabel(market)} ${recent[p.i]} ${p.v}%</title></circle>`).join("");
+    return `<polyline points="${polyline}" fill="none" stroke="${colors[market]}" stroke-width="2" stroke-linejoin="round"/>${dots}`;
+  }).join("");
+  const legend = markets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  return `
+    <div class="level-chart-wrap">
+      <div class="level-chart-legend">${legend}</div>
+      <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg" aria-label="建議水位趨勢">
+        ${yGridLines.join("")}
+        ${xLabels}
+        ${lines}
+      </svg>
+    </div>
+  `;
+}
+
 function renderLayoutDeltaTable(points) {
   if (!points.length) return "<p class=\"muted-text\">目前還沒有快照差異可計算。</p>";
   return ["TW", "US"].map((market) => {
@@ -3761,6 +3807,14 @@ function renderCloudSnapshot() {
         <div class="trend-chart">${trendBars || "<p class=\"muted-text\">尚無歷史快照。</p>"}</div>
       </section>
     </div>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>建議水位趨勢</h3>
+        <span>台股 / 美股歷史建議水位（%）</span>
+      </div>
+      ${renderTargetLevelChart(state.targetLevelHistory)}
+    </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
