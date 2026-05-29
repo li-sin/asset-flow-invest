@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.6";
-const APP_VERSION_NOTE = "Y軸自動縮放；delta 走勢；圖上拖截取線；首頁刪快照；水位修正；水位趨勢非日期列過濾";
+const APP_VERSION = "v0.15.0";
+const APP_VERSION_NOTE = "OCR 後可直接編輯並一鍵存雲端；水位趨勢日期過濾";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -54,6 +54,7 @@ const SYMBOL_NAMES = {
 const state = {
   entries: [],
   draftImages: [],
+  draftEditedRows: null,
   filter: "all",
   query: "",
   cloudSnapshot: null,
@@ -631,6 +632,68 @@ function clearDraft() {
   els.draftPreview.innerHTML = "";
   els.parsePreview.innerHTML = "";
   els.ocrStatus.textContent = "尚未解析";
+  state.draftEditedRows = null;
+}
+
+function buildEntry() {
+  const base = {
+    id: entryId(),
+    date: els.date.value || today(),
+    market: els.market.value,
+    kind: els.kind.value,
+    status: els.status.value,
+    title: els.title.value.trim(),
+    text: els.text.value.trim(),
+    note: els.note.value.trim(),
+    parsedRows: parseHoldings(els.text.value.trim()),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const images = state.draftImages;
+  if (images.length === 1) {
+    const image = images[0];
+    return {
+      ...base,
+      images: [image],
+      ocrElapsedMs: image.ocrElapsedMs,
+      columnOcrMs: image.columnOcrMs,
+      rowOcrMs: image.rowOcrMs,
+      columnCrops: image.columnCrops || [],
+      rowCrops: image.rowCrops || [],
+      skippedRowCrops: image.skippedRowCrops || [],
+      completeCircleCount: image.completeCircleCount || 0,
+      missingRowCount: image.missingRowCount || 0,
+    };
+  }
+  return {
+    ...base,
+    images,
+    columnCrops: images.flatMap((img) => img.columnCrops || []),
+    rowCrops: images.flatMap((img) => img.rowCrops || []),
+    skippedRowCrops: images.flatMap((img) => img.skippedRowCrops || []),
+    completeCircleCount: images.reduce((sum, img) => sum + (img.completeCircleCount || 0), 0),
+    missingRowCount: images.reduce((sum, img) => sum + (img.missingRowCount || 0), 0),
+  };
+}
+
+async function saveDraftDirectToCloud() {
+  if (!state.draftEditedRows?.length) { alert("尚無解析資料。"); return; }
+  const btn = els.parsePreview.querySelector("#draft-confirm-save");
+  if (btn) { btn.disabled = true; btn.textContent = "存入中…"; }
+  try {
+    const entry = buildEntry();
+    entry.parsedRows = state.draftEditedRows;
+    entry.status = "reviewed";
+    await txStore("readwrite", (store) => store.put(entry));
+    state.entries.unshift(entry);
+    await saveEntrySnapshotToGoogleSheet(entry.id);
+    clearDraft();
+    state.draftEditedRows = null;
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "存入失敗");
+    if (btn) { btn.disabled = false; btn.textContent = "確認並存雲端"; }
+  }
 }
 
 function openDetail(id) {
@@ -1461,6 +1524,38 @@ async function parseDraftImages() {
       });
       renderRowLineApplyAction();
     }
+    // 初始化 draftEditedRows（深拷貝目前 parsedRows）
+    state.draftEditedRows = parsedRows.map((r) => ({ ...r }));
+    // 綁定 live edit 事件
+    els.parsePreview.querySelectorAll("[data-draft-symbol]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const i = Number(input.dataset.draftSymbol);
+        if (state.draftEditedRows?.[i]) {
+          state.draftEditedRows[i].symbol = input.value.trim().toUpperCase();
+          state.draftEditedRows[i].name = SYMBOL_NAMES[state.draftEditedRows[i].symbol] || state.draftEditedRows[i].name;
+        }
+      });
+    });
+    els.parsePreview.querySelectorAll("[data-draft-shares]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const i = Number(input.dataset.draftShares);
+        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].shares = Number(input.value) || 0;
+      });
+    });
+    els.parsePreview.querySelectorAll("[data-draft-avgcost]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const i = Number(input.dataset.draftAvgcost);
+        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].avgCost = Number(input.value) || 0;
+      });
+    });
+    // 若有 parsedRows，顯示確認存雲端按鈕
+    if (parsedRows.length > 0) {
+      const confirmDiv = document.createElement("div");
+      confirmDiv.className = "draft-confirm-actions";
+      confirmDiv.innerHTML = `<button class="button primary" type="button" id="draft-confirm-save">確認並存雲端</button>`;
+      els.parsePreview.appendChild(confirmDiv);
+      confirmDiv.querySelector("#draft-confirm-save").addEventListener("click", saveDraftDirectToCloud);
+    }
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
     const missingText = missingRows ? `，可能少 ${missingRows} 筆` : "";
@@ -2287,6 +2382,15 @@ function renderColumnCrops(crops) {
 }
 
 function renderRowFixCell(row, index, context, entryId) {
+  if (context === "draft") {
+    return `
+      <div class="row-fix">
+        <label>代號<input data-draft-symbol="${index}" type="text" inputmode="text" value="${escapeHtml(row.symbol || "")}"></label>
+        <label>股數<input data-draft-shares="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.shares ?? "")}"></label>
+        <label>均價<input data-draft-avgcost="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.avgCost ?? "")}"></label>
+      </div>
+    `;
+  }
   if (context !== "detail" || !entryId) return "";
   return `
     <div class="row-fix">
