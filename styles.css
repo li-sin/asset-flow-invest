@@ -844,6 +844,26 @@ textarea {
   margin-top: 12px;
 }
 
+.symbol-row:hover,
+.symbol-row:focus {
+  background: var(--hover-bg, #f0f7f4);
+  outline: none;
+}
+
+.symbol-chart-panel {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-soft, #f9fafb);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.symbol-chart-heading {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
 .layout-shares-market {
   display: grid;
   gap: 6px;

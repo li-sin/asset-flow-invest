@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.19";
-const APP_VERSION_NOTE = "水位趨勢圖歷史資料 + 時間範圍選擇";
+const APP_VERSION = "v0.13.20";
+const APP_VERSION_NOTE = "個股股數趨勢圖 + 點擊明細查看單檔走勢";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -24,10 +24,12 @@ const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
   positions: "AssetFlowPositions",
   levels: "水位",
+  layout: "AssetFlowLayout",
 };
 const SHEET_HEADERS = {
   snapshots: ["snapshot_id", "created_at", "date", "market", "source_entry_id", "source_title", "row_count", "app_version"],
   positions: ["snapshot_id", "date", "market", "symbol", "name", "kind", "shares", "avg_cost", "source", "created_at"],
+  layout: ["date", "market", "symbol", "name", "shares", "prev_shares", "delta"],
 };
 const SYMBOL_NAMES = {
   "0050": "元大台灣50",
@@ -2639,6 +2641,7 @@ async function ensureSheetTables() {
 
   await updateSheetValues(SHEET_NAMES.snapshots, "A1:H1", [SHEET_HEADERS.snapshots]);
   await updateSheetValues(SHEET_NAMES.positions, "A1:J1", [SHEET_HEADERS.positions]);
+  await updateSheetValues(SHEET_NAMES.layout, "A1:G1", [SHEET_HEADERS.layout]);
 }
 
 async function ensureCloudSheetTables() {
@@ -2916,6 +2919,41 @@ async function writeMarketSnapshotPayloads(payloads) {
   };
 }
 
+async function saveLayoutDeltaToSheet(newPayloads) {
+  if (!newPayloads?.length) return;
+  try {
+    const allPositions = state.cloudHistory?.positions || [];
+    const allSnapshots = state.cloudHistory?.snapshots || [];
+    const rows = [];
+    for (const payload of newPayloads) {
+      const { date, market } = payload;
+      const newRows = payload.positionRows.map((r) => ({
+        symbol: r[3], name: r[4], shares: Number(r[6] ?? 0),
+      }));
+      // find previous snapshot for this market (before this date)
+      const prevSnapshot = allSnapshots
+        .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(market) && (s.date || "") < date)
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+      const prevPositions = prevSnapshot
+        ? allPositions.filter((p) => p.snapshotId === prevSnapshot.snapshotId)
+        : [];
+      for (const newRow of newRows) {
+        const prev = prevPositions.find((p) => p.symbol === newRow.symbol);
+        const prevShares = prev ? Number(prev.shares ?? 0) : 0;
+        const delta = newRow.shares - prevShares;
+        if (delta !== 0 || !prev) {
+          rows.push([date, market, newRow.symbol, newRow.name, newRow.shares, prevShares, delta]);
+        }
+      }
+    }
+    if (rows.length) {
+      await appendSheetValues(SHEET_NAMES.layout, "A:G", rows);
+    }
+  } catch (error) {
+    console.warn("saveLayoutDeltaToSheet", error);
+  }
+}
+
 function findDuplicateSnapshotGroups(snapshots, positions) {
   const groups = new Map();
   for (const snapshot of snapshots || []) {
@@ -3186,6 +3224,7 @@ async function saveEntrySnapshotToGoogleSheet(id) {
     await loadLatestCloudSnapshot(false);
     const result = await writeMarketSnapshotPayloads(payloads);
     if (result.cancelled) return;
+    if (result.written.length) await saveLayoutDeltaToSheet(result.written);
     const sheetSnapshotIds = [...result.written.map((payload) => payload.snapshotId), ...result.skipped.map((item) => item.existingSnapshot.snapshotId)];
     if (!result.written.length && result.skipped.length) {
       entry.status = "imported";
@@ -3536,11 +3575,21 @@ function renderTargetLevelChart(history) {
     const pts = allDates.map((d, i) => {
       const found = filtered.find((item) => item.market === market && item.date === d);
       return found ? { i, v: found.targetLevel } : null;
-    }).filter(Boolean);
-    if (!pts.length) return "";
-    const polyline = pts.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ");
-    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${colors[market]}"><title>${marketLabel(market)} ${allDates[p.i]} ${p.v}%</title></circle>`).join("");
-    return `<polyline points="${polyline}" fill="none" stroke="${colors[market]}" stroke-width="2" stroke-linejoin="round"/>${dots}`;
+    });
+    // break line into segments at null gaps (no data = no line)
+    const segments = [];
+    let seg = [];
+    for (const pt of pts) {
+      if (pt) { seg.push(pt); }
+      else if (seg.length) { segments.push(seg); seg = []; }
+    }
+    if (seg.length) segments.push(seg);
+    if (!segments.length) return "";
+    const polylines = segments.map((s) =>
+      `<polyline points="${s.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${colors[market]}" stroke-width="2" stroke-linejoin="round"/>`
+    ).join("");
+    const dots = pts.filter(Boolean).map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${colors[market]}"><title>${marketLabel(market)} ${allDates[p.i]} ${p.v}%</title></circle>`).join("");
+    return polylines + dots;
   }).join("");
   const legend = markets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
   const rangeBtns = ["1M", "6M", "1Y"].map((r) =>
@@ -3605,31 +3654,99 @@ function renderLayoutDeltaTable(points) {
   }).join("");
 }
 
-function renderLayoutSharesChart(cloudHistory) {
-  const snapshots = (cloudHistory?.snapshots || []).slice(0, 10).reverse();
-  if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+function buildSharesTimeline(cloudHistory) {
+  const snapshots = (cloudHistory?.snapshots || [])
+    .slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const allPositions = cloudHistory?.positions || [];
-  return ["TW", "US"].map((market) => {
-    const days = snapshots.map((snap) => {
-      const positions = allPositions.filter((row) => row.snapshotId === snap.snapshotId && normalizeMarketKey(row.market) === market);
-      const totalShares = positions.reduce((sum, row) => sum + Number(row.shares || 0), 0);
-      return { date: snap.date || snap.createdAt?.slice(0, 10) || "", totalShares };
-    }).filter((day) => day.totalShares > 0);
-    if (!days.length) return "";
-    const maxShares = Math.max(...days.map((d) => d.totalShares), 1);
-    const cols = days.map((day) => `
-      <div class="layout-shares-col">
-        <span style="height: ${Math.max(3, Math.round((day.totalShares / maxShares) * 90))}px"></span>
-        <small>${escapeHtml(day.date.slice(5))}</small>
-      </div>
-    `).join("");
-    return `
-      <div class="layout-shares-market">
-        <h4>${marketLabel(market)}</h4>
-        <div class="layout-shares-bars">${cols}</div>
-      </div>
-    `;
+  const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
+  return { snapshots, allPositions, dates };
+}
+
+function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
+  if (!dates.length) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const PL = 52; const PR = 8; const PT = 8; const PB = 24;
+  const cW = W - PL - PR; const cH = H - PT - PB;
+  const allVals = series.flatMap((s) => s.pts.map((p) => p.v));
+  if (!allVals.length) return "<p class=\"muted-text\">尚無資料。</p>";
+  const minV = 0;
+  const maxV = Math.ceil(Math.max(...allVals) * 1.1) || 1;
+  const xPos = (i) => PL + (i / (dates.length - 1 || 1)) * cW;
+  const yPos = (v) => PT + (1 - v / maxV) * cH;
+  const labelStep = Math.max(1, Math.floor(dates.length / 5));
+  const xLabels = dates.map((d, i) => {
+    if (i % labelStep !== 0 && i !== dates.length - 1) return "";
+    return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join("");
+  const yStep = maxV > 5000 ? 1000 : maxV > 1000 ? 500 : maxV > 200 ? 100 : maxV > 50 ? 20 : 10;
+  const yLines = [];
+  for (let v = yStep; v <= maxV; v += yStep) {
+    const y = yPos(v);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${v >= 1000 ? `${v / 1000}k` : v}</text>`);
+  }
+  const svgLines = series.map(({ pts, color }) => {
+    if (!pts.length) return "";
+    const segs = []; let seg = [];
+    const indexed = dates.map((_, i) => pts.find((p) => p.i === i) || null);
+    for (const pt of indexed) {
+      if (pt) { seg.push(pt); } else if (seg.length) { segs.push(seg); seg = []; }
+    }
+    if (seg.length) segs.push(seg);
+    const polylines = segs.map((s) =>
+      `<polyline points="${s.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`
+    ).join("");
+    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${color}"><title>${dates[p.i]} ${p.v.toLocaleString()}</title></circle>`).join("");
+    return polylines + dots;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg>`;
+}
+
+function renderLayoutSharesChart(cloudHistory) {
+  const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
+  if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const series = ["TW", "US"].map((market) => {
+    const pts = dates.map((d, i) => {
+      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      if (!snap) return null;
+      const totalShares = allPositions.filter((row) => row.snapshotId === snap.snapshotId).reduce((sum, row) => sum + Number(row.shares || 0), 0);
+      return totalShares > 0 ? { i, v: totalShares } : null;
+    }).filter(Boolean);
+    return { market, pts, color: colors[market] };
+  });
+  const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
+}
+
+function renderSymbolSharesChart(symbol, cloudHistory) {
+  const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
+  if (dates.length < 1) return "";
+  const pts = dates.map((d, i) => {
+    const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d);
+    if (!snap) return null;
+    const pos = allPositions.find((row) => row.snapshotId === snap.snapshotId && row.symbol === symbol);
+    return pos ? { i, v: Number(pos.shares || 0) } : null;
+  }).filter(Boolean);
+  if (!pts.length) return "";
+  return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
+}
+
+function renderAllSymbolsChart(cloudHistory) {
+  const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
+  if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const palette = ["#2f7d5b", "#4f8ef7", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
+  const symbols = [...new Set(allPositions.map((p) => p.symbol))].sort();
+  const series = symbols.map((symbol, si) => {
+    const pts = dates.map((d, i) => {
+      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d);
+      if (!snap) return null;
+      const pos = allPositions.find((row) => row.snapshotId === snap.snapshotId && row.symbol === symbol);
+      return pos ? { i, v: Number(pos.shares || 0) } : null;
+    }).filter(Boolean);
+    return { symbol, pts, color: palette[si % palette.length] };
+  }).filter((s) => s.pts.length > 0);
+  const legend = series.map((s) => `<span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}`).join(" ");
+  return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}</div>${renderSharesSvg(series, dates, {})}`;
 }
 
 function widthPercent(value, max) {
@@ -3765,7 +3882,7 @@ function renderCloudSnapshot() {
   }).join("");
   const marketDetailSections = marketSummaries.map((item) => {
     const rows = item.rows.map((row) => `
-      <tr>
+      <tr class="symbol-row" data-symbol="${escapeHtml(row.symbol)}" tabindex="0" style="cursor:pointer">
         <td>${escapeHtml(row.symbol)}</td>
         <td>${escapeHtml(row.name)}</td>
         <td>${escapeHtml(displayValue(row.shares))}</td>
@@ -3793,6 +3910,7 @@ function renderCloudSnapshot() {
             <tbody>${rows || "<tr><td colspan=\"5\">沒有庫存</td></tr>"}</tbody>
           </table>
         </div>
+        <div class="symbol-chart-panel" id="symbol-chart-${escapeHtml(item.market)}" hidden></div>
       </section>
     `;
   }).join("");
@@ -3867,6 +3985,14 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
+        <h3>個股股數趨勢</h3>
+        <span>每支股票的股數時間序列，點擊下方明細列查看單檔走勢</span>
+      </div>
+      <div class="layout-shares-chart">${renderAllSymbolsChart(state.cloudHistory)}</div>
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
         <h3>個股每日股數</h3>
         <span>最近快照的持股股數時間序列</span>
       </div>
@@ -3884,7 +4010,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存，依台股與美股分開</span>
+        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看股數走勢</span>
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
@@ -3980,6 +4106,27 @@ function renderCloudSnapshot() {
       state.levelChartRange = btn.dataset.levelRange;
       renderCloudSnapshot();
     });
+  });
+  els.cloudSnapshot.querySelectorAll(".symbol-row").forEach((row) => {
+    const activate = () => {
+      const symbol = row.dataset.symbol;
+      if (!symbol) return;
+      const section = row.closest(".market-detail-section");
+      const panel = section?.querySelector(".symbol-chart-panel");
+      if (!panel) return;
+      const isOpen = !panel.hidden && panel.dataset.activeSymbol === symbol;
+      panel.hidden = isOpen;
+      if (!isOpen) {
+        panel.dataset.activeSymbol = symbol;
+        const name = row.querySelector("td:nth-child(2)")?.textContent || symbol;
+        const chartHtml = renderSymbolSharesChart(symbol, state.cloudHistory);
+        panel.innerHTML = chartHtml
+          ? `<div class="symbol-chart-heading"><strong>${escapeHtml(symbol)}</strong> ${escapeHtml(name)} 股數走勢</div>${chartHtml}`
+          : `<p class="muted-text">${escapeHtml(symbol)} 尚無足夠歷史資料。</p>`;
+      }
+    };
+    row.addEventListener("click", activate);
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); } });
   });
   renderSummaryLine();
 }
