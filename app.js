@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.11";
-const APP_VERSION_NOTE = "多圖截取線";
+const APP_VERSION = "v0.13.12";
+const APP_VERSION_NOTE = "分市場布局圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3375,117 +3375,125 @@ function buildLayoutAnalysis() {
 }
 
 function renderWaterCostAnalysis(points) {
-  const recent = points.slice(-12);
-  const maxAbsCost = Math.max(...recent.map((item) => Math.abs(item.netLayoutCost)), 0);
-  if (!recent.length) return "<p class=\"muted-text\">尚無足夠快照建立布局分析。</p>";
-  return recent.map((item) => {
-    const barClass = item.netLayoutCost >= 0 ? "buy" : "sell";
+  if (!points.length) return "<p class=\"muted-text\">尚無足夠快照建立布局分析。</p>";
+  return ["TW", "US"].map((market) => {
+    const marketPoints = points.filter((item) => item.market === market).slice(-12);
+    if (!marketPoints.length) return "";
+    const maxAbsCost = Math.max(...marketPoints.map((item) => Math.abs(item.netLayoutCost)), 0);
+    const rows = marketPoints.map((item) => {
+      const barClass = item.netLayoutCost >= 0 ? "buy" : "sell";
+      return `
+        <div class="water-cost-row">
+          <div>
+            <strong>${escapeHtml(item.date)}</strong>
+            <span>${item.isInitial ? "初始庫存" : `${item.deltas.length} 檔變動`}</span>
+          </div>
+          <span>${item.targetLevel === null ? "水位未設定" : formatPercent(item.targetLevel)}</span>
+          <div class="layout-cost-meter ${barClass}">
+            <span style="width: ${widthPercent(Math.abs(item.netLayoutCost), maxAbsCost)}%"></span>
+          </div>
+          <b>${item.isInitial ? "基準" : formatSignedMoney(item.netLayoutCost)}</b>
+        </div>
+      `;
+    }).join("");
+    return `<h4 class="market-section-heading">${marketLabel(market)}</h4>${rows}`;
+  }).join("");
+}
+
+function renderDailyShareMatrix(points) {
+  if (!points.length) return "<p class=\"muted-text\">尚無個股股數時間序列。</p>";
+  return ["TW", "US"].map((market) => {
+    const recent = points.filter((item) => item.market === market).slice(-8);
+    if (!recent.length) return "";
+    const symbols = new Map();
+    for (const point of recent) {
+      for (const row of point.rows) {
+        const item = symbols.get(row.symbol) || {
+          symbol: row.symbol,
+          name: row.name || "",
+          score: 0,
+        };
+        item.score = Math.max(item.score, estimatedCost(row));
+        symbols.set(row.symbol, item);
+      }
+    }
+    const selected = [...symbols.values()].sort((a, b) => b.score - a.score).slice(0, 16);
+    const maxShares = Math.max(...recent.flatMap((point) => point.rows.map((row) => Number(row.shares || 0))), 0);
+    const head = recent.map((point) => `<th>${escapeHtml(point.date.slice(5) || point.date)}</th>`).join("");
+    const body = selected.map((symbol) => {
+      const cells = recent.map((point) => {
+        const row = point.rows.find((item) => item.symbol === symbol.symbol);
+        const shares = Number(row?.shares || 0);
+        return `
+          <td>
+            <div class="share-cell">
+              <span style="width: ${widthPercent(shares, maxShares)}%"></span>
+              <b>${shares ? formatNumber(shares, 3) : "-"}</b>
+            </div>
+          </td>
+        `;
+      }).join("");
+      return `
+        <tr>
+          <th>${escapeHtml(symbol.symbol)}<br><small>${escapeHtml(symbol.name)}</small></th>
+          ${cells}
+        </tr>
+      `;
+    }).join("");
     return `
-      <div class="water-cost-row">
-        <div>
-          <strong>${escapeHtml(item.date)}</strong>
-          <span>${marketLabel(item.market)}${item.isInitial ? " · 初始庫存" : ` · ${item.deltas.length} 檔變動`}</span>
-        </div>
-        <span>${item.targetLevel === null ? "水位未設定" : formatPercent(item.targetLevel)}</span>
-        <div class="layout-cost-meter ${barClass}">
-          <span style="width: ${widthPercent(Math.abs(item.netLayoutCost), maxAbsCost)}%"></span>
-        </div>
-        <b>${item.isInitial ? "基準" : formatSignedMoney(item.netLayoutCost)}</b>
+      <h4 class="market-section-heading">${marketLabel(market)}</h4>
+      <div class="table-scroll share-matrix">
+        <table>
+          <thead><tr><th>個股</th>${head}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
       </div>
     `;
   }).join("");
 }
 
-function renderDailyShareMatrix(points) {
-  const recent = points.slice(-8);
-  const symbols = new Map();
-  for (const point of recent) {
-    for (const row of point.rows) {
-      const item = symbols.get(row.symbol) || {
-        symbol: row.symbol,
-        name: row.name || "",
+function renderLayoutDeltaTable(points) {
+  if (!points.length) return "<p class=\"muted-text\">目前還沒有快照差異可計算。</p>";
+  return ["TW", "US"].map((market) => {
+    const rows = points
+      .slice()
+      .reverse()
+      .filter((point) => point.market === market)
+      .flatMap((point) => point.deltas.map((delta) => ({
+        ...delta,
+        date: point.date,
         market: point.market,
-        score: 0,
-      };
-      item.score = Math.max(item.score, estimatedCost(row));
-      symbols.set(row.symbol, item);
-    }
-  }
-  const selected = [...symbols.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 12);
-  if (!selected.length || !recent.length) return "<p class=\"muted-text\">尚無個股股數時間序列。</p>";
-  const maxShares = Math.max(...recent.flatMap((point) => point.rows.map((row) => Number(row.shares || 0))), 0);
-  const head = recent.map((point) => `<th>${escapeHtml(point.date.slice(5) || point.date)}<br><small>${marketLabel(point.market)}</small></th>`).join("");
-  const body = selected.map((symbol) => {
-    const cells = recent.map((point) => {
-      const row = point.rows.find((item) => item.symbol === symbol.symbol);
-      const shares = Number(row?.shares || 0);
-      return `
-        <td>
-          <div class="share-cell">
-            <span style="width: ${widthPercent(shares, maxShares)}%"></span>
-            <b>${shares ? formatNumber(shares, 3) : "-"}</b>
-          </div>
-        </td>
-      `;
-    }).join("");
+      })))
+      .slice(0, 40);
+    if (!rows.length) return "";
     return `
-      <tr>
-        <th>${escapeHtml(symbol.symbol)}<br><small>${escapeHtml(symbol.name)}</small></th>
-        ${cells}
-      </tr>
+      <h4 class="market-section-heading">${marketLabel(market)}</h4>
+      <div class="table-scroll compact-table">
+        <table class="parsed-table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>代號</th>
+              <th>名稱</th>
+              <th>布局股數</th>
+              <th>估算成本</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.date)}</td>
+                <td>${escapeHtml(row.symbol)}</td>
+                <td>${escapeHtml(row.name)}</td>
+                <td>${formatSignedNumber(row.deltaShares, 3)}</td>
+                <td>${formatSignedMoney(row.layoutCost)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
     `;
   }).join("");
-  return `
-    <div class="table-scroll share-matrix">
-      <table>
-        <thead><tr><th>個股</th>${head}</tr></thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>
-  `;
-}
-
-function renderLayoutDeltaTable(points) {
-  const rows = points
-    .slice()
-    .reverse()
-    .flatMap((point) => point.deltas.map((delta) => ({
-      ...delta,
-      date: point.date,
-      market: point.market,
-    })))
-    .slice(0, 40);
-  if (!rows.length) return "<p class=\"muted-text\">目前還沒有快照差異可計算。</p>";
-  return `
-    <div class="table-scroll compact-table">
-      <table class="parsed-table">
-        <thead>
-          <tr>
-            <th>日期</th>
-            <th>市場</th>
-            <th>代號</th>
-            <th>名稱</th>
-            <th>布局股數</th>
-            <th>估算成本</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => `
-            <tr>
-              <td>${escapeHtml(row.date)}</td>
-              <td>${marketLabel(row.market)}</td>
-              <td>${escapeHtml(row.symbol)}</td>
-              <td>${escapeHtml(row.name)}</td>
-              <td>${formatSignedNumber(row.deltaShares, 3)}</td>
-              <td>${formatSignedMoney(row.layoutCost)}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
 }
 
 function widthPercent(value, max) {
@@ -3583,14 +3591,42 @@ function renderCloudSnapshot() {
       <small>${escapeHtml(item.date?.slice(5) || item.createdAt?.slice(5, 10) || "")}</small>
     </div>
   `).join("");
-  const dailyRows = history.slice().reverse().map((item) => `
-    <tr>
-      <td>${escapeHtml(item.date || "")}</td>
-      <td>${escapeHtml(formatNumber(item.stockCount))}</td>
-      <td>${escapeHtml(formatNumber(item.totalShares, 3))}</td>
-      <td>${escapeHtml(formatMoney(item.totalCost))}</td>
-    </tr>
-  `).join("");
+  const dailyRowsByMarket = ["TW", "US"].map((market) => {
+    const marketHistory = history.slice().reverse().map((item) => {
+      const marketPositions = item.positions.filter((row) => normalizeMarketKey(row.market) === market);
+      return {
+        ...item,
+        stockCount: marketPositions.length,
+        totalShares: marketPositions.reduce((sum, row) => sum + Number(row.shares || 0), 0),
+        totalCost: marketPositions.reduce((sum, row) => sum + estimatedCost(row), 0),
+      };
+    }).filter((item) => item.stockCount > 0);
+    if (!marketHistory.length) return "";
+    const rows = marketHistory.map((item) => `
+      <tr>
+        <td>${escapeHtml(item.date || "")}</td>
+        <td>${escapeHtml(formatNumber(item.stockCount))}</td>
+        <td>${escapeHtml(formatNumber(item.totalShares, 3))}</td>
+        <td>${escapeHtml(formatMoney(item.totalCost))}</td>
+      </tr>
+    `).join("");
+    return `
+      <h4 class="market-section-heading">${marketLabel(market)}</h4>
+      <div class="table-scroll compact-table">
+        <table class="parsed-table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>檔數</th>
+              <th>總股數</th>
+              <th>估算投入成本</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
   const marketDetailSections = marketSummaries.map((item) => {
     const rows = item.rows.map((row) => `
       <tr>
@@ -3713,21 +3749,9 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>每日庫存總覽</h3>
-        <span>最近 ${history.length} 次雲端快照</span>
+        <span>最近 ${history.length} 次雲端快照，依市場分開</span>
       </div>
-      <div class="table-scroll compact-table">
-        <table class="parsed-table">
-          <thead>
-            <tr>
-              <th>日期</th>
-              <th>檔數</th>
-              <th>總股數</th>
-              <th>估算投入成本</th>
-            </tr>
-          </thead>
-          <tbody>${dailyRows}</tbody>
-        </table>
-      </div>
+      ${dailyRowsByMarket || "<p class=\"muted-text\">尚無歷史快照。</p>"}
       <div class="snapshot-actions">
         <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
       </div>
