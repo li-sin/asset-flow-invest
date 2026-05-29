@@ -1779,8 +1779,8 @@ textarea {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: var(--card-bg, #1e2530);
-  color: var(--text);
+  background: var(--panel, #fffefa);
+  color: var(--ink, #1f2623);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 4px 8px;
@@ -1788,4 +1788,5 @@ textarea {
   pointer-events: none;
   display: none;
   z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
