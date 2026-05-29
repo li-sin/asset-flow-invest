@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.5";
-const APP_VERSION_NOTE = "Y軸自動縮放；delta 走勢；圖上拖截取線；首頁刪快照；水位修正";
+const APP_VERSION = "v0.14.6";
+const APP_VERSION_NOTE = "Y軸自動縮放；delta 走勢；圖上拖截取線；首頁刪快照；水位修正；水位趨勢非日期列過濾";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -472,14 +472,15 @@ async function loadTargetLevelHistory() {
       readSheetValues("台股", "A:B").catch(() => []),
       readSheetValues("美股", "A:B").catch(() => []),
     ]);
+    const isValidDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d);
     const fromTw = twValues
       .filter((row, i) => i > 0 && row[0] && row[1])
       .map((row) => ({ date: normalizeDateText(row[0]), market: "TW", targetLevel: parsePercentValue(row[1]), source: "台股" }))
-      .filter((item) => item.date && item.targetLevel !== null);
+      .filter((item) => isValidDate(item.date) && item.targetLevel !== null);
     const fromUs = usValues
       .filter((row, i) => i > 0 && row[0] && row[1])
       .map((row) => ({ date: normalizeDateText(row[0]), market: "US", targetLevel: parsePercentValue(row[1]), source: "美股" }))
-      .filter((item) => item.date && item.targetLevel !== null);
+      .filter((item) => isValidDate(item.date) && item.targetLevel !== null);
     // merge; prefer tab data over levels tab (tab is source of truth)
     const seen = new Map();
     for (const item of [...fromTw, ...fromUs]) {
