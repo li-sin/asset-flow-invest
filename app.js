@@ -1,7 +1,7 @@
-const DB_NAME = "assetflow_invest_screenshots";
+﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.15.2";
+const APP_VERSION = "v0.15.3";
 const APP_VERSION_NOTE = "表現率排名；折線圖 tooltip；庫存 tab 排序；手機表格修正";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -95,8 +95,6 @@ const els = {
   date: $("#entry-date"),
   market: $("#entry-market"),
   kind: $("#entry-kind"),
-  status: $("#entry-status"),
-  title: $("#entry-title"),
   text: $("#entry-text"),
   note: $("#entry-note"),
   parseDraft: $("#parse-draft"),
@@ -282,11 +280,6 @@ function updateDraftState() {
       <span>${escapeHtml(image.name)}</span>
     </div>
   `).join("");
-  if (state.draftImages.length > 0 && !els.title.value.trim()) {
-    els.title.value = state.draftImages.length === 1
-      ? state.draftImages[0].name.replace(/\.[^.]+$/, "")
-      : `${state.draftImages.length} 張截圖`;
-  }
   if (!state.draftImages.length) {
     els.ocrStatus.textContent = "尚未解析";
     els.parsePreview.innerHTML = "";
@@ -591,8 +584,8 @@ async function saveEntry(event) {
     date: els.date.value || today(),
     market: els.market.value,
     kind: els.kind.value,
-    status: els.status.value,
-    title: els.title.value.trim(),
+    status: "reviewed",
+    title: `\${els.market.value || "截圖"} \${els.date.value || today()}`,
     text: els.text.value.trim(),
     note: els.note.value.trim(),
     parsedRows: parseHoldings(els.text.value.trim()),
@@ -646,8 +639,8 @@ function buildEntry() {
     date: els.date.value || today(),
     market: els.market.value,
     kind: els.kind.value,
-    status: els.status.value,
-    title: els.title.value.trim(),
+    status: "reviewed",
+    title: `\${els.market.value || "截圖"} \${els.date.value || today()}`,
     text: els.text.value.trim(),
     note: els.note.value.trim(),
     parsedRows: parseHoldings(els.text.value.trim()),
@@ -1461,12 +1454,15 @@ async function parseDraftImages() {
     for (let index = 0; index < state.draftImages.length; index += 1) {
       const image = state.draftImages[index];
       setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張`);
-      const result = await recognizeImage(image, (progress, mode) => {
-        setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%（${mode}）`);
-      }, {
-        maskEditButtons: els.kind.value === "ark_position",
-        columnOcr: els.kind.value === "ark_position",
-      });
+      const result = await Promise.race([
+        recognizeImage(image, (progress, mode) => {
+          setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%（${mode}）`);
+        }, {
+          maskEditButtons: els.kind.value === "ark_position",
+          columnOcr: els.kind.value === "ark_position",
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("OCR 逾時（超過 90 秒），請重新整理後再試")), 90000)),
+      ]);
       if (result.needsRowLineReview) {
         image.pendingRowLineReview = result.rowLineReview;
         image.rowLineReview = result.rowLineReview;
@@ -1553,6 +1549,18 @@ async function parseDraftImages() {
         if (state.draftEditedRows?.[i]) state.draftEditedRows[i].avgCost = Number(input.value) || 0;
       });
     });
+    els.parsePreview.querySelectorAll("[data-draft-name]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const i = Number(input.dataset.draftName);
+        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].name = input.value.trim();
+      });
+    });
+    els.parsePreview.querySelectorAll("[data-draft-kind]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const i = Number(input.dataset.draftKind);
+        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].kind = input.value.trim();
+      });
+    });
     // 若有 parsedRows，顯示確認存雲端按鈕
     if (parsedRows.length > 0) {
       const confirmDiv = document.createElement("div");
@@ -1590,7 +1598,7 @@ function renderRowLineReview(review, imageIndex) {
       </div>
       <div class="row-line-stage">
         <img src="${review.imageDataUrl}" alt="截取線校準預覽">
-        ${lines.map((line, index) => `<span class="row-line-overlay${line.extra ? " candidate" : ""}" data-line-overlay="${index}" style="top:${line.value}%"></span>`).join("")}
+        ${lines.map((line, index) => `<span class="row-line-overlay${line.extra ? " candidate" : ""}" data-line-overlay="${index}" style="top:${line.value}%">${Math.round(line.value)}%</span>`).join("")}
       </div>
       <div class="row-line-controls">
         ${lines.map((line, index) => `
@@ -1637,7 +1645,7 @@ function bindRowLineReviewControls(imageIndex) {
   container.querySelectorAll("[data-row-line-input]").forEach((input) => {
     input.addEventListener("input", () => {
       const overlay = container.querySelector(`[data-line-overlay="${input.dataset.rowLineInput}"]`);
-      if (overlay) overlay.style.top = `${input.value}%`;
+      if (overlay) { overlay.style.top = `${input.value}%`; overlay.textContent = `${Math.round(Number(input.value))}%`; }
     });
   });
   container.querySelectorAll("[data-line-overlay]").forEach((overlay) => {
@@ -1653,6 +1661,7 @@ function bindRowLineReviewControls(imageIndex) {
       let pct = ((clientY - rect.top) / rect.height) * 100;
       pct = Math.min(86, Math.max(18, pct));
       overlay.style.top = `${pct}%`;
+      overlay.textContent = `${pct.toFixed(0)}%`;
       const idx = overlay.dataset.lineOverlay;
       const input = container.querySelector(`[data-row-line-input="${idx}"]`);
       if (input) { input.value = pct.toFixed(1); }
@@ -2290,13 +2299,13 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
   const body = rows.map((row, index) => `
     <tr>
       <td>${renderRowCropCell(row)}</td>
-      <td>${escapeHtml(row.symbol || "待確認")}</td>
-      <td>${escapeHtml(row.name)}</td>
-      <td>${escapeHtml(row.kind || "")}</td>
-      <td>${escapeHtml(displayValue(row.shares))}</td>
-      <td>${escapeHtml(displayValue(row.avgCost))}</td>
+      <td>${context === "draft" ? `<input class="cell-input" data-draft-symbol="${index}" type="text" value="${escapeHtml(row.symbol || "")}" placeholder="代號">` : escapeHtml(row.symbol || "待確認")}</td>
+      <td>${context === "draft" ? `<input class="cell-input" data-draft-name="${index}" type="text" value="${escapeHtml(row.name || "")}" placeholder="名稱">` : escapeHtml(row.name)}</td>
+      <td>${context === "draft" ? `<input class="cell-input" data-draft-kind="${index}" type="text" value="${escapeHtml(row.kind || "")}" placeholder="種類">` : escapeHtml(row.kind || "")}</td>
+      <td>${context === "draft" ? `<input class="cell-input" data-draft-shares="${index}" type="number" step="0.001" value="${escapeHtml(String(row.shares ?? ""))}" placeholder="股數">` : escapeHtml(displayValue(row.shares))}</td>
+      <td>${context === "draft" ? `<input class="cell-input" data-draft-avgcost="${index}" type="number" step="0.001" value="${escapeHtml(String(row.avgCost ?? ""))}" placeholder="均價">` : escapeHtml(displayValue(row.avgCost))}</td>
       <td>${escapeHtml(row.needsReview ? row.reviewReason || "待確認" : "")}</td>
-      <td>${renderRowFixCell(row, index, context, entryId)}</td>
+      ${context !== "draft" ? `<td>${renderRowFixCell(row, index, context, entryId)}</td>` : ""}
       <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
     </tr>
   `).join("");
@@ -2314,7 +2323,7 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
               <th>股數</th>
               <th>成交均價</th>
               <th>狀態</th>
-              <th>修正</th>
+              ${context !== "draft" ? "<th>修正</th>" : ""}
               <th>OCR 區塊</th>
             </tr>
           </thead>
@@ -2364,10 +2373,16 @@ function renderRowCropDiagnostics(rowCrops, skippedRowCrops = []) {
     `;
   }).join("");
 
-  return `
+  const content = `
     <div class="row-diagnostics" aria-label="個股橫列裁切診斷">
       ${items}
     </div>
+  `;
+  return `
+    <details class="diagnostics-details">
+      <summary>分析明細（${unique.length} 列）</summary>
+      ${content}
+    </details>
   `;
 }
 
@@ -2387,15 +2402,6 @@ function renderColumnCrops(crops) {
 }
 
 function renderRowFixCell(row, index, context, entryId) {
-  if (context === "draft") {
-    return `
-      <div class="row-fix">
-        <label>代號<input data-draft-symbol="${index}" type="text" inputmode="text" value="${escapeHtml(row.symbol || "")}"></label>
-        <label>股數<input data-draft-shares="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.shares ?? "")}"></label>
-        <label>均價<input data-draft-avgcost="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.avgCost ?? "")}"></label>
-      </div>
-    `;
-  }
   if (context !== "detail" || !entryId) return "";
   return `
     <div class="row-fix">

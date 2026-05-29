@@ -1,9 +1,9 @@
-const CACHE_NAME = "assetflow-invest-v69";
+const CACHE_NAME = "assetflow-invest-v70";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=0.15.2",
-  "./app.js?v=0.15.2",
+  "./styles.css?v=0.15.3",
+  "./app.js?v=0.15.3",
   "./manifest.json",
   "./icon.svg",
 ];

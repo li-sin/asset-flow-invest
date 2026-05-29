@@ -765,16 +765,23 @@ textarea {
   position: absolute;
   left: 0;
   right: 0;
-  height: 2px;
-  background: #ff5b5b;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 0 10px rgba(255, 91, 91, 0.9);
+  height: 10px;           /* 原本 2px，加粗讓手指好點 */
+  background: rgba(255, 91, 91, 0.7);
+  border-top: 2px solid #ff5b5b;
+  box-shadow: 0 0 6px rgba(255, 91, 91, 0.6);
   pointer-events: auto;
   cursor: ns-resize;
+  transform: translateY(-50%);   /* 讓碰觸區域垂直置中對齊視覺線 */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
 }
 
 .row-line-overlay.candidate {
-  background: #46a6ff;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75), 0 0 10px rgba(70, 166, 255, 0.9);
+  background: rgba(79, 142, 247, 0.5);
+  border-top: 2px dashed #4f8ef7;
+  box-shadow: none;
 }
 
 .row-line-controls {
@@ -1783,6 +1790,18 @@ textarea {
 
   .parsed-table {
     min-width: 900px;
+  }
+}
+
+@media (max-width: 600px) {
+  .draft-preview {
+    flex-direction: column;
+  }
+  .draft-image-item {
+    width: 100%;
+  }
+  .parsed-card {
+    overflow-x: auto;
   }
 }
 
