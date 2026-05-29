@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.4";
+const APP_VERSION = "v0.14.5";
 const APP_VERSION_NOTE = "蝘駁瘞港? tab 靘?嚗耨甇?偌雿隅?Ｙ撣賊?";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4624,7 +4624,7 @@ function bindEvents() {
   els.form.addEventListener("submit", saveEntry);
   els.clear.addEventListener("click", clearDraft);
   els.parseDraft.addEventListener("click", parseDraftImages);
-  els.search.addEventListener("input", (event) => {
+  els.search?.addEventListener("input", (event) => {
     state.query = event.target.value;
     render();
   });
