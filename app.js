@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.12";
-const APP_VERSION_NOTE = "分市場布局圖";
+const APP_VERSION = "v0.13.13";
+const APP_VERSION_NOTE = "修正 SW 更新";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4302,7 +4302,7 @@ function registerServiceWorker() {
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshing) return;
-    if (authFlowInProgress || state.auth.signedIn || googleAccessToken) return;
+    if (authFlowInProgress) return;
     refreshing = true;
     window.location.reload();
   });
