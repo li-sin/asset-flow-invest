@@ -1,7 +1,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.15.1";
+const APP_VERSION = "v0.15.2";
 const APP_VERSION_NOTE = "表現率排名；折線圖 tooltip；庫存 tab 排序；手機表格修正";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -580,6 +580,11 @@ function escapeHtml(value) {
 async function saveEntry(event) {
   event.preventDefault();
   if (!state.draftImages.length) return;
+  // OCR 後有解析資料 → 直接存雲端（合併流程）
+  if (state.draftEditedRows?.length) {
+    await saveDraftDirectToCloud();
+    return;
+  }
 
   const base = {
     id: entryId(),
