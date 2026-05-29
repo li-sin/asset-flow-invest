@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.13";
-const APP_VERSION_NOTE = "修正 SW 更新";
+const APP_VERSION = "v0.13.14";
+const APP_VERSION_NOTE = "水位存 Sheet、Tab 固定底部、庫存趨勢圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -362,7 +362,23 @@ function updateTargetLevel(market, value) {
   }
   state.targetLevels[key] = number;
   saveTargetLevels();
+  saveTargetLevelToSheet(key, number);
   return true;
+}
+
+async function saveTargetLevelToSheet(market, level) {
+  if (!googleAccessToken || !state.auth.authorized) return;
+  try {
+    await ensureCloudSheetTables();
+    const row = [today(), market, level];
+    await appendSheetValues(SHEET_NAMES.levels, "A:C", [row]);
+    state.targetLevelHistory = [
+      { date: today(), market, targetLevel: level, source: "水位" },
+      ...state.targetLevelHistory.filter((item) => !(item.date === today() && item.market === market)),
+    ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  } catch (error) {
+    console.warn("saveTargetLevelToSheet", error);
+  }
 }
 
 function normalizeHeaderText(value) {
@@ -2591,6 +2607,7 @@ async function ensureSheetTables() {
 
   await updateSheetValues(SHEET_NAMES.snapshots, "A1:H1", [SHEET_HEADERS.snapshots]);
   await updateSheetValues(SHEET_NAMES.positions, "A1:J1", [SHEET_HEADERS.positions]);
+  await updateSheetValues(SHEET_NAMES.levels, "A1:C1", [["日期", "市場", "建議水位"]]);
 }
 
 async function ensureCloudSheetTables() {
@@ -3496,6 +3513,33 @@ function renderLayoutDeltaTable(points) {
   }).join("");
 }
 
+function renderLayoutSharesChart(cloudHistory) {
+  const snapshots = (cloudHistory?.snapshots || []).slice(0, 10).reverse();
+  if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const allPositions = cloudHistory?.positions || [];
+  return ["TW", "US"].map((market) => {
+    const days = snapshots.map((snap) => {
+      const positions = allPositions.filter((row) => row.snapshotId === snap.snapshotId && normalizeMarketKey(row.market) === market);
+      const totalShares = positions.reduce((sum, row) => sum + Number(row.shares || 0), 0);
+      return { date: snap.date || snap.createdAt?.slice(0, 10) || "", totalShares };
+    }).filter((day) => day.totalShares > 0);
+    if (!days.length) return "";
+    const maxShares = Math.max(...days.map((d) => d.totalShares), 1);
+    const cols = days.map((day) => `
+      <div class="layout-shares-col">
+        <span style="height: ${Math.max(3, Math.round((day.totalShares / maxShares) * 90))}px"></span>
+        <small>${escapeHtml(day.date.slice(5))}</small>
+      </div>
+    `).join("");
+    return `
+      <div class="layout-shares-market">
+        <h4>${marketLabel(market)}</h4>
+        <div class="layout-shares-bars">${cols}</div>
+      </div>
+    `;
+  }).join("");
+}
+
 function widthPercent(value, max) {
   if (!value || !max) return 0;
   return Math.max(2, Math.min(100, (value / max) * 100));
@@ -3713,6 +3757,14 @@ function renderCloudSnapshot() {
     </section>
   `;
   const holdingsContent = `
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>布局股數趨勢</h3>
+        <span>台股 / 美股每日總布局股數</span>
+      </div>
+      <div class="layout-shares-chart">${renderLayoutSharesChart(state.cloudHistory)}</div>
+    </section>
+
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>個股每日股數</h3>

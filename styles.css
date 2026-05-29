@@ -349,21 +349,23 @@ textarea {
 .dashboard-tab-content {
   display: grid;
   gap: 12px;
-  padding-bottom: 76px;
+  padding-bottom: 80px;
 }
 
 .dashboard-tabs {
-  position: sticky;
-  bottom: 10px;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 4;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 254, 250, 0.96);
-  box-shadow: var(--shadow);
-  padding: 6px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: rgba(255, 254, 250, 0.97);
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+  padding: 6px 6px env(safe-area-inset-bottom, 6px);
 }
 
 .dashboard-tab {
@@ -776,6 +778,54 @@ textarea {
 .trend-day small {
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.layout-shares-chart {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.layout-shares-market {
+  display: grid;
+  gap: 6px;
+}
+
+.layout-shares-market h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.layout-shares-bars {
+  min-height: 100px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(28px, 1fr);
+  align-items: end;
+  gap: 6px;
+  padding-top: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.layout-shares-col {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 4px;
+  justify-items: center;
+}
+
+.layout-shares-col span {
+  width: 18px;
+  min-height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--green);
+}
+
+.layout-shares-col small {
+  color: var(--muted);
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -1537,7 +1587,7 @@ textarea {
   }
 
   .dashboard-tabs {
-    bottom: 6px;
+    padding-bottom: env(safe-area-inset-bottom, 6px);
   }
 
   .capture-panel,
