@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.1";
-const APP_VERSION_NOTE = "Y軸自動縮放；個股趨勢改 delta；擷取線可直接拖動";
+const APP_VERSION = "v0.14.2";
+const APP_VERSION_NOTE = "移除水位 tab 來源；修正水位趨勢異常點";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -466,62 +466,12 @@ function marketFromText(value) {
   return "";
 }
 
-function inferLevelRow(row) {
-  const marketIndex = row.findIndex((value) => marketFromText(value));
-  if (marketIndex < 0) return null;
-  const targetIndex = row.findIndex((value, index) => index !== marketIndex && looksLikePercent(value));
-  if (targetIndex < 0) return null;
-  const dateValue = row.find((value, index) => index !== marketIndex && index !== targetIndex && /\d{1,4}[/-]\d{1,2}/.test(String(value || ""))) || "";
-  return {
-    date: normalizeDateText(dateValue),
-    market: marketFromText(row[marketIndex]),
-    targetLevel: parsePercentValue(row[targetIndex]),
-    source: "水位",
-  };
-}
-
-function parseTargetLevelRows(values) {
-  if (!values?.length) return [];
-  const headers = values[0] || [];
-  const dateIndex = findHeaderIndex(headers, ["date", "日期", "時間", "快照日期", "建立日期", "更新日期"]);
-  const twLevelIndex = findHeaderIndex(headers, ["台股水位", "台股建議水位", "台股建議", "tw水位", "twtarget"]);
-  const usLevelIndex = findHeaderIndex(headers, ["美股水位", "美股建議水位", "美股建議", "us水位", "ustarget"]);
-  if (twLevelIndex >= 0 || usLevelIndex >= 0) {
-    return values.slice(1).flatMap((row) => {
-      const date = normalizeDateText(dateIndex >= 0 ? row[dateIndex] : "");
-      return [
-        twLevelIndex >= 0 ? { date, market: "TW", targetLevel: parsePercentValue(row[twLevelIndex]), source: "水位" } : null,
-        usLevelIndex >= 0 ? { date, market: "US", targetLevel: parsePercentValue(row[usLevelIndex]), source: "水位" } : null,
-      ].filter((item) => item && item.targetLevel !== null);
-    });
-  }
-  const marketIndex = findHeaderIndex(headers, ["market", "市場", "股市", "類別", "地區"]);
-  const targetIndex = findTargetLevelIndex(headers);
-  const hasUsableHeader = marketIndex >= 0 && targetIndex >= 0;
-  const rows = hasUsableHeader ? values.slice(1) : values;
-
-  return rows.map((row) => {
-    if (!hasUsableHeader) return inferLevelRow(row);
-    const market = marketFromText(row[marketIndex]);
-    const targetLevel = parsePercentValue(row[targetIndex]);
-    if (!market || targetLevel === null) return null;
-    return {
-      date: normalizeDateText(dateIndex >= 0 ? row[dateIndex] : ""),
-      market,
-      targetLevel,
-      source: "水位",
-    };
-  }).filter(Boolean);
-}
-
 async function loadTargetLevelHistory() {
   try {
-    const [levelsValues, twValues, usValues] = await Promise.all([
-      readCloudSheetValues(SHEET_NAMES.levels, "A1:Z").catch(() => []),
+    const [twValues, usValues] = await Promise.all([
       readSheetValues("台股", "A:B").catch(() => []),
       readSheetValues("美股", "A:B").catch(() => []),
     ]);
-    const fromLevels = parseTargetLevelRows(levelsValues);
     const fromTw = twValues
       .filter((row, i) => i > 0 && row[0] && row[1])
       .map((row) => ({ date: normalizeDateText(row[0]), market: "TW", targetLevel: parsePercentValue(row[1]), source: "台股" }))
@@ -530,9 +480,8 @@ async function loadTargetLevelHistory() {
       .filter((row, i) => i > 0 && row[0] && row[1])
       .map((row) => ({ date: normalizeDateText(row[0]), market: "US", targetLevel: parsePercentValue(row[1]), source: "美股" }))
       .filter((item) => item.date && item.targetLevel !== null);
-    // merge; prefer tab data over levels tab (tab is source of truth)
     const seen = new Map();
-    for (const item of [...fromTw, ...fromUs, ...fromLevels]) {
+    for (const item of [...fromTw, ...fromUs]) {
       const key = `${item.market}_${item.date}`;
       if (!seen.has(key)) seen.set(key, item);
     }
