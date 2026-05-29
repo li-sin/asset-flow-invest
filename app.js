@@ -1,8 +1,8 @@
-const DB_NAME = "assetflow_invest_screenshots";
+﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.2";
-const APP_VERSION_NOTE = "移除水位 tab 來源；修正水位趨勢異常點";
+const APP_VERSION = "v0.14.3";
+const APP_VERSION_NOTE = "蝘駁瘞港? tab 靘?嚗耨甇?偌雿隅?Ｙ撣賊?";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -24,7 +24,7 @@ const SHEET_SYNC_CONFIG_KEY = "assetflow_invest_sheet_sync";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
   positions: "AssetFlowPositions",
-  levels: "水位",
+  levels: "瘞港?",
   layout: "AssetFlowLayout",
 };
 const SHEET_HEADERS = {
@@ -33,22 +33,22 @@ const SHEET_HEADERS = {
   layout: ["date", "market", "symbol", "name", "shares", "prev_shares", "delta"],
 };
 const SYMBOL_NAMES = {
-  "0050": "元大台灣50",
-  "0051": "元大中型100",
-  "0052": "富邦科技",
-  "0053": "元大電子",
-  "00830": "國泰費城半導體",
-  "00861": "元大全球未來通訊",
-  "00876": "元大全球5G",
-  "00893": "國泰智能電動車",
-  "00909": "國泰數位支付服務",
-  "00910": "第一金太空衛星",
-  "00911": "兆豐洲際半導體",
-  "00920": "富邦ESG綠色電力",
-  "00941": "中信上游半導體",
-  "00988A": "主動統一全球創新",
-  "2327": "國巨",
-  "2330": "台積電",
+  "0050": "?之?啁50",
+  "0051": "?之銝剖?100",
+  "0052": "撖蝘?",
+  "0053": "?之?餃?",
+  "00830": "?陸鞎餃???擃?,
+  "00861": "?之?函??芯???",
+  "00876": "?之?函?5G",
+  "00893": "?陸?箄?餃?頠?,
+  "00909": "?陸?訾??臭???",
+  "00910": "蝚砌??云蝛箄???,
+  "00911": "??瘣脤???擃?,
+  "00920": "撖ESG蝬?餃?",
+  "00941": "銝凋縑銝虜??擃?,
+  "00988A": "銝餃?蝯曹??函??菜",
+  "2327": "?楊",
+  "2330": "?啁???,
 };
 
 const state = {
@@ -71,7 +71,7 @@ const state = {
     signedIn: false,
     authorized: false,
     email: "",
-    message: "請使用授權的 Google 帳號登入。",
+    message: "隢蝙?冽?甈? Google 撣唾??餃??,
   },
 };
 
@@ -217,11 +217,11 @@ function blobToDataUrl(blob) {
 async function ensureHeicConverter() {
   if (window.heic2any) return;
   if (!heicLoadPromise) {
-    heicLoadPromise = loadScript(HEIC_SCRIPT_URL, () => Boolean(window.heic2any), "HEIC 轉檔模組");
+    heicLoadPromise = loadScript(HEIC_SCRIPT_URL, () => Boolean(window.heic2any), "HEIC 頧?璅∠?");
   }
   await heicLoadPromise;
   if (!window.heic2any) {
-    throw new Error("HEIC 轉檔模組載入後仍不可用，請重新整理後再試");
+    throw new Error("HEIC 頧?璅∠?頛敺?銝?剁?隢??唳???岫");
   }
 }
 
@@ -284,40 +284,40 @@ function updateDraftState() {
   if (state.draftImages.length > 0 && !els.title.value.trim()) {
     els.title.value = state.draftImages.length === 1
       ? state.draftImages[0].name.replace(/\.[^.]+$/, "")
-      : `${state.draftImages.length} 張截圖`;
+      : `${state.draftImages.length} 撘菜?;
   }
   if (!state.draftImages.length) {
-    els.ocrStatus.textContent = "尚未解析";
+    els.ocrStatus.textContent = "撠閫??";
     els.parsePreview.innerHTML = "";
   }
 }
 
 function kindLabel(kind) {
   return {
-    ark_position: "方舟庫存",
-    ark_level: "方舟水位",
-    ark_layout: "方舟布局",
-    broker_position: "券商庫存",
-    other: "其他",
+    ark_position: "?寡?摨怠?",
+    ark_level: "?寡?瘞港?",
+    ark_layout: "?寡?撣?",
+    broker_position: "?詨?摨怠?",
+    other: "?嗡?",
   }[kind] || kind;
 }
 
 function statusLabel(status) {
   return {
-    new: "未整理",
-    reviewed: "已確認",
-    imported: "已匯入",
+    new: "?芣??,
+    reviewed: "撌脩Ⅱ隤?,
+    imported: "撌脣??,
   }[status] || status;
 }
 
 function marketLabel(market) {
-  return { TW: "台股", US: "美股", ALL: "全部" }[market] || market;
+  return { TW: "?啗", US: "蝢", ALL: "?券" }[market] || market;
 }
 
 function normalizeMarketKey(market) {
   const value = String(market || "").trim().toUpperCase();
-  if (["TW", "台股", "TAIWAN", "TPE", "TSE"].includes(value)) return "TW";
-  if (["US", "美股", "USA", "NYSE", "NASDAQ"].includes(value)) return "US";
+  if (["TW", "?啗", "TAIWAN", "TPE", "TSE"].includes(value)) return "TW";
+  if (["US", "蝢", "USA", "NYSE", "NASDAQ"].includes(value)) return "US";
   return value;
 }
 
@@ -362,7 +362,7 @@ function updateTargetLevel(market, value) {
   }
   const number = Number(text);
   if (!Number.isFinite(number) || number < 0 || number > 100) {
-    alert("市場建議水位請輸入 0 到 100 的百分比");
+    alert("撣撱箄降瘞港?隢撓??0 ??100 ???");
     return false;
   }
   state.targetLevels[key] = number;
@@ -374,7 +374,7 @@ function updateTargetLevel(market, value) {
 async function saveTargetLevelToSheet(market, level) {
   if (!googleAccessToken || !state.auth.authorized) return;
   try {
-    const tabName = market === "TW" ? "台股" : "美股";
+    const tabName = market === "TW" ? "?啗" : "蝢";
     const values = await readSheetValues(tabName, "A:B");
     const todayStr = today();
     const levelStr = `${level}%`;
@@ -390,7 +390,7 @@ async function saveTargetLevelToSheet(market, level) {
       body: JSON.stringify({ majorDimension: "ROWS", values: writeValues }),
     });
     state.targetLevelHistory = [
-      { date: todayStr, market, targetLevel: level, source: "水位" },
+      { date: todayStr, market, targetLevel: level, source: "瘞港?" },
       ...state.targetLevelHistory.filter((item) => !(item.date === todayStr && item.market === market)),
     ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   } catch (error) {
@@ -403,7 +403,7 @@ function normalizeHeaderText(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "")
-    .replace(/[：:_-]/g, "");
+    .replace(/[嚗?_-]/g, "");
 }
 
 function findHeaderIndex(headers, candidates) {
@@ -412,8 +412,8 @@ function findHeaderIndex(headers, candidates) {
 }
 
 function findTargetLevelIndex(headers) {
-  const preferred = findHeaderIndex(headers, ["方舟建議水位", "建議水位", "目標水位", "建議%", "targetlevel", "target"]);
-  return preferred >= 0 ? preferred : findHeaderIndex(headers, ["水位"]);
+  const preferred = findHeaderIndex(headers, ["?寡?撱箄降瘞港?", "撱箄降瘞港?", "?格?瘞港?", "撱箄降%", "targetlevel", "target"]);
+  return preferred >= 0 ? preferred : findHeaderIndex(headers, ["瘞港?"]);
 }
 
 function normalizeDateText(value) {
@@ -448,37 +448,37 @@ function normalizeDateText(value) {
 }
 
 function parsePercentValue(value) {
-  const text = String(value ?? "").replace("％", "%").trim();
+  const text = String(value ?? "").replace("嚗?, "%").trim();
   const number = Number(text.replace("%", "").replace(/,/g, ""));
   return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
 }
 
 function looksLikePercent(value) {
-  const text = String(value ?? "").replace("％", "%").trim();
+  const text = String(value ?? "").replace("嚗?, "%").trim();
   return text.includes("%") || (parsePercentValue(text) !== null && !isTwSymbol(text));
 }
 
 function marketFromText(value) {
   const text = String(value || "").trim().toUpperCase();
   if (!text) return "";
-  if (/(^|[^A-Z])TW([^A-Z]|$)|台股|臺股|台灣|臺灣/.test(text)) return "TW";
-  if (/(^|[^A-Z])US([^A-Z]|$)|美股|美國/.test(text)) return "US";
+  if (/(^|[^A-Z])TW([^A-Z]|$)|?啗|?箄|?啁|?箇/.test(text)) return "TW";
+  if (/(^|[^A-Z])US([^A-Z]|$)|蝢|蝢?/.test(text)) return "US";
   return "";
 }
 
 async function loadTargetLevelHistory() {
   try {
     const [twValues, usValues] = await Promise.all([
-      readSheetValues("台股", "A:B").catch(() => []),
-      readSheetValues("美股", "A:B").catch(() => []),
+      readSheetValues("?啗", "A:B").catch(() => []),
+      readSheetValues("蝢", "A:B").catch(() => []),
     ]);
     const fromTw = twValues
       .filter((row, i) => i > 0 && row[0] && row[1])
-      .map((row) => ({ date: normalizeDateText(row[0]), market: "TW", targetLevel: parsePercentValue(row[1]), source: "台股" }))
+      .map((row) => ({ date: normalizeDateText(row[0]), market: "TW", targetLevel: parsePercentValue(row[1]), source: "?啗" }))
       .filter((item) => item.date && item.targetLevel !== null);
     const fromUs = usValues
       .filter((row, i) => i > 0 && row[0] && row[1])
-      .map((row) => ({ date: normalizeDateText(row[0]), market: "US", targetLevel: parsePercentValue(row[1]), source: "美股" }))
+      .map((row) => ({ date: normalizeDateText(row[0]), market: "US", targetLevel: parsePercentValue(row[1]), source: "蝢" }))
       .filter((item) => item.date && item.targetLevel !== null);
     const seen = new Map();
     for (const item of [...fromTw, ...fromUs]) {
@@ -538,8 +538,8 @@ function render() {
           <span class="chip">${kindLabel(entry.kind)}</span>
           <span class="chip ${entry.status}">${statusLabel(entry.status)}</span>
         </div>
-        <h3>${escapeHtml(entry.title || "未命名截圖")}</h3>
-        <p>${escapeHtml(parsedCount ? `${entry.date} · ${parsedCount} 筆庫存資料` : entry.text || entry.note || entry.date)}</p>
+        <h3>${escapeHtml(entry.title || "?芸???)}</h3>
+        <p>${escapeHtml(parsedCount ? `${entry.date} 繚 ${parsedCount} 蝑澈摮?? : entry.text || entry.note || entry.date)}</p>
       </div>
     `;
     card.addEventListener("click", () => openDetail(entry.id));
@@ -558,12 +558,12 @@ function renderSummaryLine() {
   const positions = state.cloudSnapshot?.positions || [];
   const date = state.cloudSnapshot?.snapshot?.date;
   if (positions.length) {
-    els.summary.textContent = `${date || "最新"} · ${positions.length} 檔庫存 · ${state.entries.length} 張快照`;
+    els.summary.textContent = `${date || "???} 繚 ${positions.length} 瑼澈摮?繚 ${state.entries.length} 撘萄翰?呎;
     return;
   }
   els.summary.textContent = state.auth.authorized
-    ? `尚未讀到雲端庫存 · ${state.entries.length} 張快照`
-    : "登入後自動載入雲端庫存";
+    ? `撠霈?圈蝡臬澈摮?繚 ${state.entries.length} 撘萄翰?呎
+    : "?餃敺???仿蝡臬澈摮?;
 }
 
 function escapeHtml(value) {
@@ -597,7 +597,7 @@ async function saveEntry(event) {
     id: index === 0 ? base.id : entryId(),
     title: state.draftImages.length === 1
       ? base.title
-      : `${base.title || "截圖"} ${index + 1}`,
+      : `${base.title || "?芸?"} ${index + 1}`,
     images: [image],
     parsedRows: image.parsedRows || base.parsedRows,
     ocrElapsedMs: image.ocrElapsedMs,
@@ -628,7 +628,7 @@ function clearDraft() {
   els.parseDraft.disabled = true;
   els.draftPreview.innerHTML = "";
   els.parsePreview.innerHTML = "";
-  els.ocrStatus.textContent = "尚未解析";
+  els.ocrStatus.textContent = "撠閫??";
 }
 
 function openDetail(id) {
@@ -643,29 +643,29 @@ function openDetail(id) {
         <span class="chip">${kindLabel(entry.kind)}</span>
         <span class="chip ${entry.status}">${statusLabel(entry.status)}</span>
       </div>
-      <h2>${escapeHtml(entry.title || "未命名截圖")}</h2>
+      <h2>${escapeHtml(entry.title || "?芸???)}</h2>
       <div class="form-actions detail-actions">
-        <button class="button secondary" type="button" data-action="parse-entry">重新解析截圖</button>
-        <button class="button secondary" type="button" data-action="export-diagnostics">匯出診斷</button>
-        <button class="button secondary" type="button" data-action="mark-reviewed">標記已確認</button>
-        <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
-        <button class="button primary" type="button" data-action="save-cloud-snapshot">存到 Google Sheet</button>
-        <button class="button ghost danger" type="button" data-action="delete">刪除</button>
+        <button class="button secondary" type="button" data-action="parse-entry">?閫???芸?</button>
+        <button class="button secondary" type="button" data-action="export-diagnostics">?臬閮箸</button>
+        <button class="button secondary" type="button" data-action="mark-reviewed">璅?撌脩Ⅱ隤?/button>
+        <button class="button secondary" type="button" data-action="mark-imported">璅?撌脣??/button>
+        <button class="button primary" type="button" data-action="save-cloud-snapshot">摮 Google Sheet</button>
+        <button class="button ghost danger" type="button" data-action="delete">?芷</button>
       </div>
       ${renderOcrCompleteness(entry.expectedTotalCount || entry.completeCircleCount || 0, (entry.parsedRows || []).length || parseHoldings(entry.text || "").length, entry.missingRowCount || 0, "detail", entry.expectedTotalCount ? "total" : "circle")}
       ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-grid">
-        <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
-        <div class="detail-field"><span>檔名</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
+        <div class="detail-field"><span>撱箇???</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
+        <div class="detail-field"><span>瑼?</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
         ${renderOcrTiming(entry)}
       </div>
       <div class="detail-field ocr-text-field">
-        <span>擷取文字 / 手動補資料</span>
-        <div class="pre-wrap">${escapeHtml(entry.text || "尚未填寫")}</div>
+        <span>?瑕??? / ??鋆???/span>
+        <div class="pre-wrap">${escapeHtml(entry.text || "撠憛怠神")}</div>
       </div>
       <div class="detail-field">
-        <span>備註</span>
-        <div class="pre-wrap">${escapeHtml(entry.note || "尚未填寫")}</div>
+        <span>?酉</span>
+        <div class="pre-wrap">${escapeHtml(entry.note || "撠憛怠神")}</div>
       </div>
     </div>
   `;
@@ -701,14 +701,14 @@ function loadScript(src, isReady, label) {
   const existing = document.querySelector(`script[src="${src}"]`);
   return new Promise((resolve, reject) => {
     const script = existing || document.createElement("script");
-    const timer = setTimeout(() => reject(new Error(`${label} 載入逾時`)), 20000);
+    const timer = setTimeout(() => reject(new Error(`${label} 頛?暹?`)), 20000);
     script.onload = () => {
       clearTimeout(timer);
       resolve();
     };
     script.onerror = () => {
       clearTimeout(timer);
-      reject(new Error(`無法載入 ${label}，請確認網路連線`));
+      reject(new Error(`?⊥?頛 ${label}嚗?蝣箄?蝬脰楝???`));
     };
     if (!existing) {
       script.src = src;
@@ -720,11 +720,11 @@ function loadScript(src, isReady, label) {
 async function ensureTesseract() {
   if (window.Tesseract?.recognize) return;
   if (!tesseractLoadPromise) {
-    tesseractLoadPromise = loadScript(OCR_SCRIPT_URL, () => Boolean(window.Tesseract?.recognize), "OCR 模組");
+    tesseractLoadPromise = loadScript(OCR_SCRIPT_URL, () => Boolean(window.Tesseract?.recognize), "OCR 璅∠?");
   }
   await tesseractLoadPromise;
   if (!window.Tesseract?.recognize) {
-    throw new Error("OCR 模組載入後仍不可用，請重新整理後再試");
+    throw new Error("OCR 璅∠?頛敺?銝?剁?隢??唳???岫");
   }
 }
 
@@ -743,8 +743,8 @@ async function recognizeImage(image, onProgress, options = {}) {
   await ensureTesseract();
 
   const attempts = [
-    { lang: "chi_tra+eng", label: "繁中/英文" },
-    { lang: "eng", label: "英文/數字備援" },
+    { lang: "chi_tra+eng", label: "蝜葉/?望?" },
+    { lang: "eng", label: "?望?/?詨??" },
   ];
   const errors = [];
 
@@ -767,7 +767,7 @@ async function recognizeImage(image, onProgress, options = {}) {
     if (rowLineReview.needsReview && !options.rowLinePercents?.length) {
       return {
         text: full.text,
-        mode: `${full.mode} + 截取線校準`,
+        mode: `${full.mode} + ?芸?蝺皞,
         elapsedMs: Math.round(performance.now() - startedAt),
         needsRowLineReview: true,
         rowLineReview: {
@@ -795,8 +795,8 @@ async function recognizeImage(image, onProgress, options = {}) {
     const missingRowCount = expectedCount ? Math.max(0, expectedCount - rows.length) : 0;
 
     return {
-      text: [full.text.trim(), rowText].filter(Boolean).join("\n\n--- 橫列 OCR ---\n\n"),
-      mode: `${full.mode} + 橫列裁切`,
+      text: [full.text.trim(), rowText].filter(Boolean).join("\n\n--- 璈怠? OCR ---\n\n"),
+      mode: `${full.mode} + 璈怠?鋆?`,
       rows,
       elapsedMs: Math.round(performance.now() - startedAt),
       rowOcrMs: Math.round(performance.now() - rowStartedAt),
@@ -811,16 +811,16 @@ async function recognizeImage(image, onProgress, options = {}) {
     };
   }
 
-  throw new Error(`OCR 無法完成。${errors.join("；")}`);
+  throw new Error(`OCR ?⊥?摰???{errors.join("嚗?)}`);
 }
 
 function extractExpectedHoldingCount(text) {
   const normalized = normalizeOcrText(text);
   const compact = normalized.replace(/\s+/g, "");
   const patterns = [
-    /總共(\d{1,3})檔/,
-    /共(\d{1,3})檔/,
-    /(\d{1,3})檔$/,
+    /蝮賢(\d{1,3})瑼?,
+    /??\d{1,3})瑼?,
+    /(\d{1,3})瑼?/,
   ];
   for (const pattern of patterns) {
     const match = compact.match(pattern);
@@ -850,7 +850,7 @@ async function recognizeDataUrl(dataUrl, attempts, onProgress, errors = []) {
         mode: attempt.label,
         lines: normalizeTesseractLines(result?.data?.lines || []),
       };
-      errors.push(`${attempt.label}: 沒有辨識到文字`);
+      errors.push(`${attempt.label}: 瘝?颲刻??唳?摮);
     } catch (error) {
       errors.push(`${attempt.label}: ${error.message || error}`);
     }
@@ -877,7 +877,7 @@ function normalizeTesseractLines(lines) {
 
 async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) {
   const rowRects = rects?.length ? rects : await detectArkRowRects(dataUrl, fullLines, markers);
-  const attempts = [{ lang: "chi_tra+eng", label: "橫列" }];
+  const attempts = [{ lang: "chi_tra+eng", label: "璈怠?" }];
   const rows = [];
   const crops = [];
   const skipped = [];
@@ -885,7 +885,7 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
   for (let index = 0; index < rowRects.length; index += 1) {
     const rect = rowRects[index];
     const crop = await cropImageDataUrl(dataUrl, rect);
-    const label = rect.fallback ? `備援第 ${index + 1} 列` : `第 ${index + 1} 列`;
+    const label = rect.fallback ? `?蝚?${index + 1} ? : `蝚?${index + 1} ?;
     const result = await recognizeDataUrl(crop, attempts, (progress) => {
       onProgress?.(progress, `${label} OCR`);
     });
@@ -1215,7 +1215,7 @@ async function detectCompleteCircleMarkers(dataUrl) {
 
 function extractNumbersAfterHolding(text) {
   const normalized = normalizeOcrText(text);
-  const index = normalized.search(/現\s*股/);
+  const index = normalized.search(/?閱s*??);
   if (index < 0) return [];
   return (normalized.slice(index).match(/[\d,]+(?:\.\d+)?/g) || [])
     .map(parseNumberToken)
@@ -1246,7 +1246,7 @@ function loadImage(dataUrl) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("圖片載入失敗，無法進行 OCR 前處理"));
+    image.onerror = () => reject(new Error("??頛憭望?嚗瘜脰? OCR ????));
     image.src = dataUrl;
   });
 }
@@ -1294,11 +1294,11 @@ async function imageDimensions(dataUrl) {
 }
 
 async function recognizeArkColumns(dataUrl, onProgress) {
-  const columnAttempts = [{ lang: "chi_tra+eng", label: "欄位" }];
+  const columnAttempts = [{ lang: "chi_tra+eng", label: "甈?" }];
   const columns = [
-    { key: "name", label: "持有股票欄", rect: { x: 0.095, y: 0.215, width: 0.255, height: 0.64 } },
-    { key: "shares", label: "總股數欄", rect: { x: 0.535, y: 0.215, width: 0.165, height: 0.64 } },
-    { key: "avgCost", label: "成交均價欄", rect: { x: 0.72, y: 0.215, width: 0.18, height: 0.64 } },
+    { key: "name", label: "???∠巨甈?, rect: { x: 0.095, y: 0.215, width: 0.255, height: 0.64 } },
+    { key: "shares", label: "蝮質?豢?", rect: { x: 0.535, y: 0.215, width: 0.165, height: 0.64 } },
+    { key: "avgCost", label: "?漱?甈?, rect: { x: 0.72, y: 0.215, width: 0.18, height: 0.64 } },
   ];
   const result = {};
 
@@ -1322,11 +1322,11 @@ async function recognizeArkColumns(dataUrl, onProgress) {
 function renderColumnOcrText(column) {
   if (!column) return "";
   return [
-    "【持有股票欄】",
+    "???蟡冽???,
     column.name || "",
-    "【總股數欄】",
+    "?蜇?⊥甈?,
     column.shares || "",
-    "【成交均價欄】",
+    "??鈭文??寞???,
     column.avgCost || "",
   ].join("\n").trim();
 }
@@ -1337,14 +1337,14 @@ async function applyManualRowFix(entryId, rowIndex, values) {
 
   const symbol = normalizeSymbolInput(values.symbol);
   if (!isTwSymbol(symbol)) {
-    alert("請輸入有效代號，例如 0050、2330、00988A");
+    alert("隢撓?交??誨??靘? 0050??330??0988A");
     return;
   }
 
   const shares = parseManualNumber(values.shares);
   const avgCost = parseManualNumber(values.avgCost);
   if (shares === null || avgCost === null) {
-    alert("請輸入有效股數與成交均價");
+    alert("隢撓?交???貉??漱?");
     return;
   }
 
@@ -1357,7 +1357,7 @@ async function applyManualRowFix(entryId, rowIndex, values) {
     shares,
     avgCost,
     needsReview: !officialName,
-    reviewReason: officialName ? "" : "名稱待補",
+    reviewReason: officialName ? "" : "?迂敺?",
     manualSymbol: true,
     manualShares: true,
     manualAvgCost: true,
@@ -1385,14 +1385,14 @@ function normalizeSymbolInput(value) {
 async function parseDraftImages() {
   if (!state.draftImages.length || els.parseDraft.disabled) return;
   els.parseDraft.disabled = true;
-  setOcrStatus("載入 OCR 中...");
+  setOcrStatus("頛 OCR 銝?..");
   try {
     const texts = [];
     for (let index = 0; index < state.draftImages.length; index += 1) {
       const image = state.draftImages[index];
-      setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張`);
+      setOcrStatus(`閫??蝚?${index + 1}/${state.draftImages.length} 撘琛);
       const result = await recognizeImage(image, (progress, mode) => {
-        setOcrStatus(`解析第 ${index + 1}/${state.draftImages.length} 張 ${progress}%（${mode}）`);
+        setOcrStatus(`閫??蝚?${index + 1}/${state.draftImages.length} 撘?${progress}%嚗?{mode}嚗);
       }, {
         maskEditButtons: els.kind.value === "ark_position",
         columnOcr: els.kind.value === "ark_position",
@@ -1408,7 +1408,7 @@ async function parseDraftImages() {
           els.parsePreview.innerHTML = renderRowLineReview(result.rowLineReview, index);
           bindRowLineReviewControls(index);
           renderRowLineApplyAction();
-          setOcrStatus(`需要調整截取線：紅圈 ${image.completeCircleCount} 個，偵測到 ${result.rowLineReview.detectedLines} 條線，應為 ${result.rowLineReview.expectedLines} 條`);
+          setOcrStatus(`?閬矽?湔??嚗???${image.completeCircleCount} ???菜葫??${result.rowLineReview.detectedLines} 璇?嚗???${result.rowLineReview.expectedLines} 璇);
           return;
         }
         continue;
@@ -1443,7 +1443,7 @@ async function parseDraftImages() {
       ? state.draftImages
         .map((image, imageIndex) => image.rowLineReview?.imageDataUrl ? renderRowLineReview({
           ...image.rowLineReview,
-          reason: `總檔數顯示 ${expectedRows} 檔，目前合併解析 ${parsedRows.length} 筆，可能少 ${missingRows} 筆。`,
+          reason: `蝮賣??賊＊蝷?${expectedRows} 瑼??桀??蔥閫?? ${parsedRows.length} 蝑??航撠?${missingRows} 蝑,
           extraLineCount: Math.max(0, missingRows - 1),
         }, imageIndex) : "")
         .join("")
@@ -1460,13 +1460,13 @@ async function parseDraftImages() {
       renderRowLineApplyAction();
     }
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
-    const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
-    const missingText = missingRows ? `，可能少 ${missingRows} 筆` : "";
-    setOcrStatus(parsedRows.length ? `完成，${countText}抓到 ${parsedRows.length} 筆候選庫存${missingText}（${formatDuration(elapsed)}）` : `完成，${countText}未抓到庫存列${missingText}（${formatDuration(elapsed)}）`);
+    const countText = expectedTotal ? `蝮賢 ${expectedTotal} 瑼?` : (expectedRows ? `摰??${expectedRows} ??` : "");
+    const missingText = missingRows ? `嚗?賢? ${missingRows} 蝑 : "";
+    setOcrStatus(parsedRows.length ? `摰?嚗?{countText}? ${parsedRows.length} 蝑摨怠?${missingText}嚗?{formatDuration(elapsed)}嚗 : `摰?嚗?{countText}?芣??啣澈摮?${missingText}嚗?{formatDuration(elapsed)}嚗);
   } catch (error) {
     console.error(error);
-    setOcrStatus("解析失敗");
-    alert(error.message || "截圖解析失敗，請重新整理後再試");
+    setOcrStatus("閫??憭望?");
+    alert(error.message || "?芸?閫??憭望?嚗???渡?敺?閰?);
   } finally {
     els.parseDraft.disabled = state.draftImages.length === 0;
   }
@@ -1483,17 +1483,17 @@ function renderRowLineReview(review, imageIndex) {
   return `
     <section class="row-line-review" data-row-line-review="${imageIndex}">
       <div class="ocr-completeness warning">
-        <strong>請先調整截取線</strong>
-        <p>${escapeHtml(review.reason || `紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。`)}直接拖曳圖上的線，或使用下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
+        <strong>隢?隤踵?芸?蝺?/strong>
+        <p>${escapeHtml(review.reason || `蝝??閬?${review.expectedLines} 璇帖???嚗??皜?${review.detectedLines} 璇)}?湔?????嚗?雿輻銝皛▼嚗?蝺?冽??拙?銝剝?嚗???瑕???/p>
       </div>
       <div class="row-line-stage">
-        <img src="${review.imageDataUrl}" alt="截取線校準預覽">
+        <img src="${review.imageDataUrl}" alt="?芸?蝺皞?閬?>
         ${lines.map((line, index) => `<span class="row-line-overlay${line.extra ? " candidate" : ""}" data-line-overlay="${index}" style="top:${line.value}%"></span>`).join("")}
       </div>
       <div class="row-line-controls">
         ${lines.map((line, index) => `
           <label>
-            ${line.extra ? "候補線" : "線"} ${index + 1}
+            ${line.extra ? "??蝺? : "蝺?} ${index + 1}
             <input type="range" min="18" max="86" step="0.1" value="${escapeHtml(line.value)}" data-row-line-input="${index}">
           </label>
         `).join("")}
@@ -1507,7 +1507,7 @@ function renderRowLineApplyAction() {
   if (els.parsePreview.querySelector("[data-row-line-apply-all]")) return;
   const actions = document.createElement("div");
   actions.className = "row-line-global-actions";
-  actions.innerHTML = '<button class="button primary" type="button" data-row-line-apply-all>用截取線擷取</button>';
+  actions.innerHTML = '<button class="button primary" type="button" data-row-line-apply-all>?冽???瑕?</button>';
   els.parsePreview.appendChild(actions);
   actions.querySelector("[data-row-line-apply-all]")?.addEventListener("click", parseDraftImagesWithRowLines);
 }
@@ -1549,6 +1549,7 @@ function bindRowLineReviewControls(imageIndex) {
     };
     const moveDrag = (e) => {
       if (!dragging || !stage) return;
+      e.preventDefault();
       const rect = stage.getBoundingClientRect();
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
       let pct = ((clientY - rect.top) / rect.height) * 100;
@@ -1587,9 +1588,9 @@ async function parseDraftImagesWithRowLines() {
   const button = els.parsePreview.querySelector("[data-row-line-apply-all]");
   if (button) {
     button.disabled = true;
-    button.textContent = "擷取中...";
+    button.textContent = "?瑕?銝?..";
   }
-  setOcrStatus("使用調整後截取線解析所有圖片中...");
+  setOcrStatus("雿輻隤踵敺??閫??????葉...");
   try {
     const resultTextParts = [];
     for (let order = 0; order < calibrations.length; order += 1) {
@@ -1597,7 +1598,7 @@ async function parseDraftImagesWithRowLines() {
       const image = state.draftImages[imageIndex];
       if (!image) continue;
       const result = await recognizeImage(image, (progress, mode) => {
-        setOcrStatus(`截取線解析 ${order + 1}/${calibrations.length}：${progress}%（${mode}）`);
+        setOcrStatus(`?芸?蝺圾??${order + 1}/${calibrations.length}嚗?{progress}%嚗?{mode}嚗);
       }, {
         maskEditButtons: els.kind.value === "ark_position",
         columnOcr: els.kind.value === "ark_position",
@@ -1630,14 +1631,14 @@ async function parseDraftImagesWithRowLines() {
       renderParsedRows(parsedRows, "draft", "", [], rowCrops, skippedRowCrops),
     ].join("");
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
-    setOcrStatus(`截圖解析完成，應有 ${expectedRows || "?"} 筆，目前解析 ${parsedRows.length} 筆${missingRows ? `，可能少 ${missingRows} 筆` : ""}（${formatDuration(elapsed)}）`);
+    setOcrStatus(`?芸?閫??摰?嚗???${expectedRows || "?"} 蝑??桀?閫?? ${parsedRows.length} 蝑?{missingRows ? `嚗?賢? ${missingRows} 蝑 : ""}嚗?{formatDuration(elapsed)}嚗);
   } catch (error) {
     console.error(error);
-    setOcrStatus("截取線解析失敗");
-    alert(error.message || "截取線解析失敗，請重新調整後再試。");
+    setOcrStatus("?芸?蝺圾?仃??);
+    alert(error.message || "?芸?蝺圾?仃??隢??啗矽?游??岫??);
     if (button) {
       button.disabled = false;
-      button.textContent = "用截取線擷取";
+      button.textContent = "?冽???瑕?";
     }
   }
 }
@@ -1650,12 +1651,12 @@ async function parseDraftImageWithRowLines(imageIndex) {
   const button = container.querySelector("#apply-row-lines");
   if (button) {
     button.disabled = true;
-    button.textContent = "擷取中...";
+    button.textContent = "?瑕?銝?..";
   }
-  setOcrStatus("使用調整後截取線解析中...");
+  setOcrStatus("雿輻隤踵敺??閫??銝?..");
   try {
     const result = await recognizeImage(image, (progress, mode) => {
-      setOcrStatus(`使用調整線解析 ${progress}%（${mode}）`);
+      setOcrStatus(`雿輻隤踵蝺圾??${progress}%嚗?{mode}嚗);
     }, {
       maskEditButtons: els.kind.value === "ark_position",
       columnOcr: els.kind.value === "ark_position",
@@ -1677,14 +1678,14 @@ async function parseDraftImageWithRowLines(imageIndex) {
       renderOcrCompleteness(expectedRows, parsedRows.length, Math.max(0, expectedRows - parsedRows.length), "draft", image.expectedTotalCount ? "total" : "circle"),
       renderParsedRows(parsedRows, "draft", "", [], image.rowCrops || [], image.skippedRowCrops || []),
     ].join("");
-    setOcrStatus(`完成，${image.expectedTotalCount ? `總共 ${image.expectedTotalCount} 檔` : `完整圈 ${image.completeCircleCount || 0} 個`}，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(result.elapsedMs || 0)}）`);
+    setOcrStatus(`摰?嚗?{image.expectedTotalCount ? `蝮賢 ${image.expectedTotalCount} 瑼 : `摰??${image.completeCircleCount || 0} ?}嚗???${parsedRows.length} 蝑摨怠?嚗?{formatDuration(result.elapsedMs || 0)}嚗);
   } catch (error) {
     console.error(error);
-    setOcrStatus("解析失敗");
-    alert(error.message || "截圖解析失敗，請重新整理後再試");
+    setOcrStatus("閫??憭望?");
+    alert(error.message || "?芸?閫??憭望?嚗???渡?敺?閰?);
     if (button) {
       button.disabled = false;
-      button.textContent = "用截取線擷取";
+      button.textContent = "?冽???瑕?";
     }
   }
 }
@@ -1694,10 +1695,10 @@ async function parseExistingEntry(id) {
   if (!entry?.images?.length) return;
   const button = els.detailContent.querySelector('[data-action="parse-entry"]');
   button.disabled = true;
-  button.textContent = "解析中...";
+  button.textContent = "閫??銝?..";
   try {
     const result = await recognizeImage(entry.images[0], (progress, mode) => {
-      button.textContent = `解析中 ${progress}%（${mode}）`;
+      button.textContent = `閫??銝?${progress}%嚗?{mode}嚗;
     }, {
       maskEditButtons: entry.kind === "ark_position",
       columnOcr: entry.kind === "ark_position",
@@ -1719,28 +1720,28 @@ async function parseExistingEntry(id) {
     openDetail(id);
   } catch (error) {
     console.error(error);
-    alert(error.message || "截圖解析失敗，請重新整理後再試");
+    alert(error.message || "?芸?閫??憭望?嚗???渡?敺?閰?);
     button.disabled = false;
-    button.textContent = "重新解析截圖";
+    button.textContent = "?閫???芸?";
   }
 }
 
 function normalizeOcrText(text) {
   return String(text || "")
-    .replace(/[０-９]/g, (value) => String.fromCharCode(value.charCodeAt(0) - 0xfee0))
-    .replace(/[，]/g, ",")
-    .replace(/[％]/g, "%")
-    .replace(/[＋]/g, "+")
-    .replace(/[－]/g, "-")
-    .replace(/[|｜]/g, " ")
-    .replace(/[：]/g, ":");
+    .replace(/[嚗?嚗/g, (value) => String.fromCharCode(value.charCodeAt(0) - 0xfee0))
+    .replace(/[嚗/g, ",")
+    .replace(/[嚗/g, "%")
+    .replace(/[嚗/g, "+")
+    .replace(/[嚗/g, "-")
+    .replace(/[|嚚/g, " ")
+    .replace(/[嚗/g, ":");
 }
 
 function parseNumberToken(token) {
   const normalized = String(token || "")
     .replace(/[,$]/g, "")
     .replace(/[()]/g, "")
-    .replace(/[％%]/g, "")
+    .replace(/[嚗?]/g, "")
     .replace(/[+]/g, "");
   if (!/^[-]?\d+(?:\.\d+)?$/.test(normalized)) return null;
   return Number(normalized);
@@ -1758,9 +1759,9 @@ function parseHoldings(text) {
 function parseArkRowCropText(text, cropDataUrl, label) {
   const normalized = normalizeOcrText(text);
   const compact = compactText(normalized);
-  if (!/現\s*股/.test(normalized) || !compact.includes("現股")) return null;
+  if (!/?閱s*??.test(normalized) || !compact.includes("?曇")) return null;
 
-  const holdingIndex = normalized.search(/現\s*股/);
+  const holdingIndex = normalized.search(/?閱s*??);
   const numbers = extractNumbersAfterHolding(normalized);
   if (numbers.length < 2) return null;
 
@@ -1778,7 +1779,7 @@ function parseArkRowCropText(text, cropDataUrl, label) {
     symbol,
     name: officialName || ocrName,
     ocrName,
-    kind: "現股",
+    kind: "?曇",
     shares,
     avgCost,
     currentPrice: null,
@@ -1787,7 +1788,7 @@ function parseArkRowCropText(text, cropDataUrl, label) {
     source: "ark_row_ocr",
     rawLine: normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(" / "),
     needsReview: !officialName,
-    reviewReason: symbol ? "名稱待補" : "代號待補",
+    reviewReason: symbol ? "?迂敺?" : "隞??敺?",
     crop: {
       key: label,
       label,
@@ -1817,7 +1818,7 @@ function findSymbolByOcrName(text) {
   const aliases = {
     SO: "0053",
     S0: "0053",
-    水: "2330",
+    瘞? "2330",
   };
   if (aliases[normalized]) return aliases[normalized];
   const entries = Object.entries(SYMBOL_NAMES)
@@ -1836,10 +1837,10 @@ function normalizeStockNameForMatch(value) {
   return String(value || "")
     .replace(/\s+/g, "")
     .replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, "")
-    .replace(/[臺台]/g, "台")
-    .replace(/[脊驢]/g, "能")
-    .replace(/[寓]/g, "富")
-    .replace(/[一]/g, "5")
+    .replace(/[?箏]/g, "??)
+    .replace(/[?岷]/g, "??)
+    .replace(/[撖/g, "撖?)
+    .replace(/[銝]/g, "5")
     .toUpperCase();
 }
 
@@ -1861,11 +1862,11 @@ function longestCommonSubsequenceLength(a, b) {
 function renderRowOcrText(result) {
   if (!result?.crops?.length && !result?.skipped?.length) return "";
   const imported = (result.crops || []).map((crop) => [
-    `【${crop.label}】`,
+    `??{crop.label}?,
     crop.text || "",
   ].join("\n"));
   const skipped = (result.skipped || []).map((crop) => [
-    `【略過 ${crop.label}】`,
+    `???${crop.label}?,
     crop.text || "",
   ].join("\n"));
   return [...imported, ...skipped].join("\n\n").trim();
@@ -1887,7 +1888,7 @@ function parseColumnOcrRows(column) {
       symbol,
       name: officialName || ocrName,
       ocrName,
-      kind: "現股",
+      kind: "?曇",
       shares: shares[index] ?? null,
       avgCost: avgCosts[index] ?? null,
       currentPrice: null,
@@ -1896,11 +1897,11 @@ function parseColumnOcrRows(column) {
       source: "ark_column_ocr",
       rawLine: [
         nameRow.rawLine,
-        shares[index] !== undefined ? `股數:${shares[index]}` : "",
-        avgCosts[index] !== undefined ? `均價:${avgCosts[index]}` : "",
+        shares[index] !== undefined ? `?⊥:${shares[index]}` : "",
+        avgCosts[index] !== undefined ? `?:${avgCosts[index]}` : "",
       ].filter(Boolean).join(" | "),
       needsReview: !symbol || !officialName,
-      reviewReason: symbol ? "名稱待補" : "代號待補",
+      reviewReason: symbol ? "?迂敺?" : "隞??敺?",
     });
   }
 
@@ -1967,7 +1968,7 @@ function parseArkPositionRows(lines) {
     const line = lines[index];
     if (isNoiseLine(line)) continue;
 
-    const holdingMatch = line.match(/現\s*股\s+([\d,]+)\s+([\d,.]+)/);
+    const holdingMatch = line.match(/?閱s*?﹏s+([\d,]+)\s+([\d,.]+)/);
     if (!holdingMatch) {
       pendingNameLines.push(line);
       continue;
@@ -1987,7 +1988,7 @@ function parseArkPositionRows(lines) {
       symbol,
       name: officialName || ocrName,
       ocrName,
-      kind: "現股",
+      kind: "?曇",
       shares,
       avgCost,
       currentPrice: null,
@@ -1996,7 +1997,7 @@ function parseArkPositionRows(lines) {
       source: "ark_position",
       rawLine: [pendingNameLines.join(" / "), line, symbolInfo?.line].filter(Boolean).join(" | "),
       needsReview: !officialName,
-      reviewReason: symbol ? "名稱待補" : "代號待補",
+      reviewReason: symbol ? "?迂敺?" : "隞??敺?",
     });
 
     pendingNameLines.length = 0;
@@ -2022,7 +2023,7 @@ function parseLineBasedRows(lines) {
         token,
         index,
         value: parseNumberToken(token),
-        percent: /[%％]/.test(token),
+        percent: /[%嚗/.test(token),
       }))
       .filter((item) => item.value !== null);
 
@@ -2053,7 +2054,7 @@ function parseLineBasedRows(lines) {
 }
 
 function isNoiseLine(line) {
-  return /^(《|編輯庫存|編輯 庫存|台股庫存|台 股 庫存|美股庫存|美 股 庫存|持有股票|持 有 股票|總共|總 共|新增持股|新 增 持 股)/.test(compactText(line));
+  return /^(?蝺刻摩摨怠?|蝺刻摩 摨怠?|?啗摨怠?|????摨怠?|蝢摨怠?|蝢???摨怠?|???∠巨|?????∠巨|蝮賢|蝮??悴?啣??|??憓?????/.test(compactText(line));
 }
 
 function lookupSymbolName(symbol) {
@@ -2071,7 +2072,7 @@ function isTwSymbol(value) {
 function findNearbySymbol(lines, index, pendingNameLines) {
   for (let offset = 1; offset <= 4; offset += 1) {
     const candidateLine = lines[index + offset];
-    if (offset > 1 && /現\s*股\s+[\d,]+\s+[\d,.]+/.test(candidateLine || "")) break;
+    if (offset > 1 && /?閱s*?﹏s+[\d,]+\s+[\d,.]+/.test(candidateLine || "")) break;
     const symbol = exactSymbolFromLine(candidateLine);
     if (symbol) return { symbol, index: index + offset, line: candidateLine };
   }
@@ -2102,20 +2103,20 @@ function buildArkName(pendingNameLines, beforeHolding, symbol) {
 
 function cleanArkNamePart(value) {
   let text = String(value || "")
-    .replace(/現\s*股.*/, "")
+    .replace(/?閱s*??*/, "")
     .replace(/\b\d{4,6}[A-Z]?\b/g, "")
     .replace(/[\d,]+(?:\.\d+)?/g, "")
-    .replace(/[《》\[\]「」"'`~!@#$%^&*_=+|\\/:;，。,.?？、三喧呈””-]/g, " ")
+    .replace(/[?[\]??'`~!@#$%^&*_=+|\\/:;嚗?.?嚗??批???]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
   const tokens = text.split(" ").filter(Boolean);
-  if (tokens.length > 1 && /^(伍|全|愈|會|圖|師|朮|可|第)$/.test(tokens[0])) {
+  if (tokens.length > 1 && /^(隡?育???撣咽?徑?砝蝚?$/.test(tokens[0])) {
     tokens.shift();
   }
 
   text = tokens.join("");
-  if (/^(持有股票|種類|總股數|成交均價|台股庫存|美股庫存)$/.test(text)) return "";
+  if (/^(???∠巨|蝔桅?|蝮質?腮?漱?|?啗摨怠?|蝢摨怠?)$/.test(text)) return "";
   return text;
 }
 
@@ -2143,30 +2144,30 @@ function displayValue(value, suffix = "") {
 }
 
 function formatDuration(ms) {
-  if (!ms) return "0 秒";
-  return `${(ms / 1000).toFixed(1)} 秒`;
+  if (!ms) return "0 蝘?;
+  return `${(ms / 1000).toFixed(1)} 蝘;
 }
 
 function renderOcrTiming(entry) {
   if (!entry.ocrElapsedMs) return "";
   const cropMs = entry.rowOcrMs || entry.columnOcrMs;
-  const cropLabel = entry.rowOcrMs ? "橫列" : "欄位";
-  const columnText = cropMs ? `，${cropLabel} ${formatDuration(cropMs)}` : "";
-  return `<div class="detail-field"><span>OCR 耗時</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
+  const cropLabel = entry.rowOcrMs ? "璈怠?" : "甈?";
+  const columnText = cropMs ? `嚗?{cropLabel} ${formatDuration(cropMs)}` : "";
+  return `<div class="detail-field"><span>OCR ??</span><strong>${formatDuration(entry.ocrElapsedMs)}${columnText}</strong></div>`;
 }
 
 function renderOcrCompleteness(expectedRows, parsedRows, missingRows, context, source = "circle") {
   if (!expectedRows) return "";
   const complete = missingRows <= 0;
   const className = `${context === "detail" ? "detail-field" : "parsed-card"} ocr-completeness ${complete ? "complete" : "warning"}`;
-  const label = source === "total" ? "總檔數檢查" : "完整圈數檢查";
+  const label = source === "total" ? "蝮賣??豢炎?? : "摰?瑼Ｘ";
   const body = source === "total"
-    ? `畫面顯示總共 ${expectedRows} 檔，目前解析 ${parsedRows} 筆。`
-    : `截圖前方完整圓圈 ${expectedRows} 個，目前解析 ${parsedRows} 筆。`;
+    ? `?恍憿舐內蝮賢 ${expectedRows} 瑼??桀?閫?? ${parsedRows} 蝑
+    : `?芸??摰?? ${expectedRows} ???桀?閫?? ${parsedRows} 蝑;
   return `
     <div class="${className}">
       <span>${label}</span>
-      <strong>${complete ? "解析筆數符合" : `可能少 ${missingRows} 筆`}</strong>
+      <strong>${complete ? "閫??蝑蝚血?" : `?航撠?${missingRows} 蝑}</strong>
       <p>${body}</p>
     </div>
   `;
@@ -2179,45 +2180,45 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
     if (crops) {
       return `
         <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
-          <span>解析庫存</span>
-          <div class="pre-wrap">尚未抓到庫存列</div>
+          <span>閫??摨怠?</span>
+          <div class="pre-wrap">撠?摨怠???/div>
           ${crops}
         </div>
       `;
     }
     return context === "detail"
-      ? `<div class="detail-field"><span>解析庫存</span><div class="pre-wrap">尚未抓到庫存列</div></div>`
+      ? `<div class="detail-field"><span>閫??摨怠?</span><div class="pre-wrap">撠?摨怠???/div></div>`
       : "";
   }
   const body = rows.map((row, index) => `
     <tr>
       <td>${renderRowCropCell(row)}</td>
-      <td>${escapeHtml(row.symbol || "待確認")}</td>
+      <td>${escapeHtml(row.symbol || "敺Ⅱ隤?)}</td>
       <td>${escapeHtml(row.name)}</td>
       <td>${escapeHtml(row.kind || "")}</td>
       <td>${escapeHtml(displayValue(row.shares))}</td>
       <td>${escapeHtml(displayValue(row.avgCost))}</td>
-      <td>${escapeHtml(row.needsReview ? row.reviewReason || "待確認" : "")}</td>
+      <td>${escapeHtml(row.needsReview ? row.reviewReason || "敺Ⅱ隤? : "")}</td>
       <td>${renderRowFixCell(row, index, context, entryId)}</td>
       <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
     </tr>
   `).join("");
   return `
     <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
-      <span>解析庫存</span>
+      <span>閫??摨怠?</span>
       <div class="table-scroll">
         <table class="parsed-table">
           <thead>
             <tr>
-              <th>截圖</th>
-              <th>代號</th>
-              <th>名稱</th>
-              <th>種類</th>
-              <th>股數</th>
-              <th>成交均價</th>
-              <th>狀態</th>
-              <th>修正</th>
-              <th>OCR 區塊</th>
+              <th>?芸?</th>
+              <th>隞??</th>
+              <th>?迂</th>
+              <th>蝔桅?</th>
+              <th>?⊥</th>
+              <th>?漱?</th>
+              <th>???/th>
+              <th>靽格迤</th>
+              <th>OCR ?憛?/th>
             </tr>
           </thead>
           <tbody>${body}</tbody>
@@ -2233,7 +2234,7 @@ function renderRowCropCell(row) {
   if (!row?.crop?.dataUrl) return "";
   return `
     <figure class="row-crop">
-      <img src="${row.crop.dataUrl}" alt="${escapeHtml(row.crop.label || "個股橫列裁切")}">
+      <img src="${row.crop.dataUrl}" alt="${escapeHtml(row.crop.label || "?璈怠?鋆?")}">
       <figcaption>${escapeHtml(row.crop.label || "")}</figcaption>
     </figure>
   `;
@@ -2252,22 +2253,22 @@ function renderRowCropDiagnostics(rowCrops, skippedRowCrops = []) {
 
   const items = unique.map((crop) => {
     const imported = crop.status === "imported";
-    const statusText = crop.fallback ? "備援候選" : (imported ? "已進庫存" : "未匯入");
+    const statusText = crop.fallback ? "??" : (imported ? "撌脤脣澈摮? : "?芸??);
     const text = String(crop.text || "").trim();
     return `
       <figure class="diagnostic-crop ${imported ? "imported" : "skipped"} ${crop.fallback ? "fallback" : ""}">
-        <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "個股橫列裁切")}">
+        <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "?璈怠?鋆?")}">
         <figcaption>
-          <strong>${escapeHtml(crop.label || "橫列")}</strong>
+          <strong>${escapeHtml(crop.label || "璈怠?")}</strong>
           <span>${statusText}</span>
-          <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
+          <small>${escapeHtml(text || "OCR 瘝儘霅??")}</small>
         </figcaption>
       </figure>
     `;
   }).join("");
 
   return `
-    <div class="row-diagnostics" aria-label="個股橫列裁切診斷">
+    <div class="row-diagnostics" aria-label="?璈怠?鋆?閮箸">
       ${items}
     </div>
   `;
@@ -2277,12 +2278,12 @@ function renderColumnCrops(crops) {
   if (!Array.isArray(crops) || !crops.length) return "";
   const items = crops.map((crop) => `
     <figure class="column-crop">
-      <img src="${crop.dataUrl || ""}" alt="${escapeHtml(crop.label || "欄位裁切")}">
-      <figcaption>${escapeHtml(crop.label || "欄位裁切")}</figcaption>
+      <img src="${crop.dataUrl || ""}" alt="${escapeHtml(crop.label || "甈?鋆?")}">
+      <figcaption>${escapeHtml(crop.label || "甈?鋆?")}</figcaption>
     </figure>
   `).join("");
   return `
-    <div class="column-crops" aria-label="固定欄位裁切對照">
+    <div class="column-crops" aria-label="?箏?甈?鋆?撠">
       ${items}
     </div>
   `;
@@ -2292,10 +2293,10 @@ function renderRowFixCell(row, index, context, entryId) {
   if (context !== "detail" || !entryId) return "";
   return `
     <div class="row-fix">
-      <label>代號<input data-symbol-input="${index}" type="text" inputmode="text" value="${escapeHtml(row.symbol || "")}"></label>
-      <label>股數<input data-shares-input="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.shares ?? "")}"></label>
-      <label>均價<input data-avg-cost-input="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.avgCost ?? "")}"></label>
-      <button class="button secondary compact" type="button" data-action="apply-row-fix" data-row-index="${index}">套用</button>
+      <label>隞??<input data-symbol-input="${index}" type="text" inputmode="text" value="${escapeHtml(row.symbol || "")}"></label>
+      <label>?⊥<input data-shares-input="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.shares ?? "")}"></label>
+      <label>?<input data-avg-cost-input="${index}" type="number" step="0.001" inputmode="decimal" value="${escapeHtml(row.avgCost ?? "")}"></label>
+      <button class="button secondary compact" type="button" data-action="apply-row-fix" data-row-index="${index}">憟</button>
     </div>
   `;
 }
@@ -2358,7 +2359,7 @@ function saveSheetSyncConfig(config) {
   }));
 }
 
-function resetGoogleSession(message = "請使用授權的 Google 帳號登入。") {
+function resetGoogleSession(message = "隢蝙?冽?甈? Google 撣唾??餃??) {
   googleTokenClient = null;
   googleAccessToken = "";
   googleAccessTokenExpiresAt = 0;
@@ -2376,7 +2377,7 @@ function configureSheetSync() {
   const current = getSheetSyncConfig();
   const spreadsheetId = prompt("Google Sheet ID", current.spreadsheetId || DEFAULT_SPREADSHEET_ID);
   if (spreadsheetId === null) return null;
-  const clientId = prompt("Google OAuth Client ID（Web application）", normalizeClientId(current.clientId));
+  const clientId = prompt("Google OAuth Client ID嚗eb application嚗?, normalizeClientId(current.clientId));
   if (clientId === null) return null;
   const config = {
     spreadsheetId: spreadsheetId.trim() || DEFAULT_SPREADSHEET_ID,
@@ -2385,8 +2386,8 @@ function configureSheetSync() {
   };
   saveSheetSyncConfig(config);
   resetGoogleSession(config.clientId
-    ? "設定已儲存，請使用授權帳號登入。"
-    : "請補齊 OAuth Client ID。");
+    ? "閮剖?撌脣摮?隢蝙?冽?甈董??乓?
+    : "隢?朣?OAuth Client ID??);
   return config;
 }
 
@@ -2398,13 +2399,13 @@ function setAppLocked(locked) {
 function renderAuthGate(message = "") {
   if (!els.authGate) return;
   const config = getSheetSyncConfig();
-  const status = message || state.auth.message || "請使用授權的 Google 帳號登入。";
+  const status = message || state.auth.message || "隢蝙?冽?甈? Google 撣唾??餃??;
   els.authStatus.textContent = status;
   els.authEmail.textContent = config.authorizedEmail
-    ? `允許帳號：${config.authorizedEmail}`
-    : "允許帳號未設定";
+    ? `?迂撣唾?嚗?{config.authorizedEmail}`
+    : "?迂撣唾??芾身摰?;
   els.authSignIn.disabled = !config.clientId || !config.authorizedEmail;
-  els.authSignIn.textContent = state.auth.authorized ? "已登入" : "使用 Google 登入";
+  els.authSignIn.textContent = state.auth.authorized ? "撌脩?? : "雿輻 Google ?餃";
 }
 
 function ensureAuthConfig() {
@@ -2412,7 +2413,7 @@ function ensureAuthConfig() {
   if (config.clientId) return config;
   const updated = configureSheetSync();
   if (!updated?.clientId) {
-    throw new Error("請先設定 OAuth Client ID");
+    throw new Error("隢?閮剖? OAuth Client ID");
   }
   return updated;
 }
@@ -2431,24 +2432,24 @@ async function fetchGoogleProfile(token) {
 function authorizeGoogleProfile(profile, config = getSheetSyncConfig()) {
   const email = normalizeEmail(profile.email || "");
   const allowed = normalizeEmail(config.authorizedEmail || "");
-  if (!email) throw new Error("Google 帳號沒有回傳 email，請重新登入。");
-  if (!allowed) throw new Error("允許登入的 Google Email 尚未設定");
+  if (!email) throw new Error("Google 撣唾?瘝?? email嚗???餃??);
+  if (!allowed) throw new Error("?迂?餃??Google Email 撠閮剖?");
   if (email !== allowed) {
     state.auth = {
       signedIn: true,
       authorized: false,
       email,
-      message: `此 Google 帳號未授權：${email}`,
+      message: `甇?Google 撣唾??芣?甈?${email}`,
     };
     setAppLocked(true);
     renderAuthGate();
-    throw new Error(`此 Google 帳號未授權：${email}`);
+    throw new Error(`甇?Google 撣唾??芣?甈?${email}`);
   }
   state.auth = {
     signedIn: true,
     authorized: true,
     email,
-    message: `已登入：${email}`,
+    message: `撌脩?伐?${email}`,
   };
   renderAuthGate();
   return email;
@@ -2460,12 +2461,12 @@ async function ensureGoogleIdentity() {
     googleIdentityLoadPromise = loadScript(
       GOOGLE_ID_SCRIPT_URL,
       () => Boolean(window.google?.accounts?.oauth2),
-      "Google 登入模組",
+      "Google ?餃璅∠?",
     );
   }
   await googleIdentityLoadPromise;
   if (!window.google?.accounts?.oauth2) {
-    throw new Error("Google 登入模組載入後仍不可用，請重新整理後再試");
+    throw new Error("Google ?餃璅∠?頛敺?銝?剁?隢??唳???岫");
   }
 }
 
@@ -2506,7 +2507,7 @@ async function getGoogleAccessToken() {
 
 async function sheetsFetch(path, options = {}) {
   const config = getSheetSyncConfig();
-  if (!config.spreadsheetId) throw new Error("尚未設定 Google Sheet ID");
+  if (!config.spreadsheetId) throw new Error("撠閮剖? Google Sheet ID");
   const token = await getGoogleAccessToken();
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(config.spreadsheetId)}${path}`;
   const response = await fetch(url, {
@@ -2540,7 +2541,7 @@ function parseGoogleVisualizationValues(payloadOrText) {
       .replace(/\);?\s*$/, ""))
     : payloadOrText;
   if (payload.status === "error") {
-    throw new Error(payload.errors?.[0]?.detailed_message || payload.errors?.[0]?.reason || "Google Sheet 讀取失敗");
+    throw new Error(payload.errors?.[0]?.detailed_message || payload.errors?.[0]?.reason || "Google Sheet 霈?仃??);
   }
   return (payload.table?.rows || []).map((row) => (row.c || []).map((cell) => cell?.v ?? ""));
 }
@@ -2551,7 +2552,7 @@ async function readPublicSheetValues(sheetName) {
     const script = document.createElement("script");
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error("讀取 Google Sheet 逾時，請確認 2026 Invest 是否允許知道連結的人檢視"));
+      reject(new Error("霈??Google Sheet ?暹?嚗?蝣箄? 2026 Invest ?臬?迂?仿?????犖瑼Ｚ?"));
     }, 15000);
 
     function cleanup() {
@@ -2573,7 +2574,7 @@ async function readPublicSheetValues(sheetName) {
 
     script.onerror = () => {
       cleanup();
-      reject(new Error("讀取 Google Sheet 失敗，請確認 2026 Invest 是否允許知道連結的人檢視"));
+      reject(new Error("霈??Google Sheet 憭望?嚗?蝣箄? 2026 Invest ?臬?迂?仿?????犖瑼Ｚ?"));
     };
     script.src = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/gviz/tq?tqx=${encodeURIComponent(`out:json;responseHandler:${callbackName}`)}&sheet=${encodeURIComponent(sheetName)}`;
     document.head.appendChild(script);
@@ -2805,18 +2806,18 @@ function compareSnapshotRows(existingRows, newRows) {
 }
 
 function snapshotDiffLine(row) {
-  return `${row.symbol}${row.name ? ` ${row.name}` : ""}：${formatNumber(row.shares, 3)} 股 / ${formatNumber(row.avgCost, 3)}`;
+  return `${row.symbol}${row.name ? ` ${row.name}` : ""}嚗?{formatNumber(row.shares, 3)} ??/ ${formatNumber(row.avgCost, 3)}`;
 }
 
 function formatSnapshotDiff(diff, limit = 18) {
   const lines = [];
-  for (const row of diff.added) lines.push(`新增 ${snapshotDiffLine(row)}`);
-  for (const row of diff.removed) lines.push(`移除 ${snapshotDiffLine(row)}`);
+  for (const row of diff.added) lines.push(`?啣? ${snapshotDiffLine(row)}`);
+  for (const row of diff.removed) lines.push(`蝘駁 ${snapshotDiffLine(row)}`);
   for (const row of diff.changed) {
-    lines.push(`變更 ${row.symbol}${row.name ? ` ${row.name}` : ""}：股數 ${formatNumber(row.previousShares, 3)} → ${formatNumber(row.currentShares, 3)}，均價 ${formatNumber(row.previousCost, 3)} → ${formatNumber(row.currentCost, 3)}`);
+    lines.push(`霈 ${row.symbol}${row.name ? ` ${row.name}` : ""}嚗??${formatNumber(row.previousShares, 3)} ??${formatNumber(row.currentShares, 3)}嚗???${formatNumber(row.previousCost, 3)} ??${formatNumber(row.currentCost, 3)}`);
   }
   if (lines.length > limit) {
-    return [...lines.slice(0, limit), `...另有 ${lines.length - limit} 筆差異`].join("\n");
+    return [...lines.slice(0, limit), `...?行? ${lines.length - limit} 蝑榆?躬].join("\n");
   }
   return lines.join("\n");
 }
@@ -2855,11 +2856,11 @@ async function writeMarketSnapshotPayloads(payloads) {
     }
 
     const confirmed = confirm([
-      `雲端已存在 ${date} ${marketLabel(market)} 快照 ${existingSnapshots.length} 筆。`,
-      "差異：",
+      `?脩垢撌脣???${date} ${marketLabel(market)} 敹怎 ${existingSnapshots.length} 蝑,
+      "撌桃嚗?,
       diffText,
       "",
-      "是否用這次最新快照取代同日同市場的舊快照？",
+      "?臬?券活??啣翰?批?隞???亙?撣??敹怎嚗?,
     ].join("\n"));
     if (!confirmed) return { cancelled: true, written: [], skipped };
     actions.push({ type: "replace", payload, existingSnapshots });
@@ -2971,19 +2972,19 @@ function findSnapshotsForDeletion(date, market) {
 
 function snapshotDeletePreviewText(date, market) {
   const targets = findSnapshotsForDeletion(date, market);
-  if (!date) return "請先選擇日期。";
-  if (!targets.length) return "這個日期與市場沒有雲端快照。";
+  if (!date) return "隢??豢??交???;
+  if (!targets.length) return "???撣瘝??脩垢敹怎??;
   const positionCount = targets.reduce((sum, snapshot) => (
     sum + snapshotPositionsFromList(snapshot.snapshotId, state.cloudHistory.positions).length
   ), 0);
   const marketSummary = [...new Set(targets.map((snapshot) => marketLabel(snapshot.market)))].join(" / ");
-  return `將刪除 ${targets.length} 筆 ${marketSummary} 快照與 ${positionCount} 筆庫存明細。`;
+  return `撠??${targets.length} 蝑?${marketSummary} 敹怎??${positionCount} 蝑澈摮?蝝啜;
 }
 
 function renderSnapshotDeleteOptions(selectedDate = "") {
   const dates = cloudSnapshotDates();
   if (!dates.length) {
-    return "<p class=\"muted-text\">目前沒有可刪除的雲端快照。</p>";
+    return "<p class=\"muted-text\">?桀?瘝??臬?斤??脩垢敹怎??/p>";
   }
   const currentDate = normalizeDateText(selectedDate) || normalizeDateText(state.cloudSnapshot?.snapshot?.date) || dates[0];
   const currentMarket = normalizeMarketKey(state.cloudSnapshot?.snapshot?.market) || "TW";
@@ -2993,18 +2994,18 @@ function renderSnapshotDeleteOptions(selectedDate = "") {
   return `
     <div class="snapshot-delete-form">
       <label>
-        日期
+        ?交?
         <select id="delete-snapshot-date">${dateOptions}</select>
       </label>
       <label>
-        市場
+        撣
         <select id="delete-snapshot-market">
-          <option value="TW"${currentMarket === "TW" ? " selected" : ""}>台股</option>
-          <option value="US"${currentMarket === "US" ? " selected" : ""}>美股</option>
-          <option value="ALL">該日期全部市場</option>
+          <option value="TW"${currentMarket === "TW" ? " selected" : ""}>?啗</option>
+          <option value="US"${currentMarket === "US" ? " selected" : ""}>蝢</option>
+          <option value="ALL">閰脫??典???/option>
         </select>
       </label>
-      <button id="delete-cloud-snapshot" class="button ghost danger compact" type="button">刪除快照</button>
+      <button id="delete-cloud-snapshot" class="button ghost danger compact" type="button">?芷敹怎</button>
     </div>
     <p id="delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText(currentDate, currentMarket))}</p>
   `;
@@ -3014,16 +3015,16 @@ function renderCloudSnapshotSwipeList() {
   const rows = [...(state.cloudHistory.snapshots || [])]
     .sort((a, b) => snapshotSortValue(b).localeCompare(snapshotSortValue(a)))
     .map(snapshotMetrics);
-  if (!rows.length) return "<p class=\"muted-text\">目前沒有雲端快照。</p>";
+  if (!rows.length) return "<p class=\"muted-text\">?桀?瘝??脩垢敹怎??/p>";
   return `
     <div class="snapshot-swipe-list">
       ${rows.map((snapshot) => `
         <div class="swipe-row" data-snapshot-id="${escapeHtml(snapshot.snapshotId)}">
-          <button class="swipe-delete-action" type="button" data-delete-snapshot-id="${escapeHtml(snapshot.snapshotId)}">刪除</button>
+          <button class="swipe-delete-action" type="button" data-delete-snapshot-id="${escapeHtml(snapshot.snapshotId)}">?芷</button>
           <div class="swipe-row-content">
             <div>
               <strong>${escapeHtml(snapshot.date || "")}</strong>
-              <span>${marketLabel(snapshot.market)} · ${formatNumber(snapshot.stockCount)} 檔 · ${formatMoney(snapshot.totalCost)}</span>
+              <span>${marketLabel(snapshot.market)} 繚 ${formatNumber(snapshot.stockCount)} 瑼?繚 ${formatMoney(snapshot.totalCost)}</span>
             </div>
             <small>${escapeHtml(snapshot.createdAt || "")}</small>
           </div>
@@ -3080,7 +3081,7 @@ function mergeSnapshotEntries(entries) {
   for (const item of candidates) {
     for (const row of item.rows) {
       const symbol = String(row.symbol || "").trim();
-      if (!symbol || /待補/.test(symbol)) continue;
+      if (!symbol || /敺?/.test(symbol)) continue;
       const existing = bySymbol.get(symbol);
       const normalized = { ...row, source: `${item.entry.title || item.entry.id}` };
       if (!existing) {
@@ -3090,7 +3091,7 @@ function mergeSnapshotEntries(entries) {
       const sameShares = Number(existing.shares) === Number(row.shares);
       const sameAvgCost = Number(existing.avgCost) === Number(row.avgCost);
       if (!sameShares || !sameAvgCost) {
-        conflicts.push(`${symbol}：${existing.shares}/${existing.avgCost} vs ${row.shares}/${row.avgCost}`);
+        conflicts.push(`${symbol}嚗?{existing.shares}/${existing.avgCost} vs ${row.shares}/${row.avgCost}`);
       }
     }
   }
@@ -3102,27 +3103,27 @@ function mergeSnapshotEntries(entries) {
 async function saveMergedSnapshotToGoogleSheet() {
   const { candidates, rows, conflicts } = mergeSnapshotEntries(state.entries);
   if (!candidates.length) {
-    alert("目前沒有已確認或已匯入的方舟庫存截圖可合併。");
+    alert("?桀?瘝?撌脩Ⅱ隤?撌脣?亦??寡?摨怠??芸??臬?雿萸?);
     return;
   }
   if (!rows.length) {
-    alert("已確認截圖中沒有可合併的庫存列。請先確認 OCR 解析結果與股票代號。");
+    alert("撌脩Ⅱ隤?葉瘝??臬?雿萇?摨怠????Ⅱ隤?OCR 閫??蝯??蟡其誨??);
     return;
   }
   if (conflicts.length) {
-    alert(`合併快照發現同代號衝突，請打開截圖明細，在解析庫存表的修正欄調整股數或成交均價後再存：\n\n${conflicts.slice(0, 8).join("\n")}`);
+    alert(`?蔥敹怎?潛?誨??蝒?隢????蝝堆??刻圾?澈摮”?耨甇??隤踵?⊥??鈭文??孵???嚗n\n${conflicts.slice(0, 8).join("\n")}`);
     return;
   }
 
   const markets = [...new Set(candidates.map((item) => item.entry.market).filter(Boolean))];
   const marketGroups = splitRowsByMarket(rows, markets.length === 1 ? markets[0] : "");
-  const confirmed = confirm(`將 ${candidates.length} 張方舟庫存截圖合併成 ${marketGroups.length} 個市場快照，共 ${rows.length} 筆庫存。若同日同市場已有快照，會先列出差異再詢問是否取代。確定繼續？`);
+  const confirmed = confirm(`撠?${candidates.length} 撘菜?澈摮??雿菜? ${marketGroups.length} ???游翰?改???${rows.length} 蝑澈摮????游歇?翰?改????撌桃?岷??血?隞?Ⅱ摰匱蝥?`);
   if (!confirmed) return;
 
   const button = els.saveMergedSnapshot;
   if (button) {
     button.disabled = true;
-    button.textContent = "合併寫入中...";
+    button.textContent = "?蔥撖怠銝?..";
   }
 
   try {
@@ -3137,7 +3138,7 @@ async function saveMergedSnapshotToGoogleSheet() {
       date: latestDate,
       market: markets.length === 1 ? markets[0] : "",
       sourceEntryId: candidates.map((item) => item.entry.id).join(","),
-      sourceTitle: `合併快照：${candidates.length} 張截圖`,
+      sourceTitle: `?蔥敹怎嚗?{candidates.length} 撘菜?,
       rows,
     });
 
@@ -3157,7 +3158,7 @@ async function saveMergedSnapshotToGoogleSheet() {
       });
       state.entries = await getAllEntries();
       render();
-      alert("雲端已存在同日、同市場、同內容的快照，未重複寫入。");
+      alert("?脩垢撌脣??典??乓?撣???批捆?翰?改??芷?銴神?乓?);
       return;
     }
 
@@ -3172,14 +3173,14 @@ async function saveMergedSnapshotToGoogleSheet() {
     state.entries = await getAllEntries();
     await loadLatestCloudSnapshot(false);
     render();
-    alert(`已合併存到 Google Sheet：${rows.length} 筆庫存，${result.written.length} 個市場快照${result.replacedCount ? `，取代 ${result.replacedCount} 筆舊快照` : ""}`);
+    alert(`撌脣?雿萄???Google Sheet嚗?{rows.length} 蝑澈摮?${result.written.length} ???游翰??{result.replacedCount ? `嚗?隞?${result.replacedCount} 蝑?敹怎` : ""}`);
   } catch (error) {
     console.error(error);
-    alert(error.message || "合併寫入 Google Sheet 失敗");
+    alert(error.message || "?蔥撖怠 Google Sheet 憭望?");
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = "合併存雲端";
+      button.textContent = "?蔥摮蝡?;
     }
   }
 }
@@ -3189,14 +3190,14 @@ async function saveEntrySnapshotToGoogleSheet(id) {
   const payloads = buildMarketSnapshotPayloads(entry);
   const rowCount = payloads.reduce((sum, payload) => sum + payload.positionRows.length, 0);
   if (!rowCount) {
-    alert("目前沒有可存入 Google Sheet 的庫存列。");
+    alert("?桀?瘝??臬???Google Sheet ?澈摮???);
     return;
   }
 
   const button = els.detailContent.querySelector('[data-action="save-cloud-snapshot"]');
   if (button) {
     button.disabled = true;
-    button.textContent = "寫入中...";
+    button.textContent = "撖怠銝?..";
   }
 
   try {
@@ -3214,7 +3215,7 @@ async function saveEntrySnapshotToGoogleSheet(id) {
       state.entries = await getAllEntries();
       render();
       openDetail(id);
-      alert("雲端已存在同日、同市場、同內容的快照，未重複寫入。");
+      alert("?脩垢撌脣??典??乓?撣???批捆?翰?改??芷?銴神?乓?);
       return;
     }
     entry.status = "imported";
@@ -3224,14 +3225,14 @@ async function saveEntrySnapshotToGoogleSheet(id) {
     await loadLatestCloudSnapshot(false);
     render();
     openDetail(id);
-    alert(`已存到 Google Sheet：${rowCount} 筆庫存，${result.written.length} 個市場快照${result.replacedCount ? `，取代 ${result.replacedCount} 筆舊快照` : ""}`);
+    alert(`撌脣???Google Sheet嚗?{rowCount} 蝑澈摮?${result.written.length} ???游翰??{result.replacedCount ? `嚗?隞?${result.replacedCount} 蝑?敹怎` : ""}`);
   } catch (error) {
     console.error(error);
-    alert(error.message || "寫入 Google Sheet 失敗");
+    alert(error.message || "撖怠 Google Sheet 憭望?");
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = "存到 Google Sheet";
+      button.textContent = "摮 Google Sheet";
     }
   }
 }
@@ -3286,14 +3287,14 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
     const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
     await loadTargetLevelHistory();
-    const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G");
+    const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G").catch(() => []);
     const layout = parseLayoutRows(stripHeaderRow(layoutValues, SHEET_HEADERS.layout));
     state.cloudHistory = { snapshots, positions, layout };
     if (!snapshots.length) {
       state.cloudSnapshot = null;
       state.cloudLoading = false;
       renderCloudSnapshot();
-      if (showAlert) alert("Google Sheet 目前還沒有庫存快照。");
+      if (showAlert) alert("Google Sheet ?桀????澈摮翰?扼?);
       return;
     }
     const latest = snapshots[0];
@@ -3302,14 +3303,14 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     state.cloudLoading = false;
     renderCloudSnapshot();
     renderSummaryLine();
-    if (showAlert) alert(`已讀取雲端庫存：${latestPositions.length} 筆`);
+    if (showAlert) alert(`撌脰??蝡臬澈摮?${latestPositions.length} 蝑);
     const symbols = [...new Set(latestPositions.map((p) => p.symbol).filter(Boolean))];
     fetchQuotes(symbols);
   } catch (error) {
     console.error(error);
     state.cloudLoading = false;
     renderCloudSnapshot();
-    if (showAlert) alert(error.message || "讀取 Google Sheet 失敗");
+    if (showAlert) alert(error.message || "霈??Google Sheet 憭望?");
   }
 }
 
@@ -3474,7 +3475,7 @@ function buildLayoutAnalysis() {
 }
 
 function renderWaterCostAnalysis(points) {
-  if (!points.length) return "<p class=\"muted-text\">尚無足夠快照建立布局分析。</p>";
+  if (!points.length) return "<p class=\"muted-text\">撠頞喳?敹怎撱箇?撣?????/p>";
   return ["TW", "US"].map((market) => {
     const marketPoints = points.filter((item) => item.market === market).slice(-12);
     if (!marketPoints.length) return "";
@@ -3485,13 +3486,13 @@ function renderWaterCostAnalysis(points) {
         <div class="water-cost-row">
           <div>
             <strong>${escapeHtml(item.date)}</strong>
-            <span>${item.isInitial ? "初始庫存" : `${item.deltas.length} 檔變動`}</span>
+            <span>${item.isInitial ? "??摨怠?" : `${item.deltas.length} 瑼??}</span>
           </div>
-          <span>${item.targetLevel === null ? "水位未設定" : formatPercent(item.targetLevel)}</span>
+          <span>${item.targetLevel === null ? "瘞港??芾身摰? : formatPercent(item.targetLevel)}</span>
           <div class="layout-cost-meter ${barClass}">
             <span style="width: ${widthPercent(Math.abs(item.netLayoutCost), maxAbsCost)}%"></span>
           </div>
-          <b>${item.isInitial ? "基準" : formatSignedMoney(item.netLayoutCost)}</b>
+          <b>${item.isInitial ? "?箸?" : formatSignedMoney(item.netLayoutCost)}</b>
         </div>
       `;
     }).join("");
@@ -3500,7 +3501,7 @@ function renderWaterCostAnalysis(points) {
 }
 
 function renderDailyShareMatrix(points) {
-  if (!points.length) return "<p class=\"muted-text\">尚無個股股數時間序列。</p>";
+  if (!points.length) return "<p class=\"muted-text\">撠??⊥??摨???/p>";
   return ["TW", "US"].map((market) => {
     const recent = points.filter((item) => item.market === market).slice(-8);
     if (!recent.length) return "";
@@ -3543,7 +3544,7 @@ function renderDailyShareMatrix(points) {
       <h4 class="market-section-heading">${marketLabel(market)}</h4>
       <div class="table-scroll share-matrix">
         <table>
-          <thead><tr><th>個股</th>${head}</tr></thead>
+          <thead><tr><th>?</th>${head}</tr></thead>
           <tbody>${body}</tbody>
         </table>
       </div>
@@ -3558,7 +3559,7 @@ function renderTargetLevelChart(history) {
   const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const filtered = history.filter((item) => item.date >= cutoff);
   const allDates = [...new Set(filtered.map((item) => item.date))].sort();
-  if (!allDates.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
+  if (!allDates.length) return "<p class=\"muted-text\">撠甇瑕瘞港?鞈???/p>";
   const markets = ["TW", "US"];
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
   const allVals = filtered.map((i) => i.targetLevel);
@@ -3600,7 +3601,7 @@ function renderTargetLevelChart(history) {
     const polylines = segments.map((s) =>
       `<polyline points="${s.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${colors[market]}" stroke-width="2" stroke-linejoin="round"/>`
     ).join("");
-    const dots = pts.filter(Boolean).map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${colors[market]}"><title>${marketLabel(market)} ${allDates[p.i]} ${p.v}%</title></circle>`).join("");
+    const dots = pts.filter(Boolean).map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${colors[market]}" data-tooltip="${marketLabel(market)} ${allDates[p.i]} ${p.v}%"><title>${marketLabel(market)} ${allDates[p.i]} ${p.v}%</title></circle>`).join("");
     return polylines + dots;
   }).join("");
   const legend = markets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
@@ -3613,17 +3614,19 @@ function renderTargetLevelChart(history) {
         <div class="level-chart-legend">${legend}</div>
         <div class="level-range-btns">${rangeBtns}</div>
       </div>
-      <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg" aria-label="建議水位趨勢">
-        ${yLines.join("")}
-        ${xLabels}
-        ${lines}
-      </svg>
+      <div class="level-chart-container" style="position:relative">
+        <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg" aria-label="撱箄降瘞港?頞典">
+          ${yLines.join("")}
+          ${xLabels}
+          ${lines}
+        </svg>
+      </div>
     </div>
   `;
 }
 
 function renderLayoutDeltaTable(points) {
-  if (!points.length) return "<p class=\"muted-text\">目前還沒有快照差異可計算。</p>";
+  if (!points.length) return "<p class=\"muted-text\">?桀????翰?批榆?啣閮???/p>";
   return ["TW", "US"].map((market) => {
     const rows = points
       .slice()
@@ -3642,11 +3645,11 @@ function renderLayoutDeltaTable(points) {
         <table class="parsed-table">
           <thead>
             <tr>
-              <th>日期</th>
-              <th>代號</th>
-              <th>名稱</th>
-              <th>布局股數</th>
-              <th>估算成本</th>
+              <th>?交?</th>
+              <th>隞??</th>
+              <th>?迂</th>
+              <th>撣??⊥</th>
+              <th>隡啁??</th>
             </tr>
           </thead>
           <tbody>
@@ -3675,11 +3678,11 @@ function buildSharesTimeline(cloudHistory) {
 }
 
 function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
-  if (!dates.length) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  if (!dates.length) return "<p class=\"muted-text\">?閬撠蝑翰?扳??賡＊蝷箄隅?Ｕ?/p>";
   const PL = 52; const PR = 8; const PT = 8; const PB = 24;
   const cW = W - PL - PR; const cH = H - PT - PB;
   const allVals = series.flatMap((s) => s.pts.map((p) => p.v));
-  if (!allVals.length) return "<p class=\"muted-text\">尚無資料。</p>";
+  if (!allVals.length) return "<p class=\"muted-text\">撠鞈???/p>";
   const rawMin = Math.min(...allVals);
   const rawMax = Math.max(...allVals);
   const range = rawMax - rawMin || 1;
@@ -3723,7 +3726,7 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
 
 function renderLayoutSharesChart(cloudHistory) {
   const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
-  if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  if (dates.length < 2) return "<p class=\"muted-text\">?閬撠蝑翰?扳??賡＊蝷箄隅?Ｕ?/p>";
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
   const series = ["TW", "US"].map((market) => {
     const pts = dates.map((d, i) => {
@@ -3740,22 +3743,35 @@ function renderLayoutSharesChart(cloudHistory) {
 
 function renderSymbolSharesChart(symbol, cloudHistory) {
   const layout = cloudHistory?.layout || [];
-  const rows = layout.filter((r) => r.symbol === symbol);
-  if (!rows.length) return "";
-  const dates = [...new Set(rows.map((r) => r.date))].sort();
+  const layoutRows = layout.filter((r) => r.symbol === symbol);
+  if (layoutRows.length > 0) {
+    // 優先用 delta
+    const dates = [...new Set(layoutRows.map((r) => r.date))].sort();
+    const pts = dates.map((d, i) => {
+      const row = layoutRows.find((r) => r.date === d);
+      return row ? { i, v: row.delta } : null;
+    }).filter(Boolean);
+    if (pts.length) return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
+  }
+  // fallback: 讀 positions（累積持股）
+  const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const positions = cloudHistory?.positions || [];
+  const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
   const pts = dates.map((d, i) => {
-    const row = rows.find((r) => r.date === d);
-    return row ? { i, v: row.delta } : null;
+    const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d);
+    if (!snap) return null;
+    const pos = positions.find((r) => r.snapshotId === snap.snapshotId && r.symbol === symbol);
+    return pos ? { i, v: Number(pos.shares || 0) } : null;
   }).filter(Boolean);
   if (!pts.length) return "";
-  return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
+  return renderSharesSvg([{ pts, color: "#4f8ef7" }], dates, {});
 }
 
 function renderAllSymbolsChart(cloudHistory) {
   const layout = cloudHistory?.layout || [];
-  if (!layout.length) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  if (!layout.length) return "<p class=\"muted-text\">?閬撠蝑翰?扳??賡＊蝷箄隅?Ｕ?/p>";
   const dates = [...new Set(layout.map((r) => r.date))].sort();
-  if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  if (dates.length < 2) return "<p class=\"muted-text\">?閬撠蝑翰?扳??賡＊蝷箄隅?Ｕ?/p>";
   const palette = ["#2f7d5b", "#4f8ef7", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
   const symbols = [...new Set(layout.map((r) => r.symbol))].sort();
   const series = symbols.map((symbol, si) => {
@@ -3765,7 +3781,7 @@ function renderAllSymbolsChart(cloudHistory) {
     }).filter(Boolean);
     return { symbol, pts, color: palette[si % palette.length] };
   }).filter((s) => s.pts.length > 0);
-  if (!series.length) return "<p class=\"muted-text\">尚無布局差異資料。</p>";
+  if (!series.length) return "<p class=\"muted-text\">撠撣?撌桃鞈???/p>";
   const legend = series.map((s) => `<span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}`).join(" ");
   return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}</div>${renderSharesSvg(series, dates, {})}`;
 }
@@ -3786,10 +3802,10 @@ function renderCloudSnapshot() {
   if (!els.cloudSnapshot) return;
   const cloud = state.cloudSnapshot;
   if (!cloud?.snapshot) {
-    const title = state.cloudLoading ? "正在載入雲端庫存" : "登入後會自動載入目前庫存";
+    const title = state.cloudLoading ? "甇?頛?脩垢摨怠?" : "?餃敺??芸?頛?桀?摨怠?";
     const body = state.cloudLoading
-      ? "正在讀取 Google Sheet 的最新快照與歷史資料。"
-      : "目前還沒有雲端快照。先把確認後的庫存截圖「合併存雲端」，這裡就會變成每天看庫存、水位和趨勢的首頁。";
+      ? "甇?霈??Google Sheet ???啣翰?扯?甇瑕鞈???
+      : "?桀????蝡臬翰?扼??Ⅱ隤??澈摮??雿萄??脩垢???ㄐ撠望?霈?瘥予?澈摮偌雿?頞典????;
     els.cloudSnapshot.innerHTML = `
       <div class="dashboard-empty">
         <p class="section-eyebrow">Dashboard</p>
@@ -3835,23 +3851,23 @@ function renderCloudSnapshot() {
     <section class="market-water-card">
       <div class="card-heading">
         <h3>${marketLabel(item.market)}</h3>
-        <span>${item.stockCount} 檔庫存</span>
+        <span>${item.stockCount} 瑼澈摮?/span>
       </div>
       <div class="market-water-main">
         <div>
-          <span>方舟建議總水位</span>
-          <strong>${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</strong>
+          <span>?寡?撱箄降蝮賣偌雿?/span>
+          <strong>${item.targetLevel === null ? "?芾身摰? : formatPercent(item.targetLevel)}</strong>
         </div>
         <label>
-          調整建議水位
+          隤踵撱箄降瘞港?
           <input class="target-level-input" data-target-level-market="${item.market}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(item.targetLevel ?? "")}">
         </label>
       </div>
       <div class="market-stats">
-        <span>估算投入成本 <b>${formatMoney(item.totalCost)}</b></span>
-        <span>總股數 <b>${formatNumber(item.totalShares, 3)}</b></span>
+        <span>隡啁??? <b>${formatMoney(item.totalCost)}</b></span>
+        <span>蝮質??<b>${formatNumber(item.totalShares, 3)}</b></span>
       </div>
-      <div class="meter" aria-label="${marketLabel(item.market)} 估算投入成本">
+      <div class="meter" aria-label="${marketLabel(item.market)} 隡啁???">
         <span style="width: ${widthPercent(item.totalCost, maxMarketCost)}%"></span>
       </div>
     </section>
@@ -3890,10 +3906,10 @@ function renderCloudSnapshot() {
         <table class="parsed-table">
           <thead>
             <tr>
-              <th>日期</th>
-              <th>檔數</th>
-              <th>總股數</th>
-              <th>估算投入成本</th>
+              <th>?交?</th>
+              <th>瑼</th>
+              <th>蝮質??/th>
+              <th>隡啁???</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -3910,10 +3926,10 @@ function renderCloudSnapshot() {
         ? ((price - avgCost) / avgCost * 100)
         : null;
       const perfClass = perfRate === null ? "" : perfRate > 0 ? "perf-positive" : perfRate < 0 ? "perf-negative" : "";
-      const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
+      const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">??/span>";
       const perfCell = perfRate !== null
         ? `<span class="${perfClass}">${perfRate > 0 ? "+" : ""}${perfRate.toFixed(2)}%</span>`
-        : "<span class=\"muted-text\">—</span>";
+        : "<span class=\"muted-text\">??/span>";
       return `
         <tr class="symbol-row" data-symbol="${escapeHtml(row.symbol)}" tabindex="0" style="cursor:pointer">
           <td>${escapeHtml(row.symbol)}</td>
@@ -3927,28 +3943,28 @@ function renderCloudSnapshot() {
       `;
     }).join("");
     const quoteLoading = Object.keys(state.quotes).length === 0
-      ? "<p class=\"muted-text quote-loading\">正在載入現價…</p>" : "";
+      ? "<p class=\"muted-text quote-loading\">甇?頛?曉??/p>" : "";
     return `
       <section class="market-detail-section">
         <div class="card-heading">
-          <h3>${marketLabel(item.market)}明細</h3>
-          <span>建議水位 ${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</span>
+          <h3>${marketLabel(item.market)}?敦</h3>
+          <span>撱箄降瘞港? ${item.targetLevel === null ? "?芾身摰? : formatPercent(item.targetLevel)}</span>
         </div>
         ${quoteLoading}
         <div class="table-scroll compact-table">
           <table class="parsed-table">
             <thead>
               <tr>
-                <th>代號</th>
-                <th>名稱</th>
-                <th>股數</th>
-                <th>成交均價</th>
-                <th>現價</th>
-                <th>表現率</th>
-                <th>估算成本</th>
+                <th>隞??</th>
+                <th>?迂</th>
+                <th>?⊥</th>
+                <th>?漱?</th>
+                <th>?曉</th>
+                <th>銵函??/th>
+                <th>隡啁??</th>
               </tr>
             </thead>
-            <tbody>${rows || "<tr><td colspan=\"7\">沒有庫存</td></tr>"}</tbody>
+            <tbody>${rows || "<tr><td colspan=\"7\">瘝?摨怠?</td></tr>"}</tbody>
           </table>
         </div>
         <div class="symbol-chart-panel" id="symbol-chart-${escapeHtml(item.market)}" hidden></div>
@@ -3960,23 +3976,23 @@ function renderCloudSnapshot() {
   const homeContent = `
     <div class="metric-grid">
       <div class="metric">
-        <span>庫存檔數</span>
+        <span>摨怠?瑼</span>
         <strong>${formatNumber(positions.length)}</strong>
       </div>
       <div class="metric">
-        <span>總股數</span>
+        <span>蝮質??/span>
         <strong>${formatNumber(totalShares, 3)}</strong>
       </div>
       <div class="metric">
-        <span>估算投入成本</span>
+        <span>隡啁???</span>
         <strong>${formatMoney(totalCost)}</strong>
       </div>
       <div class="metric">
-        <span>雲端快照</span>
+        <span>?脩垢敹怎</span>
         <strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong>
       </div>
       <div class="metric">
-        <span>歷史建議水位</span>
+        <span>甇瑕撱箄降瘞港?</span>
         <strong>${formatNumber(state.targetLevelHistory.length)}</strong>
       </div>
     </div>
@@ -3984,49 +4000,49 @@ function renderCloudSnapshot() {
     <div class="dashboard-grid">
       <section class="dashboard-card">
         <div class="card-heading">
-          <h3>市場水位</h3>
-          <span>建議水位為各市場庫存占總資金的比例</span>
+          <h3>撣瘞港?</h3>
+          <span>撱箄降瘞港??箏?撣摨怠??蜇鞈???靘?/span>
         </div>
         <div class="market-water-grid">${marketCards}</div>
       </section>
 
       <section class="dashboard-card">
         <div class="card-heading">
-          <h3>近幾次快照趨勢</h3>
-          <span>綠色為成本，藍色為股數</span>
+          <h3>餈嗾甈∪翰?扯隅??/h3>
+          <span>蝬?箸??穿???箄??/span>
         </div>
-        <div class="trend-chart">${trendBars || "<p class=\"muted-text\">尚無歷史快照。</p>"}</div>
+        <div class="trend-chart">${trendBars || "<p class=\"muted-text\">撠甇瑕敹怎??/p>"}</div>
       </section>
     </div>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>建議水位趨勢</h3>
-        <span>台股 / 美股歷史建議水位（%）</span>
+        <h3>撱箄降瘞港?頞典</h3>
+        <span>?啗 / 蝢甇瑕撱箄降瘞港?嚗?嚗?/span>
       </div>
       ${renderTargetLevelChart(state.targetLevelHistory)}
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>每日水位與布局成本</h3>
-        <span>第一筆為初始庫存，後續以今日庫存減前一份快照</span>
+        <h3>瘥瘞港???撅?</h3>
+        <span>蝚砌?蝑??摨怠?嚗?蝥誑隞摨怠?皜?銝隞賢翰??/span>
       </div>
       <div class="water-cost-chart">${renderWaterCostAnalysis(layoutAnalysis)}</div>
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>刪除快照</h3>
+        <h3>?芷敹怎</h3>
       </div>
       <div class="snapshot-delete-row">
         <input type="date" id="home-delete-snapshot-date">
         <select id="home-delete-snapshot-market">
-          <option value="all">所有市場</option>
-          <option value="TW">台股</option>
-          <option value="US">美股</option>
+          <option value="all">?????/option>
+          <option value="TW">?啗</option>
+          <option value="US">蝢</option>
         </select>
-        <button id="home-delete-cloud-snapshot" class="button danger compact" type="button">刪除</button>
+        <button id="home-delete-cloud-snapshot" class="button danger compact" type="button">?芷</button>
       </div>
       <p id="home-delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText("", "all"))}</p>
     </section>
@@ -4034,63 +4050,63 @@ function renderCloudSnapshot() {
   const holdingsContent = `
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>布局股數趨勢</h3>
-        <span>台股 / 美股每日總布局股數</span>
+        <h3>撣??⊥頞典</h3>
+        <span>?啗 / 蝢瘥蝮賢?撅?⊥</span>
       </div>
       <div class="layout-shares-chart">${renderLayoutSharesChart(state.cloudHistory)}</div>
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>個股股數趨勢</h3>
-        <span>每支股票的股數時間序列，點擊下方明細列查看單檔走勢</span>
+        <h3>??⊥頞典</h3>
+        <span>瘥?∠巨??豢?????暺?銝?敦??瑼粥??/span>
       </div>
       <div class="layout-shares-chart">${renderAllSymbolsChart(state.cloudHistory)}</div>
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>個股每日股數</h3>
-        <span>最近快照的持股股數時間序列</span>
+        <h3>?瘥?⊥</h3>
+        <span>?餈翰?抒???⊥??摨?</span>
       </div>
       ${renderDailyShareMatrix(layoutAnalysis)}
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>每日布局股數差異</h3>
-        <span>今日庫存減前一份同市場快照</span>
+        <h3>瘥撣??⊥撌桃</h3>
+        <span>隞摨怠?皜?銝隞賢?撣敹怎</span>
       </div>
       ${renderLayoutDeltaTable(layoutAnalysis)}
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看股數走勢</span>
+        <h3>?桀??敦</h3>
+        <span>${positions.length} 蝑澈摮?靘?∟?蝢????????貉粥??/span>
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>每日庫存總覽</h3>
-        <span>最近 ${history.length} 次雲端快照，依市場分開</span>
+        <h3>瘥摨怠?蝮質汗</h3>
+        <span>?餈?${history.length} 甈⊿蝡臬翰?改?靘??游???/span>
       </div>
-      ${dailyRowsByMarket || "<p class=\"muted-text\">尚無歷史快照。</p>"}
+      ${dailyRowsByMarket || "<p class=\"muted-text\">撠甇瑕敹怎??/p>"}
       <div class="snapshot-actions">
-        <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
+        <button id="cleanup-duplicates" class="button secondary compact" type="button">皜???</button>
       </div>
     </section>
   `;
   const captureContent = `
     <section class="dashboard-card capture-tab-card">
       <div class="card-heading">
-        <h3>新增庫存截圖</h3>
-        <span>打開截圖入口後可貼上、拖放或選檔</span>
+        <h3>?啣?摨怠??芸?</h3>
+        <span>???芸??亙敺鞎潔????暹??豢?</span>
       </div>
-      <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
-      <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
+      <p class="muted-text">蝣箄??芸?閫??敺??舐??雿萄??脩垢?神??Google Sheet嚗ashboard ???啗??交??啣澈摮?/p>
+      <button id="dashboard-open-capture" class="button primary" type="button">?啣??芸?</button>
     </section>
   `;
   const tabContent = {
@@ -4102,19 +4118,19 @@ function renderCloudSnapshot() {
     <header class="dashboard-header">
       <div>
         <p class="section-eyebrow">Dashboard</p>
-        <h2>目前庫存</h2>
-        <p>${escapeHtml(cloud.snapshot.date)} · ${marketLabel(cloud.snapshot.market)} · ${escapeHtml(cloud.snapshot.createdAt)}</p>
+        <h2>?桀?摨怠?</h2>
+        <p>${escapeHtml(cloud.snapshot.date)} 繚 ${marketLabel(cloud.snapshot.market)} 繚 ${escapeHtml(cloud.snapshot.createdAt)}</p>
       </div>
       <div class="dashboard-actions">
-        <button id="dashboard-refresh" class="button secondary compact" type="button">重新整理</button>
+        <button id="dashboard-refresh" class="button secondary compact" type="button">??渡?</button>
       </div>
     </header>
 
     <div class="dashboard-tab-content">${tabContent}</div>
     <nav class="dashboard-tabs" role="tablist" aria-label="AssetFlow Invest">
-      ${dashboardTabButton("home", "首頁")}
-      ${dashboardTabButton("holdings", "庫存")}
-      ${dashboardTabButton("capture", "新增")}
+      ${dashboardTabButton("home", "擐?")}
+      ${dashboardTabButton("holdings", "摨怠?")}
+      ${dashboardTabButton("capture", "?啣?")}
     </nav>
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
@@ -4163,6 +4179,18 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
+  els.cloudSnapshot.querySelectorAll(".level-chart-container circle[data-tooltip]").forEach((dot) => {
+    dot.style.cursor = "pointer";
+    dot.addEventListener("click", (e) => {
+      const container = dot.closest(".level-chart-container");
+      let tip = container.querySelector(".chart-tooltip");
+      if (!tip) { tip = document.createElement("div"); tip.className = "chart-tooltip"; container.appendChild(tip); }
+      tip.textContent = dot.dataset.tooltip;
+      tip.style.display = "block";
+      setTimeout(() => { tip.style.display = "none"; }, 2500);
+      e.stopPropagation();
+    });
+  });
   els.cloudSnapshot.querySelectorAll(".symbol-row").forEach((row) => {
     const activate = () => {
       const symbol = row.dataset.symbol;
@@ -4177,8 +4205,8 @@ function renderCloudSnapshot() {
         const name = row.querySelector("td:nth-child(2)")?.textContent || symbol;
         const chartHtml = renderSymbolSharesChart(symbol, state.cloudHistory);
         panel.innerHTML = chartHtml
-          ? `<div class="symbol-chart-heading"><strong>${escapeHtml(symbol)}</strong> ${escapeHtml(name)} 股數走勢</div>${chartHtml}`
-          : `<p class="muted-text">${escapeHtml(symbol)} 尚無足夠歷史資料。</p>`;
+          ? `<div class="symbol-chart-heading"><strong>${escapeHtml(symbol)}</strong> ${escapeHtml(name)} ?⊥韏啣</div>${chartHtml}`
+          : `<p class="muted-text">${escapeHtml(symbol)} 撠頞喳?甇瑕鞈???/p>`;
       }
     };
     row.addEventListener("click", activate);
@@ -4235,7 +4263,7 @@ async function deleteCloudSnapshotById(snapshotId, button) {
   if (!snapshotId) return;
   if (button) {
     button.disabled = true;
-    button.textContent = "檢查";
+    button.textContent = "瑼Ｘ";
   }
   try {
     await ensureCloudSheetTables();
@@ -4245,21 +4273,21 @@ async function deleteCloudSnapshotById(snapshotId, button) {
     const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
     const target = snapshots.find((snapshot) => snapshot.snapshotId === snapshotId);
     if (!target) {
-      alert("這筆快照已不存在，將重新整理。");
+      alert("??敹怎撌脖?摮嚗???渡???);
       await loadLatestCloudSnapshot(false);
       return;
     }
     const positionCount = positions.filter((row) => row.snapshotId === snapshotId).length;
     const confirmed = confirm([
-      `確定刪除 ${target.date} ${marketLabel(target.market)} 快照？`,
+      `蝣箏??芷 ${target.date} ${marketLabel(target.market)} 敹怎嚗,
       "",
-      `${target.rowCount || positionCount} 檔庫存 · ${target.createdAt}`,
+      `${target.rowCount || positionCount} 瑼澈摮?繚 ${target.createdAt}`,
       "",
-      "刪除後會同步移除這筆快照的庫存明細。",
+      "?芷敺??郊蝘駁??敹怎?澈摮?蝝啜?,
     ].join("\n"));
     if (!confirmed) return;
 
-    if (button) button.textContent = "刪除";
+    if (button) button.textContent = "?芷";
     const keptSnapshots = snapshots.filter((snapshot) => snapshot.snapshotId !== snapshotId);
     const keptPositions = positions.filter((row) => row.snapshotId !== snapshotId);
 
@@ -4273,14 +4301,14 @@ async function deleteCloudSnapshotById(snapshotId, button) {
     }
 
     await loadLatestCloudSnapshot(false);
-    alert("已刪除雲端快照。");
+    alert("撌脣?日蝡臬翰?扼?);
   } catch (error) {
     console.error(error);
-    alert(error.message || "刪除雲端快照失敗");
+    alert(error.message || "?芷?脩垢敹怎憭望?");
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = "刪除";
+      button.textContent = "?芷";
     }
   }
 }
@@ -4293,13 +4321,13 @@ async function deleteSelectedCloudSnapshots({ buttonId = "delete-cloud-snapshot"
   const market = normalizeMarketKey(marketInput?.value);
 
   if (!date) {
-    alert("請先選擇要刪除的日期。");
+    alert("隢??豢?閬?斤??交???);
     return;
   }
 
   if (button) {
     button.disabled = true;
-    button.textContent = "檢查中...";
+    button.textContent = "瑼Ｘ銝?..";
   }
   try {
     await ensureCloudSheetTables();
@@ -4312,24 +4340,24 @@ async function deleteSelectedCloudSnapshots({ buttonId = "delete-cloud-snapshot"
     const targetPositionCount = positions.filter((row) => targetIds.has(row.snapshotId)).length;
 
     if (!targets.length) {
-      alert("這個日期與市場沒有雲端快照。");
+      alert("???撣瘝??脩垢敹怎??);
       return;
     }
 
     const targetLines = targets
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-      .map((snapshot) => `- ${snapshot.date} ${marketLabel(snapshot.market)} · ${snapshot.rowCount || 0} 檔 · ${snapshot.createdAt}`)
+      .map((snapshot) => `- ${snapshot.date} ${marketLabel(snapshot.market)} 繚 ${snapshot.rowCount || 0} 瑼?繚 ${snapshot.createdAt}`)
       .join("\n");
     const confirmed = confirm([
-      `確定刪除 ${targets.length} 筆快照與 ${targetPositionCount} 筆庫存明細？`,
+      `蝣箏??芷 ${targets.length} 蝑翰?扯? ${targetPositionCount} 蝑澈摮?蝝堆?`,
       "",
       targetLines,
       "",
-      "刪除後會直接重寫 Google Sheet 的雲端快照資料。",
+      "?芷敺??湔?神 Google Sheet ?蝡臬翰?扯???,
     ].join("\n"));
     if (!confirmed) return;
 
-    if (button) button.textContent = "刪除中...";
+    if (button) button.textContent = "?芷銝?..";
     const keptSnapshots = snapshots.filter((snapshot) => !targetIds.has(snapshot.snapshotId));
     const keptPositions = positions.filter((row) => !targetIds.has(row.snapshotId));
 
@@ -4343,14 +4371,14 @@ async function deleteSelectedCloudSnapshots({ buttonId = "delete-cloud-snapshot"
     }
 
     await loadLatestCloudSnapshot(false);
-    alert(`已刪除 ${targets.length} 筆雲端快照。`);
+    alert(`撌脣??${targets.length} 蝑蝡臬翰?扼);
   } catch (error) {
     console.error(error);
-    alert(error.message || "刪除雲端快照失敗");
+    alert(error.message || "?芷?脩垢敹怎憭望?");
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = "刪除快照";
+      button.textContent = "?芷敹怎";
     }
   }
 }
@@ -4359,7 +4387,7 @@ async function cleanupDuplicateCloudSnapshots() {
   const button = els.cloudSnapshot?.querySelector("#cleanup-duplicates");
   if (button) {
     button.disabled = true;
-    button.textContent = "檢查中...";
+    button.textContent = "瑼Ｘ銝?..";
   }
   try {
     await ensureCloudSheetTables();
@@ -4371,14 +4399,14 @@ async function cleanupDuplicateCloudSnapshots() {
     const duplicateIds = new Set(duplicateGroups.flatMap((group) => group.slice(1).map((item) => item.snapshot.snapshotId)));
 
     if (!duplicateIds.size) {
-      alert("沒有找到同日、同市場、同內容的重複快照。");
+      alert("瘝??曉???撣???批捆??銴翰?扼?);
       return;
     }
 
-    const confirmed = confirm(`找到 ${duplicateGroups.length} 組重複快照，將刪除 ${duplicateIds.size} 筆較舊快照與其庫存明細，保留每組最新建立的一份。確定清理？`);
+    const confirmed = confirm(`?曉 ${duplicateGroups.length} 蝯?銴翰?改?撠??${duplicateIds.size} 蝑??翰?扯??嗅澈摮?蝝堆?靽?瘥???啣遣蝡?銝隞賬Ⅱ摰???`);
     if (!confirmed) return;
 
-    if (button) button.textContent = "清理中...";
+    if (button) button.textContent = "皜?銝?..";
     const keptSnapshots = snapshots.filter((snapshot) => !duplicateIds.has(snapshot.snapshotId));
     const keptPositions = positions.filter((row) => !duplicateIds.has(row.snapshotId));
 
@@ -4392,14 +4420,14 @@ async function cleanupDuplicateCloudSnapshots() {
     }
 
     await loadLatestCloudSnapshot(false);
-    alert(`已清理 ${duplicateIds.size} 筆重複快照。`);
+    alert(`撌脫???${duplicateIds.size} 蝑?銴翰?扼);
   } catch (error) {
     console.error(error);
-    alert(error.message || "清理重複快照失敗");
+    alert(error.message || "皜???敹怎憭望?");
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = "清理重複";
+      button.textContent = "皜???";
     }
   }
 }
@@ -4428,7 +4456,7 @@ async function exportEntryDiagnostics(id) {
   const button = els.detailContent.querySelector('[data-action="export-diagnostics"]');
   if (button) {
     button.disabled = true;
-    button.textContent = "診斷中...";
+    button.textContent = "閮箸銝?..";
   }
 
   try {
@@ -4499,11 +4527,11 @@ async function exportEntryDiagnostics(id) {
     downloadJson(payload, `assetflow-invest-diagnostics-${entry.id}-${today()}.json`);
   } catch (error) {
     console.error(error);
-    alert(error.message || "診斷匯出失敗，請重新整理後再試");
+    alert(error.message || "閮箸?臬憭望?嚗???渡?敺?閰?);
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = "匯出診斷";
+      button.textContent = "?臬閮箸";
     }
   }
 }
@@ -4546,7 +4574,7 @@ async function importBackup(file) {
   const parsed = JSON.parse(text);
   const entries = Array.isArray(parsed) ? parsed : parsed.entries;
   if (!Array.isArray(entries)) {
-    alert("備份格式不正確");
+    alert("?遢?澆?銝迤蝣?);
     return;
   }
   const normalized = entries
@@ -4556,7 +4584,7 @@ async function importBackup(file) {
       updatedAt: new Date().toISOString(),
     }));
   if (!normalized.length) {
-    alert("備份內沒有可匯入資料");
+    alert("?遢?扳???臬鞈?");
     return;
   }
   await txStore("readwrite", (store) => {
@@ -4564,7 +4592,7 @@ async function importBackup(file) {
   });
   state.entries = await getAllEntries();
   render();
-  alert(`已匯入 ${normalized.length} 筆`);
+  alert(`撌脣??${normalized.length} 蝑);
 }
 
 function bindEvents() {
@@ -4626,7 +4654,7 @@ async function signInAndLoadApp() {
   authFlowInProgress = true;
   if (els.authSignIn) {
     els.authSignIn.disabled = true;
-    els.authSignIn.textContent = "登入中...";
+    els.authSignIn.textContent = "?餃銝?..";
   }
   try {
     await getGoogleAccessToken();
@@ -4640,7 +4668,7 @@ async function signInAndLoadApp() {
     await loadLatestCloudSnapshot(false);
   } catch (error) {
     console.error(error);
-    resetGoogleSession(error.message || "Google 登入失敗");
+    resetGoogleSession(error.message || "Google ?餃憭望?");
   } finally {
     authFlowInProgress = false;
     renderAuthGate();
@@ -4648,7 +4676,7 @@ async function signInAndLoadApp() {
 }
 
 async function init() {
-  const versionText = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
+  const versionText = `AssetFlow Invest ${APP_VERSION} 繚 ${APP_VERSION_NOTE}`;
   if (els.appVersion) els.appVersion.textContent = versionText;
   const authVersion = document.getElementById("auth-version");
   if (authVersion) authVersion.textContent = versionText;
@@ -4675,5 +4703,5 @@ function registerServiceWorker() {
 
 init().catch((error) => {
   console.error(error);
-  alert("AssetFlow Invest 啟動失敗");
+  alert("AssetFlow Invest ??憭望?");
 });

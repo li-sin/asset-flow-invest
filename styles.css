@@ -1774,3 +1774,18 @@ textarea {
     min-width: 900px;
   }
 }
+
+.chart-tooltip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--card-bg, #1e2530);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  pointer-events: none;
+  display: none;
+  z-index: 10;
+}
