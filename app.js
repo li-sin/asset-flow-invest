@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.3";
+const APP_VERSION = "v0.14.4";
 const APP_VERSION_NOTE = "蝘駁瘞港? tab 靘?嚗耨甇?偌雿隅?Ｙ撣賊?";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -519,8 +519,8 @@ function filteredEntries() {
 
 function render() {
   const entries = filteredEntries();
-  els.list.innerHTML = "";
-  els.empty.classList.toggle("is-hidden", entries.length > 0);
+  if (els.list) els.list.innerHTML = "";
+  if (els.empty) els.empty.classList.toggle("is-hidden", entries.length > 0);
   renderSummaryLine();
 
   for (const entry of entries) {
@@ -549,7 +549,7 @@ function render() {
         openDetail(entry.id);
       }
     });
-    els.list.appendChild(card);
+    if (els.list) els.list.appendChild(card);
   }
 }
 
