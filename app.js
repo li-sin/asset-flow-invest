@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.18";
-const APP_VERSION_NOTE = "修正水位 append 空格問題";
+const APP_VERSION = "v0.13.19";
+const APP_VERSION_NOTE = "水位趨勢圖歷史資料 + 時間範圍選擇";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -60,6 +60,7 @@ const state = {
     positions: [],
   },
   dashboardTab: "home",
+  levelChartRange: "1M",
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
   auth: {
@@ -511,8 +512,27 @@ function parseTargetLevelRows(values) {
 
 async function loadTargetLevelHistory() {
   try {
-    const values = await readCloudSheetValues(SHEET_NAMES.levels, "A1:Z");
-    state.targetLevelHistory = parseTargetLevelRows(values)
+    const [levelsValues, twValues, usValues] = await Promise.all([
+      readCloudSheetValues(SHEET_NAMES.levels, "A1:Z").catch(() => []),
+      readSheetValues("台股", "A:B").catch(() => []),
+      readSheetValues("美股", "A:B").catch(() => []),
+    ]);
+    const fromLevels = parseTargetLevelRows(levelsValues);
+    const fromTw = twValues
+      .filter((row, i) => i > 0 && row[0] && row[1])
+      .map((row) => ({ date: normalizeDateText(row[0]), market: "TW", targetLevel: parsePercentValue(row[1]), source: "台股" }))
+      .filter((item) => item.date && item.targetLevel !== null);
+    const fromUs = usValues
+      .filter((row, i) => i > 0 && row[0] && row[1])
+      .map((row) => ({ date: normalizeDateText(row[0]), market: "US", targetLevel: parsePercentValue(row[1]), source: "美股" }))
+      .filter((item) => item.date && item.targetLevel !== null);
+    // merge; prefer tab data over levels tab (tab is source of truth)
+    const seen = new Map();
+    for (const item of [...fromTw, ...fromUs, ...fromLevels]) {
+      const key = `${item.market}_${item.date}`;
+      if (!seen.has(key)) seen.set(key, item);
+    }
+    state.targetLevelHistory = [...seen.values()]
       .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   } catch (error) {
     console.warn("target level history", error);
@@ -3481,51 +3501,59 @@ function renderDailyShareMatrix(points) {
 }
 
 function renderTargetLevelChart(history) {
+  const rangeKey = state.levelChartRange || "1M";
+  const rangeDays = { "1M": 31, "6M": 183, "1Y": 365 };
+  const days = rangeDays[rangeKey] || 31;
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const filtered = history.filter((item) => item.date >= cutoff);
+  const allDates = [...new Set(filtered.map((item) => item.date))].sort();
+  if (!allDates.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
   const markets = ["TW", "US"];
-  const allDates = [...new Set(history.map((item) => item.date))].sort();
-  const recent = allDates.slice(-20);
-  if (!recent.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
-  const colors = { TW: "var(--green)", US: "var(--accent, #4f8ef7)" };
-  const minVal = Math.max(0, Math.floor(Math.min(...history.map((i) => i.targetLevel)) / 10) * 10 - 10);
-  const maxVal = Math.min(100, Math.ceil(Math.max(...history.map((i) => i.targetLevel)) / 10) * 10 + 10);
-  const range = maxVal - minVal || 10;
-  const toY = (v) => (1 - (v - minVal) / range) * 100;
-  const W = 600;
-  const H = 160;
-  const PAD_L = 32;
-  const PAD_R = 8;
-  const PAD_T = 8;
-  const PAD_B = 24;
-  const chartW = W - PAD_L - PAD_R;
-  const chartH = H - PAD_T - PAD_B;
-  const xPos = (i) => PAD_L + (i / (recent.length - 1 || 1)) * chartW;
-  const yPos = (v) => PAD_T + (toY(v) / 100) * chartH;
-  const yGridLines = [];
-  for (let v = minVal; v <= maxVal; v += 10) {
+  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const allVals = filtered.map((i) => i.targetLevel);
+  const minVal = Math.max(0, Math.floor(Math.min(...allVals) / 10) * 10 - 5);
+  const maxVal = Math.min(100, Math.ceil(Math.max(...allVals) / 10) * 10 + 5);
+  const valRange = maxVal - minVal || 10;
+  const W = 600; const H = 170;
+  const PL = 34; const PR = 8; const PT = 8; const PB = 26;
+  const cW = W - PL - PR; const cH = H - PT - PB;
+  const xPos = (i) => PL + (i / (allDates.length - 1 || 1)) * cW;
+  const yPos = (v) => PT + (1 - (v - minVal) / valRange) * cH;
+  const yLines = [];
+  for (let v = Math.ceil(minVal / 5) * 5; v <= maxVal; v += 5) {
     const y = yPos(v);
-    yGridLines.push(`<line x1="${PAD_L}" y1="${y}" x2="${W - PAD_R}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
-    yGridLines.push(`<text x="${PAD_L - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${v}%</text>`);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="${v % 10 === 0 ? 0.8 : 0.3}"/>`);
+    if (v % 10 === 0) yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${v}%</text>`);
   }
-  const xLabels = recent.map((d, i) => {
-    if (i % Math.max(1, Math.floor(recent.length / 5)) !== 0 && i !== recent.length - 1) return "";
-    return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
+  const maxLabels = Math.min(allDates.length, rangeKey === "1Y" ? 12 : rangeKey === "6M" ? 6 : 4);
+  const labelStep = Math.max(1, Math.floor(allDates.length / maxLabels));
+  const xLabels = allDates.map((d, i) => {
+    if (i % labelStep !== 0 && i !== allDates.length - 1) return "";
+    const label = rangeKey === "1Y" ? d.slice(0, 7) : d.slice(5);
+    return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${label}</text>`;
   }).join("");
   const lines = markets.map((market) => {
-    const pts = recent.map((d, i) => {
-      const found = history.find((item) => item.market === market && item.date === d);
+    const pts = allDates.map((d, i) => {
+      const found = filtered.find((item) => item.market === market && item.date === d);
       return found ? { i, v: found.targetLevel } : null;
     }).filter(Boolean);
     if (!pts.length) return "";
     const polyline = pts.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ");
-    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="3" fill="${colors[market]}"><title>${marketLabel(market)} ${recent[p.i]} ${p.v}%</title></circle>`).join("");
+    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${colors[market]}"><title>${marketLabel(market)} ${allDates[p.i]} ${p.v}%</title></circle>`).join("");
     return `<polyline points="${polyline}" fill="none" stroke="${colors[market]}" stroke-width="2" stroke-linejoin="round"/>${dots}`;
   }).join("");
   const legend = markets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  const rangeBtns = ["1M", "6M", "1Y"].map((r) =>
+    `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-level-range="${r}">${r}</button>`
+  ).join("");
   return `
     <div class="level-chart-wrap">
-      <div class="level-chart-legend">${legend}</div>
+      <div class="level-chart-topbar">
+        <div class="level-chart-legend">${legend}</div>
+        <div class="level-range-btns">${rangeBtns}</div>
+      </div>
       <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg" aria-label="建議水位趨勢">
-        ${yGridLines.join("")}
+        ${yLines.join("")}
         ${xLabels}
         ${lines}
       </svg>
@@ -3945,6 +3973,12 @@ function renderCloudSnapshot() {
       if (updateTargetLevel(input.dataset.targetLevelMarket, input.value)) {
         renderCloudSnapshot();
       }
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-level-range]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.levelChartRange = btn.dataset.levelRange;
+      renderCloudSnapshot();
     });
   });
   renderSummaryLine();

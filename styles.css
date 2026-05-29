@@ -396,12 +396,20 @@ textarea {
   margin-top: 10px;
 }
 
+.level-chart-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .level-chart-legend {
   display: flex;
   gap: 12px;
   font-size: 12px;
   color: var(--muted);
-  margin-bottom: 6px;
   align-items: center;
 }
 
@@ -411,6 +419,28 @@ textarea {
   height: 10px;
   border-radius: 50%;
   margin-right: 3px;
+}
+
+.level-range-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.level-range-btn {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.level-range-btn.is-active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
 }
 
 .level-chart-svg {
