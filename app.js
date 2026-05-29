@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.21";
-const APP_VERSION_NOTE = "現價 + 表現率（Yahoo Finance proxy）";
+const APP_VERSION = "v0.14.0";
+const APP_VERSION_NOTE = "快照 tab 移除；delta 走勢；圖上拖截取線；首頁刪快照";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1535,7 +1535,7 @@ function renderRowLineReview(review, imageIndex) {
     <section class="row-line-review" data-row-line-review="${imageIndex}">
       <div class="ocr-completeness warning">
         <strong>請先調整截取線</strong>
-        <p>${escapeHtml(review.reason || `紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。`)}拖曳下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
+        <p>${escapeHtml(review.reason || `紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。`)}直接拖曳圖上的線，或使用下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
       </div>
       <div class="row-line-stage">
         <img src="${review.imageDataUrl}" alt="截取線校準預覽">
@@ -1588,6 +1588,35 @@ function bindRowLineReviewControls(imageIndex) {
       const overlay = container.querySelector(`[data-line-overlay="${input.dataset.rowLineInput}"]`);
       if (overlay) overlay.style.top = `${input.value}%`;
     });
+  });
+  container.querySelectorAll("[data-line-overlay]").forEach((overlay) => {
+    overlay.style.cursor = "ns-resize";
+    let dragging = false;
+    const stage = container.querySelector(".row-line-stage");
+
+    const startDrag = (e) => {
+      dragging = true;
+      e.preventDefault();
+    };
+    const moveDrag = (e) => {
+      if (!dragging || !stage) return;
+      const rect = stage.getBoundingClientRect();
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      let pct = ((clientY - rect.top) / rect.height) * 100;
+      pct = Math.min(86, Math.max(18, pct));
+      overlay.style.top = `${pct}%`;
+      const idx = overlay.dataset.lineOverlay;
+      const input = container.querySelector(`[data-row-line-input="${idx}"]`);
+      if (input) { input.value = pct.toFixed(1); }
+    };
+    const endDrag = () => { dragging = false; };
+
+    overlay.addEventListener("mousedown", startDrag);
+    overlay.addEventListener("touchstart", startDrag, { passive: false });
+    document.addEventListener("mousemove", moveDrag);
+    document.addEventListener("touchmove", moveDrag, { passive: false });
+    document.addEventListener("mouseup", endDrag);
+    document.addEventListener("touchend", endDrag);
   });
 }
 
@@ -3286,6 +3315,18 @@ function parsePositionRows(values) {
   })).filter((row) => row.snapshotId && row.symbol);
 }
 
+function parseLayoutRows(values) {
+  return (values || []).map((row) => ({
+    date: normalizeDateText(row[0] || ""),
+    market: row[1] || "",
+    symbol: row[2] || "",
+    name: row[3] || "",
+    shares: Number(row[4] || 0),
+    prevShares: Number(row[5] || 0),
+    delta: Number(row[6] || 0),
+  })).filter((row) => row.date && row.symbol);
+}
+
 async function loadLatestCloudSnapshot(showAlert = true) {
   state.cloudLoading = true;
   renderCloudSnapshot();
@@ -3296,7 +3337,9 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
     const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
     await loadTargetLevelHistory();
-    state.cloudHistory = { snapshots, positions };
+    const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G");
+    const layout = parseLayoutRows(stripHeaderRow(layoutValues, SHEET_HEADERS.layout));
+    state.cloudHistory = { snapshots, positions, layout };
     if (!snapshots.length) {
       state.cloudSnapshot = null;
       state.cloudLoading = false;
@@ -3688,10 +3731,10 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   const cW = W - PL - PR; const cH = H - PT - PB;
   const allVals = series.flatMap((s) => s.pts.map((p) => p.v));
   if (!allVals.length) return "<p class=\"muted-text\">尚無資料。</p>";
-  const minV = 0;
+  const minV = Math.min(0, ...allVals);
   const maxV = Math.ceil(Math.max(...allVals) * 1.1) || 1;
   const xPos = (i) => PL + (i / (dates.length - 1 || 1)) * cW;
-  const yPos = (v) => PT + (1 - v / maxV) * cH;
+  const yPos = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
   const labelStep = Math.max(1, Math.floor(dates.length / 5));
   const xLabels = dates.map((d, i) => {
     if (i % labelStep !== 0 && i !== dates.length - 1) return "";
@@ -3699,6 +3742,11 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   }).join("");
   const yStep = maxV > 5000 ? 1000 : maxV > 1000 ? 500 : maxV > 200 ? 100 : maxV > 50 ? 20 : 10;
   const yLines = [];
+  if (minV < 0) {
+    const y0 = yPos(0);
+    yLines.push(`<line x1="${PL}" y1="${y0}" x2="${W - PR}" y2="${y0}" stroke="var(--line)" stroke-width="1"/>`);
+    yLines.push(`<text x="${PL - 4}" y="${y0 + 4}" text-anchor="end" font-size="9" fill="var(--muted)">0</text>`);
+  }
   for (let v = yStep; v <= maxV; v += yStep) {
     const y = yPos(v);
     yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
@@ -3739,13 +3787,13 @@ function renderLayoutSharesChart(cloudHistory) {
 }
 
 function renderSymbolSharesChart(symbol, cloudHistory) {
-  const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
-  if (dates.length < 1) return "";
+  const layout = cloudHistory?.layout || [];
+  const rows = layout.filter((r) => r.symbol === symbol);
+  if (!rows.length) return "";
+  const dates = [...new Set(rows.map((r) => r.date))].sort();
   const pts = dates.map((d, i) => {
-    const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d);
-    if (!snap) return null;
-    const pos = allPositions.find((row) => row.snapshotId === snap.snapshotId && row.symbol === symbol);
-    return pos ? { i, v: Number(pos.shares || 0) } : null;
+    const row = rows.find((r) => r.date === d);
+    return row ? { i, v: row.delta } : null;
   }).filter(Boolean);
   if (!pts.length) return "";
   return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
@@ -3954,7 +4002,7 @@ function renderCloudSnapshot() {
       </section>
     `;
   }).join("");
-  const validDashboardTabs = new Set(["home", "holdings", "snapshots", "capture"]);
+  const validDashboardTabs = new Set(["home", "holdings", "capture"]);
   if (!validDashboardTabs.has(state.dashboardTab)) state.dashboardTab = "home";
   const homeContent = `
     <div class="metric-grid">
@@ -4013,6 +4061,22 @@ function renderCloudSnapshot() {
       </div>
       <div class="water-cost-chart">${renderWaterCostAnalysis(layoutAnalysis)}</div>
     </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>刪除快照</h3>
+      </div>
+      <div class="snapshot-delete-row">
+        <input type="date" id="home-delete-snapshot-date">
+        <select id="home-delete-snapshot-market">
+          <option value="all">所有市場</option>
+          <option value="TW">台股</option>
+          <option value="US">美股</option>
+        </select>
+        <button id="home-delete-cloud-snapshot" class="button danger compact" type="button">刪除</button>
+      </div>
+      <p id="home-delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText("", "all"))}</p>
+    </section>
   `;
   const holdingsContent = `
     <section class="dashboard-card">
@@ -4054,15 +4118,6 @@ function renderCloudSnapshot() {
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
-  `;
-  const snapshotsContent = `
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>雲端快照</h3>
-        <span>左滑快照列可刪除</span>
-      </div>
-      ${renderCloudSnapshotSwipeList()}
-    </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
@@ -4088,7 +4143,6 @@ function renderCloudSnapshot() {
   const tabContent = {
     home: homeContent,
     holdings: holdingsContent,
-    snapshots: snapshotsContent,
     capture: captureContent,
   }[state.dashboardTab];
   els.cloudSnapshot.innerHTML = `
@@ -4107,7 +4161,6 @@ function renderCloudSnapshot() {
     <nav class="dashboard-tabs" role="tablist" aria-label="AssetFlow Invest">
       ${dashboardTabButton("home", "首頁")}
       ${dashboardTabButton("holdings", "庫存")}
-      ${dashboardTabButton("snapshots", "快照")}
       ${dashboardTabButton("capture", "新增")}
     </nav>
   `;
@@ -4134,6 +4187,16 @@ function renderCloudSnapshot() {
   deleteDate?.addEventListener("change", updateDeletePreview);
   deleteMarket?.addEventListener("change", updateDeletePreview);
   els.cloudSnapshot.querySelector("#delete-cloud-snapshot")?.addEventListener("click", deleteSelectedCloudSnapshots);
+  const homeDeleteDate = els.cloudSnapshot.querySelector("#home-delete-snapshot-date");
+  const homeDeleteMarket = els.cloudSnapshot.querySelector("#home-delete-snapshot-market");
+  const homeDeletePreview = els.cloudSnapshot.querySelector("#home-delete-snapshot-preview");
+  const updateHomeDeletePreview = () => {
+    if (!homeDeletePreview || !homeDeleteDate || !homeDeleteMarket) return;
+    homeDeletePreview.textContent = snapshotDeletePreviewText(homeDeleteDate.value, homeDeleteMarket.value);
+  };
+  homeDeleteDate?.addEventListener("change", updateHomeDeletePreview);
+  homeDeleteMarket?.addEventListener("change", updateHomeDeletePreview);
+  els.cloudSnapshot.querySelector("#home-delete-cloud-snapshot")?.addEventListener("click", () => deleteSelectedCloudSnapshots({ buttonId: "home-delete-cloud-snapshot", dateId: "home-delete-snapshot-date", marketId: "home-delete-snapshot-market" }));
   els.cloudSnapshot.querySelectorAll("[data-target-level-market]").forEach((input) => {
     input.addEventListener("change", () => {
       if (updateTargetLevel(input.dataset.targetLevelMarket, input.value)) {
@@ -4269,10 +4332,10 @@ async function deleteCloudSnapshotById(snapshotId, button) {
   }
 }
 
-async function deleteSelectedCloudSnapshots() {
-  const button = els.cloudSnapshot?.querySelector("#delete-cloud-snapshot");
-  const dateInput = els.cloudSnapshot?.querySelector("#delete-snapshot-date");
-  const marketInput = els.cloudSnapshot?.querySelector("#delete-snapshot-market");
+async function deleteSelectedCloudSnapshots({ buttonId = "delete-cloud-snapshot", dateId = "delete-snapshot-date", marketId = "delete-snapshot-market" } = {}) {
+  const button = els.cloudSnapshot?.querySelector(`#${buttonId}`);
+  const dateInput = els.cloudSnapshot?.querySelector(`#${dateId}`);
+  const marketInput = els.cloudSnapshot?.querySelector(`#${marketId}`);
   const date = normalizeDateText(dateInput?.value);
   const market = normalizeMarketKey(marketInput?.value);
 
