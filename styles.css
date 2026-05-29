@@ -474,6 +474,17 @@ textarea {
   display: grid;
   gap: 12px;
   margin-top: 12px;
+  overflow-x: auto;
+}
+
+.holdings-table {
+  width: 100%;
+  min-width: 0;
+}
+
+.holdings-table td,
+.holdings-table th {
+  white-space: nowrap;
 }
 
 .market-water-grid {

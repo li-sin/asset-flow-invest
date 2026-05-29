@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.15.0";
-const APP_VERSION_NOTE = "OCR 後可直接編輯並一鍵存雲端；水位趨勢日期過濾";
+const APP_VERSION = "v0.15.1";
+const APP_VERSION_NOTE = "表現率排名；折線圖 tooltip；庫存 tab 排序；手機表格修正";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3818,10 +3818,10 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
     const polylines = segs.map((s) =>
       `<polyline points="${s.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`
     ).join("");
-    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${color}"><title>${dates[p.i]} ${p.v.toLocaleString()}</title></circle>`).join("");
+    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${color}" data-tooltip="${dates[p.i]} ${p.v.toLocaleString()}"><title>${dates[p.i]} ${p.v.toLocaleString()}</title></circle>`).join("");
     return polylines + dots;
   }).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg>`;
+  return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
 function renderLayoutSharesChart(cloudHistory) {
@@ -4071,6 +4071,18 @@ function renderCloudSnapshot() {
   }).join("");
   const validDashboardTabs = new Set(["home", "holdings", "capture"]);
   if (!validDashboardTabs.has(state.dashboardTab)) state.dashboardTab = "home";
+  const performanceRows = positions
+    .filter((p) => p.avgCost > 0 && state.quotes[p.symbol] > 0)
+    .map((p) => {
+      const price = state.quotes[p.symbol];
+      const rate = (price - p.avgCost) / p.avgCost * 100;
+      return { symbol: p.symbol, name: p.name, rate };
+    })
+    .sort((a, b) => b.rate - a.rate);
+  const top3 = performanceRows.slice(0, 3);
+  const bottom3 = performanceRows.slice(-3).reverse();
+  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
+  const perfTable = (rows) => rows.length ? `<table class="parsed-table"><thead><tr><th>代號</th><th>名稱</th><th>表現率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
     <div class="metric-grid">
       <div class="metric">
@@ -4123,10 +4135,19 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>每日水位與布局成本</h3>
-        <span>第一筆為初始庫存，後續以今日庫存減前一份快照</span>
+        <h3>表現率排名</h3>
+        <span>依（現價－均價）/ 均價排序</span>
       </div>
-      <div class="water-cost-chart">${renderWaterCostAnalysis(layoutAnalysis)}</div>
+      <div class="perf-rank-grid">
+        <div>
+          <p class="section-eyebrow">前三名</p>
+          ${perfTable(top3)}
+        </div>
+        <div>
+          <p class="section-eyebrow">倒數三名</p>
+          ${perfTable(bottom3)}
+        </div>
+      </div>
     </section>
 
     <section class="dashboard-card">
@@ -4148,42 +4169,10 @@ function renderCloudSnapshot() {
   const holdingsContent = `
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>布局股數趨勢</h3>
-        <span>台股 / 美股每日總布局股數</span>
-      </div>
-      <div class="layout-shares-chart">${renderLayoutSharesChart(state.cloudHistory)}</div>
-    </section>
-
-    <section class="dashboard-card">
-      <div class="card-heading">
         <h3>個股股數趨勢</h3>
         <span>每支股票的股數時間序列，點擊下方明細列查看單檔走勢</span>
       </div>
       <div class="layout-shares-chart">${renderAllSymbolsChart(state.cloudHistory)}</div>
-    </section>
-
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>個股每日股數</h3>
-        <span>最近快照的持股股數時間序列</span>
-      </div>
-      ${renderDailyShareMatrix(layoutAnalysis)}
-    </section>
-
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>每日布局股數差異</h3>
-        <span>今日庫存減前一份同市場快照</span>
-      </div>
-      ${renderLayoutDeltaTable(layoutAnalysis)}
-    </section>
-
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看股數走勢</span>
-      </div>
-      <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
 
     <section class="dashboard-card">
@@ -4195,6 +4184,14 @@ function renderCloudSnapshot() {
       <div class="snapshot-actions">
         <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
       </div>
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>目前明細</h3>
+        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看股數走勢</span>
+      </div>
+      <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
   `;
   const captureContent = `
@@ -4275,6 +4272,18 @@ function renderCloudSnapshot() {
     dot.style.cursor = "pointer";
     dot.addEventListener("click", (e) => {
       const container = dot.closest(".level-chart-container");
+      let tip = container.querySelector(".chart-tooltip");
+      if (!tip) { tip = document.createElement("div"); tip.className = "chart-tooltip"; container.appendChild(tip); }
+      tip.textContent = dot.dataset.tooltip;
+      tip.style.display = "block";
+      setTimeout(() => { tip.style.display = "none"; }, 2500);
+      e.stopPropagation();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll(".shares-chart-container circle[data-tooltip]").forEach((dot) => {
+    dot.style.cursor = "pointer";
+    dot.addEventListener("click", (e) => {
+      const container = dot.closest(".shares-chart-container");
       let tip = container.querySelector(".chart-tooltip");
       if (!tip) { tip = document.createElement("div"); tip.className = "chart-tooltip"; container.appendChild(tip); }
       tip.textContent = dot.dataset.tooltip;
