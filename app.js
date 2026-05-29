@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.17";
-const APP_VERSION_NOTE = "修正水位存入格式與位置";
+const APP_VERSION = "v0.13.18";
+const APP_VERSION_NOTE = "修正水位 append 空格問題";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -373,17 +373,17 @@ async function saveTargetLevelToSheet(market, level) {
     const values = await readSheetValues(tabName, "A:B");
     const todayStr = today();
     const levelStr = `${level}%`;
-    // skip empty rows; find row with A col matching today
-    const existingIdx = values.findIndex((row, i) => i > 0 && row[0] && normalizeDateText(row[0]) === todayStr);
-    if (existingIdx >= 0) {
-      // USER_ENTERED so Sheet interprets "66.7%" as percent format
-      await sheetsFetch(`/values/${sheetRange(tabName, `B${existingIdx + 1}`)}?valueInputOption=USER_ENTERED`, {
-        method: "PUT",
-        body: JSON.stringify({ majorDimension: "ROWS", values: [[levelStr]] }),
-      });
-    } else {
-      await appendSheetValues(tabName, "A:B", [[todayStr, levelStr]]);
-    }
+    // only consider rows where A col has a non-empty value
+    const dataRows = values.map((row, i) => ({ row, sheetRow: i + 1 })).filter(({ row }) => row[0]);
+    const existing = dataRows.find(({ row }) => normalizeDateText(row[0]) === todayStr);
+    const writeRange = existing
+      ? `B${existing.sheetRow}`
+      : `A${(dataRows[dataRows.length - 1]?.sheetRow ?? 0) + 1}:B${(dataRows[dataRows.length - 1]?.sheetRow ?? 0) + 1}`;
+    const writeValues = existing ? [[levelStr]] : [[todayStr, levelStr]];
+    await sheetsFetch(`/values/${sheetRange(tabName, writeRange)}?valueInputOption=USER_ENTERED`, {
+      method: "PUT",
+      body: JSON.stringify({ majorDimension: "ROWS", values: writeValues }),
+    });
     state.targetLevelHistory = [
       { date: todayStr, market, targetLevel: level, source: "水位" },
       ...state.targetLevelHistory.filter((item) => !(item.date === todayStr && item.market === market)),
