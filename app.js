@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.14";
-const APP_VERSION_NOTE = "水位存 Sheet、Tab 固定底部、庫存趨勢圖";
+const APP_VERSION = "v0.13.15";
+const APP_VERSION_NOTE = "修正水位存 Sheet";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -369,7 +369,7 @@ function updateTargetLevel(market, value) {
 async function saveTargetLevelToSheet(market, level) {
   if (!googleAccessToken || !state.auth.authorized) return;
   try {
-    await ensureCloudSheetTables();
+    await ensureLevelsSheet();
     const row = [today(), market, level];
     await appendSheetValues(SHEET_NAMES.levels, "A:C", [row]);
     state.targetLevelHistory = [
@@ -379,6 +379,21 @@ async function saveTargetLevelToSheet(market, level) {
   } catch (error) {
     console.warn("saveTargetLevelToSheet", error);
   }
+}
+
+let levelsSheetReady = false;
+async function ensureLevelsSheet() {
+  if (levelsSheetReady) return;
+  const metadata = await sheetsFetch("?fields=sheets.properties.title");
+  const titles = new Set((metadata.sheets || []).map((sheet) => sheet.properties?.title).filter(Boolean));
+  if (!titles.has(SHEET_NAMES.levels)) {
+    await sheetsFetch(":batchUpdate", {
+      method: "POST",
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_NAMES.levels } } }] }),
+    });
+    await updateSheetValues(SHEET_NAMES.levels, "A1:C1", [["日期", "市場", "建議水位"]]);
+  }
+  levelsSheetReady = true;
 }
 
 function normalizeHeaderText(value) {
@@ -2607,7 +2622,6 @@ async function ensureSheetTables() {
 
   await updateSheetValues(SHEET_NAMES.snapshots, "A1:H1", [SHEET_HEADERS.snapshots]);
   await updateSheetValues(SHEET_NAMES.positions, "A1:J1", [SHEET_HEADERS.positions]);
-  await updateSheetValues(SHEET_NAMES.levels, "A1:C1", [["日期", "市場", "建議水位"]]);
 }
 
 async function ensureCloudSheetTables() {
