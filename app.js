@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.16";
-const APP_VERSION_NOTE = "水位存台股美股 tab + 水位趨勢圖";
+const APP_VERSION = "v0.13.17";
+const APP_VERSION_NOTE = "修正水位存入格式與位置";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -372,13 +372,17 @@ async function saveTargetLevelToSheet(market, level) {
     const tabName = market === "TW" ? "台股" : "美股";
     const values = await readSheetValues(tabName, "A:B");
     const todayStr = today();
-    // row index in values array (0-based); row 0 is header
-    const existingIdx = values.findIndex((row, i) => i > 0 && normalizeDateText(row[0]) === todayStr);
+    const levelStr = `${level}%`;
+    // skip empty rows; find row with A col matching today
+    const existingIdx = values.findIndex((row, i) => i > 0 && row[0] && normalizeDateText(row[0]) === todayStr);
     if (existingIdx >= 0) {
-      // overwrite existing row (existingIdx+1 because Sheets rows are 1-based)
-      await updateSheetValues(tabName, `B${existingIdx + 1}`, [[level]]);
+      // USER_ENTERED so Sheet interprets "66.7%" as percent format
+      await sheetsFetch(`/values/${sheetRange(tabName, `B${existingIdx + 1}`)}?valueInputOption=USER_ENTERED`, {
+        method: "PUT",
+        body: JSON.stringify({ majorDimension: "ROWS", values: [[levelStr]] }),
+      });
     } else {
-      await appendSheetValues(tabName, "A:B", [[todayStr, level]]);
+      await appendSheetValues(tabName, "A:B", [[todayStr, levelStr]]);
     }
     state.targetLevelHistory = [
       { date: todayStr, market, targetLevel: level, source: "水位" },
