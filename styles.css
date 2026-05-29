@@ -757,7 +757,8 @@ textarea {
   height: 2px;
   background: #ff5b5b;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 0 10px rgba(255, 91, 91, 0.9);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: ns-resize;
 }
 
 .row-line-overlay.candidate {

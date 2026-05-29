@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.14.0";
-const APP_VERSION_NOTE = "快照 tab 移除；delta 走勢；圖上拖截取線；首頁刪快照";
+const APP_VERSION = "v0.14.1";
+const APP_VERSION_NOTE = "Y軸自動縮放；個股趨勢改 delta；擷取線可直接拖動";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3731,8 +3731,11 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   const cW = W - PL - PR; const cH = H - PT - PB;
   const allVals = series.flatMap((s) => s.pts.map((p) => p.v));
   if (!allVals.length) return "<p class=\"muted-text\">尚無資料。</p>";
-  const minV = Math.min(0, ...allVals);
-  const maxV = Math.ceil(Math.max(...allVals) * 1.1) || 1;
+  const rawMin = Math.min(...allVals);
+  const rawMax = Math.max(...allVals);
+  const range = rawMax - rawMin || 1;
+  const minV = rawMin > 0 ? Math.max(0, rawMin - range * 0.2) : Math.min(0, rawMin);
+  const maxV = Math.ceil((rawMax + range * 0.1) * 1.1) || 1;
   const xPos = (i) => PL + (i / (dates.length - 1 || 1)) * cW;
   const yPos = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
   const labelStep = Math.max(1, Math.floor(dates.length / 5));
@@ -3800,19 +3803,20 @@ function renderSymbolSharesChart(symbol, cloudHistory) {
 }
 
 function renderAllSymbolsChart(cloudHistory) {
-  const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
+  const layout = cloudHistory?.layout || [];
+  if (!layout.length) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const dates = [...new Set(layout.map((r) => r.date))].sort();
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const palette = ["#2f7d5b", "#4f8ef7", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
-  const symbols = [...new Set(allPositions.map((p) => p.symbol))].sort();
+  const symbols = [...new Set(layout.map((r) => r.symbol))].sort();
   const series = symbols.map((symbol, si) => {
     const pts = dates.map((d, i) => {
-      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d);
-      if (!snap) return null;
-      const pos = allPositions.find((row) => row.snapshotId === snap.snapshotId && row.symbol === symbol);
-      return pos ? { i, v: Number(pos.shares || 0) } : null;
+      const row = layout.find((r) => r.symbol === symbol && r.date === d);
+      return row ? { i, v: row.delta } : null;
     }).filter(Boolean);
     return { symbol, pts, color: palette[si % palette.length] };
   }).filter((s) => s.pts.length > 0);
+  if (!series.length) return "<p class=\"muted-text\">尚無布局差異資料。</p>";
   const legend = series.map((s) => `<span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}`).join(" ");
   return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}</div>${renderSharesSvg(series, dates, {})}`;
 }
