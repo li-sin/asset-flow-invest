@@ -4287,9 +4287,10 @@ async function signInAndLoadApp() {
 }
 
 async function init() {
-  if (els.appVersion) {
-    els.appVersion.textContent = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
-  }
+  const versionText = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
+  if (els.appVersion) els.appVersion.textContent = versionText;
+  const authVersion = document.getElementById("auth-version");
+  if (authVersion) authVersion.textContent = versionText;
   els.date.value = today();
   bindEvents();
   registerServiceWorker();
