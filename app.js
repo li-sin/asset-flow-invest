@@ -1,8 +1,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.13.20";
-const APP_VERSION_NOTE = "個股股數趨勢圖 + 點擊明細查看單檔走勢";
+const APP_VERSION = "v0.13.21";
+const APP_VERSION_NOTE = "現價 + 表現率（Yahoo Finance proxy）";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -16,6 +16,7 @@ const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com";
 const DEFAULT_AUTHORIZED_EMAIL = "lovelisa00000@gmail.com";
+const QUOTE_PROXY_URL = "https://script.google.com/macros/s/AKfycbznKVxtS6OhxfKO6E1PB21U-X__bSHHdlhUGt8Fj5vv7PRf3Pi_xzsByAHvu0sE8G4/exec";
 const LEGACY_GOOGLE_CLIENT_IDS = new Set([
   "320535010458-cccl087b251bejs1coa2oln1n6uddr35.apps.googleusercontent.com",
 ]);
@@ -65,6 +66,7 @@ const state = {
   levelChartRange: "1M",
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
+  quotes: {},
   auth: {
     signedIn: false,
     authorized: false,
@@ -3309,6 +3311,8 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     renderCloudSnapshot();
     renderSummaryLine();
     if (showAlert) alert(`已讀取雲端庫存：${latestPositions.length} 筆`);
+    const symbols = [...new Set(latestPositions.map((p) => p.symbol).filter(Boolean))];
+    fetchQuotes(symbols);
   } catch (error) {
     console.error(error);
     state.cloudLoading = false;
@@ -3322,6 +3326,22 @@ function stripHeaderRow(values, headers) {
   const first = values[0].map((value) => String(value || "").trim());
   const sameHeader = headers.every((header, index) => first[index] === header);
   return sameHeader ? values.slice(1) : values;
+}
+
+async function fetchQuotes(symbols) {
+  if (!symbols?.length) return;
+  try {
+    const url = `${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbols.join(","))}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data?.quotes) {
+      Object.assign(state.quotes, data.quotes);
+      renderCloudSnapshot();
+    }
+  } catch (err) {
+    console.warn("fetchQuotes", err);
+  }
 }
 
 function estimatedCost(row) {
@@ -3881,21 +3901,39 @@ function renderCloudSnapshot() {
     `;
   }).join("");
   const marketDetailSections = marketSummaries.map((item) => {
-    const rows = item.rows.map((row) => `
-      <tr class="symbol-row" data-symbol="${escapeHtml(row.symbol)}" tabindex="0" style="cursor:pointer">
-        <td>${escapeHtml(row.symbol)}</td>
-        <td>${escapeHtml(row.name)}</td>
-        <td>${escapeHtml(displayValue(row.shares))}</td>
-        <td>${escapeHtml(displayValue(row.avgCost))}</td>
-        <td>${escapeHtml(formatMoney(row.cost))}</td>
-      </tr>
-    `).join("");
+    const rows = item.rows.map((row) => {
+      const quote = state.quotes[row.symbol];
+      const price = quote?.price ?? null;
+      const avgCost = Number(row.avgCost || 0);
+      const perfRate = (price !== null && avgCost > 0)
+        ? ((price - avgCost) / avgCost * 100)
+        : null;
+      const perfClass = perfRate === null ? "" : perfRate > 0 ? "perf-positive" : perfRate < 0 ? "perf-negative" : "";
+      const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
+      const perfCell = perfRate !== null
+        ? `<span class="${perfClass}">${perfRate > 0 ? "+" : ""}${perfRate.toFixed(2)}%</span>`
+        : "<span class=\"muted-text\">—</span>";
+      return `
+        <tr class="symbol-row" data-symbol="${escapeHtml(row.symbol)}" tabindex="0" style="cursor:pointer">
+          <td>${escapeHtml(row.symbol)}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(displayValue(row.shares))}</td>
+          <td>${escapeHtml(displayValue(row.avgCost))}</td>
+          <td>${priceCell}</td>
+          <td>${perfCell}</td>
+          <td>${escapeHtml(formatMoney(row.cost))}</td>
+        </tr>
+      `;
+    }).join("");
+    const quoteLoading = Object.keys(state.quotes).length === 0
+      ? "<p class=\"muted-text quote-loading\">正在載入現價…</p>" : "";
     return `
       <section class="market-detail-section">
         <div class="card-heading">
           <h3>${marketLabel(item.market)}明細</h3>
           <span>建議水位 ${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</span>
         </div>
+        ${quoteLoading}
         <div class="table-scroll compact-table">
           <table class="parsed-table">
             <thead>
@@ -3904,10 +3942,12 @@ function renderCloudSnapshot() {
                 <th>名稱</th>
                 <th>股數</th>
                 <th>成交均價</th>
+                <th>現價</th>
+                <th>表現率</th>
                 <th>估算成本</th>
               </tr>
             </thead>
-            <tbody>${rows || "<tr><td colspan=\"5\">沒有庫存</td></tr>"}</tbody>
+            <tbody>${rows || "<tr><td colspan=\"7\">沒有庫存</td></tr>"}</tbody>
           </table>
         </div>
         <div class="symbol-chart-panel" id="symbol-chart-${escapeHtml(item.market)}" hidden></div>

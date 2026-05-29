@@ -300,6 +300,20 @@ textarea {
   font-size: 13px;
 }
 
+.perf-positive {
+  color: #1a7a4a;
+  font-weight: 600;
+}
+
+.perf-negative {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.quote-loading {
+  margin-bottom: 8px;
+}
+
 .dashboard-empty {
   border: 1px dashed var(--line);
   border-radius: 8px;
