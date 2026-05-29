@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.15.3";
-const APP_VERSION_NOTE = "表現率排名；折線圖 tooltip；庫存 tab 排序；手機表格修正";
+const APP_VERSION = "v0.16.0";
+const APP_VERSION_NOTE = "損益率/表現率；首次布局日；快照折線圖；OCR 比對庫存；截取線優化";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -335,6 +335,23 @@ function loadTargetLevels() {
 
 function saveTargetLevels() {
   localStorage.setItem(TARGET_LEVEL_STORAGE_KEY, JSON.stringify(state.targetLevels));
+}
+
+const FIRST_BUY_DATES_KEY = "assetflow_invest_first_buy_dates_v1";
+function loadFirstBuyDates() {
+  try { return JSON.parse(localStorage.getItem(FIRST_BUY_DATES_KEY) || "{}"); } catch { return {}; }
+}
+function saveFirstBuyDate(market, symbol, date) {
+  const dates = loadFirstBuyDates();
+  dates[`${market}_${symbol}`] = date;
+  localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(dates));
+}
+function holdingDays(market, symbol) {
+  const dates = loadFirstBuyDates();
+  const d = dates[`${market}_${symbol}`];
+  if (!d) return null;
+  const ms = Date.now() - new Date(d).getTime();
+  return Math.max(1, Math.floor(ms / 86400000));
 }
 
 function targetLevelForMarket(market, snapshotDate = "") {
@@ -1514,60 +1531,119 @@ async function parseDraftImages() {
         }, imageIndex) : "")
         .join("")
       : "";
-    els.parsePreview.innerHTML = [
-      renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
-      renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops),
-      calibrationBlocks,
-    ].join("");
     if (needsCalibration) {
-      state.draftImages.forEach((image, imageIndex) => {
-        if (image.rowLineReview?.imageDataUrl) bindRowLineReviewControls(imageIndex);
-      });
+      // 任務 1：少檔數時先只顯示截取線調整，不顯示解析表格和確認按鈕
+      els.parsePreview.innerHTML = [
+        renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
+        calibrationBlocks,
+      ].filter(Boolean).join("");
+      state.draftImages.forEach((_, imageIndex) => bindRowLineReviewControls(imageIndex));
       renderRowLineApplyAction();
-    }
-    // 初始化 draftEditedRows（深拷貝目前 parsedRows）
-    state.draftEditedRows = parsedRows.map((r) => ({ ...r }));
-    // 綁定 live edit 事件
-    els.parsePreview.querySelectorAll("[data-draft-symbol]").forEach((input) => {
-      input.addEventListener("input", () => {
-        const i = Number(input.dataset.draftSymbol);
-        if (state.draftEditedRows?.[i]) {
-          state.draftEditedRows[i].symbol = input.value.trim().toUpperCase();
-          state.draftEditedRows[i].name = SYMBOL_NAMES[state.draftEditedRows[i].symbol] || state.draftEditedRows[i].name;
+      state.draftEditedRows = null; // 強制等截取線調整後才設定
+    } else {
+      els.parsePreview.innerHTML = [
+        renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
+        renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops),
+      ].filter(Boolean).join("");
+      // 初始化 draftEditedRows（深拷貝目前 parsedRows）
+      state.draftEditedRows = parsedRows.map((r) => ({ ...r }));
+      // 綁定 live edit 事件
+      els.parsePreview.querySelectorAll("[data-draft-symbol]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const i = Number(input.dataset.draftSymbol);
+          if (state.draftEditedRows?.[i]) {
+            state.draftEditedRows[i].symbol = input.value.trim().toUpperCase();
+            state.draftEditedRows[i].name = SYMBOL_NAMES[state.draftEditedRows[i].symbol] || state.draftEditedRows[i].name;
+          }
+        });
+      });
+      els.parsePreview.querySelectorAll("[data-draft-shares]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const i = Number(input.dataset.draftShares);
+          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].shares = Number(input.value) || 0;
+        });
+      });
+      els.parsePreview.querySelectorAll("[data-draft-avgcost]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const i = Number(input.dataset.draftAvgcost);
+          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].avgCost = Number(input.value) || 0;
+        });
+      });
+      els.parsePreview.querySelectorAll("[data-draft-name]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const i = Number(input.dataset.draftName);
+          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].name = input.value.trim();
+        });
+      });
+      els.parsePreview.querySelectorAll("[data-draft-kind]").forEach((input) => {
+        input.addEventListener("input", () => {
+          const i = Number(input.dataset.draftKind);
+          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].kind = input.value.trim();
+        });
+      });
+      // 若有 parsedRows，顯示確認存雲端按鈕
+      if (parsedRows.length > 0) {
+        const confirmDiv = document.createElement("div");
+        confirmDiv.className = "draft-confirm-actions";
+        confirmDiv.innerHTML = `<button class="button primary" type="button" id="draft-confirm-save">確認並存雲端</button>`;
+        els.parsePreview.appendChild(confirmDiv);
+        confirmDiv.querySelector("#draft-confirm-save").addEventListener("click", saveDraftDirectToCloud);
+      }
+      // 任務 3：比對現有庫存 vs OCR 結果，缺少代號顯示確認列
+      const latestSnap = (state.cloudHistory?.snapshots || [])
+        .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(els.market.value))
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+      if (latestSnap) {
+        const existingSymbols = (state.cloudHistory?.positions || [])
+          .filter((p) => p.snapshotId === latestSnap.snapshotId)
+          .map((p) => p.symbol);
+        const parsedSymbols = new Set((state.draftEditedRows || []).map((r) => r.symbol).filter(Boolean));
+        const missingFromOcr = existingSymbols.filter((s) => !parsedSymbols.has(s));
+        if (missingFromOcr.length > 0) {
+          const missingDiv = document.createElement("div");
+          missingDiv.className = "ocr-missing-confirm";
+          missingDiv.innerHTML = `
+            <p class="ocr-completeness warning"><strong>⚠ 庫存中有但 OCR 未解析到（${missingFromOcr.length} 支）</strong></p>
+            ${missingFromOcr.map((sym) => {
+              const name = SYMBOL_NAMES[sym] || sym;
+              return `<div class="missing-symbol-row" data-missing-symbol="${escapeHtml(sym)}">
+                <span class="missing-symbol-label">${escapeHtml(sym)} ${escapeHtml(name)}</span>
+                <label>股數<input type="number" step="0.001" class="missing-shares" placeholder="股數"></label>
+                <label>均價<input type="number" step="0.001" class="missing-avgcost" placeholder="均價"></label>
+                <button class="button secondary compact missing-add-btn" type="button">加入</button>
+                <button class="button ghost compact missing-skip-btn" type="button">略過</button>
+              </div>`;
+            }).join("")}
+          `;
+          els.parsePreview.appendChild(missingDiv);
+          // 綁定「加入」按鈕
+          missingDiv.querySelectorAll(".missing-add-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const row = btn.closest("[data-missing-symbol]");
+              const sym = row.dataset.missingSymbol;
+              const shares = Number(row.querySelector(".missing-shares").value) || 0;
+              const avgCost = Number(row.querySelector(".missing-avgcost").value) || 0;
+              state.draftEditedRows.push({
+                symbol: sym,
+                name: SYMBOL_NAMES[sym] || sym,
+                kind: "現股",
+                shares,
+                avgCost,
+                needsReview: false,
+              });
+              row.remove();
+              if (!missingDiv.querySelector("[data-missing-symbol]")) missingDiv.remove();
+            });
+          });
+          // 綁定「略過」按鈕
+          missingDiv.querySelectorAll(".missing-skip-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              btn.closest("[data-missing-symbol]").remove();
+              if (!missingDiv.querySelector("[data-missing-symbol]")) missingDiv.remove();
+            });
+          });
         }
-      });
-    });
-    els.parsePreview.querySelectorAll("[data-draft-shares]").forEach((input) => {
-      input.addEventListener("input", () => {
-        const i = Number(input.dataset.draftShares);
-        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].shares = Number(input.value) || 0;
-      });
-    });
-    els.parsePreview.querySelectorAll("[data-draft-avgcost]").forEach((input) => {
-      input.addEventListener("input", () => {
-        const i = Number(input.dataset.draftAvgcost);
-        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].avgCost = Number(input.value) || 0;
-      });
-    });
-    els.parsePreview.querySelectorAll("[data-draft-name]").forEach((input) => {
-      input.addEventListener("input", () => {
-        const i = Number(input.dataset.draftName);
-        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].name = input.value.trim();
-      });
-    });
-    els.parsePreview.querySelectorAll("[data-draft-kind]").forEach((input) => {
-      input.addEventListener("input", () => {
-        const i = Number(input.dataset.draftKind);
-        if (state.draftEditedRows?.[i]) state.draftEditedRows[i].kind = input.value.trim();
-      });
-    });
-    // 若有 parsedRows，顯示確認存雲端按鈕
-    if (parsedRows.length > 0) {
-      const confirmDiv = document.createElement("div");
-      confirmDiv.className = "draft-confirm-actions";
-      confirmDiv.innerHTML = `<button class="button primary" type="button" id="draft-confirm-save">確認並存雲端</button>`;
-      els.parsePreview.appendChild(confirmDiv);
-      confirmDiv.querySelector("#draft-confirm-save").addEventListener("click", saveDraftDirectToCloud);
+      }
     }
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
@@ -1594,19 +1670,11 @@ function renderRowLineReview(review, imageIndex) {
     <section class="row-line-review" data-row-line-review="${imageIndex}">
       <div class="ocr-completeness warning">
         <strong>請先調整截取線</strong>
-        <p>${escapeHtml(review.reason || `紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。`)}直接拖曳圖上的線，或使用下方滑桿，讓線落在每兩列中間，再重新擷取。</p>
+        <p>${escapeHtml(review.reason || `紅圈需要 ${review.expectedLines} 條橫向截取線，目前自動偵測 ${review.detectedLines} 條。`)}直接拖曳圖上的紅線，讓線落在每兩列中間，再按「用截取線擷取」。</p>
       </div>
       <div class="row-line-stage">
         <img src="${review.imageDataUrl}" alt="截取線校準預覽">
         ${lines.map((line, index) => `<span class="row-line-overlay${line.extra ? " candidate" : ""}" data-line-overlay="${index}" style="top:${line.value}%">${Math.round(line.value)}%</span>`).join("")}
-      </div>
-      <div class="row-line-controls">
-        ${lines.map((line, index) => `
-          <label>
-            ${line.extra ? "候補線" : "線"} ${index + 1}
-            <input type="range" min="18" max="86" step="0.1" value="${escapeHtml(line.value)}" data-row-line-input="${index}">
-          </label>
-        `).join("")}
       </div>
     </section>
   `;
@@ -1642,12 +1710,6 @@ function buildExtraRowLinePercents(lines, count) {
 function bindRowLineReviewControls(imageIndex) {
   const container = els.parsePreview.querySelector(`[data-row-line-review="${imageIndex}"]`);
   if (!container) return;
-  container.querySelectorAll("[data-row-line-input]").forEach((input) => {
-    input.addEventListener("input", () => {
-      const overlay = container.querySelector(`[data-line-overlay="${input.dataset.rowLineInput}"]`);
-      if (overlay) { overlay.style.top = `${input.value}%`; overlay.textContent = `${Math.round(Number(input.value))}%`; }
-    });
-  });
   container.querySelectorAll("[data-line-overlay]").forEach((overlay) => {
     overlay.style.cursor = "ns-resize";
     let dragging = false;
@@ -1662,9 +1724,6 @@ function bindRowLineReviewControls(imageIndex) {
       pct = Math.min(86, Math.max(18, pct));
       overlay.style.top = `${pct}%`;
       overlay.textContent = `${pct.toFixed(0)}%`;
-      const idx = overlay.dataset.lineOverlay;
-      const input = container.querySelector(`[data-row-line-input="${idx}"]`);
-      if (input) { input.value = pct.toFixed(1); }
     };
     const endDrag = () => { dragging = false; };
     overlay.addEventListener("mousedown", startDrag);
@@ -1680,8 +1739,8 @@ function collectDraftRowLinePercents() {
   return [...els.parsePreview.querySelectorAll("[data-row-line-review]")]
     .map((container) => {
       const imageIndex = Number(container.dataset.rowLineReview);
-      const linePercents = [...container.querySelectorAll("[data-row-line-input]")]
-        .map((input) => Number(input.value))
+      const linePercents = [...container.querySelectorAll("[data-line-overlay]")]
+        .map((overlay) => parseFloat(overlay.style.top))
         .filter(Number.isFinite);
       return Number.isInteger(imageIndex) && linePercents.length ? { imageIndex, linePercents } : null;
     })
@@ -3433,19 +3492,21 @@ function stripHeaderRow(values, headers) {
   return sameHeader ? values.slice(1) : values;
 }
 
-async function fetchQuotes(symbols) {
-  if (!symbols?.length) return;
+async function fetchQuotes(symbols, retryCount = 0) {
+  if (!symbols?.length || !googleAccessToken) return;
   try {
-    const url = `${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbols.join(","))}`;
-    const resp = await fetch(url);
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const symbolList = symbols.map((s) => /^\d/.test(s) ? `${s}.TW` : s).join(",");
+    const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
+    const data = await res.json();
     if (data?.quotes) {
       Object.assign(state.quotes, data.quotes);
       renderCloudSnapshot();
+    } else if (retryCount < 2) {
+      setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
     }
   } catch (err) {
     console.warn("fetchQuotes", err);
+    if (retryCount < 2) setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
   }
 }
 
@@ -3835,6 +3896,25 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
+function renderSnapshotTrendChart(cloudHistory) {
+  const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const positions = cloudHistory?.positions || [];
+  if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
+  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const series = ["TW", "US"].map((market) => {
+    const pts = dates.map((d, i) => {
+      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      if (!snap) return null;
+      const total = positions.filter((p) => p.snapshotId === snap.snapshotId).reduce((sum, p) => sum + Number(p.shares || 0), 0);
+      return total > 0 ? { i, v: total } : null;
+    }).filter(Boolean);
+    return { market, pts, color: colors[market] };
+  });
+  const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
+}
+
 function renderLayoutSharesChart(cloudHistory) {
   const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
@@ -4027,27 +4107,31 @@ function renderCloudSnapshot() {
     `;
   }).join("");
   const marketDetailSections = marketSummaries.map((item) => {
+    const firstBuyDates = loadFirstBuyDates();
     const rows = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
       const price = quote?.price ?? null;
       const avgCost = Number(row.avgCost || 0);
-      const perfRate = (price !== null && avgCost > 0)
+      const returnRate = (price !== null && avgCost > 0)
         ? ((price - avgCost) / avgCost * 100)
         : null;
-      const perfClass = perfRate === null ? "" : perfRate > 0 ? "perf-positive" : perfRate < 0 ? "perf-negative" : "";
+      const days = holdingDays(item.market, row.symbol);
+      const perfRate = (returnRate !== null && days) ? returnRate / days : null;
       const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
-      const perfCell = perfRate !== null
-        ? `<span class="${perfClass}">${perfRate > 0 ? "+" : ""}${perfRate.toFixed(2)}%</span>`
+      const rateDisplay = returnRate !== null
+        ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%${perfRate !== null ? `<br><small>${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}%/日</small>` : ''}</span>`
         : "<span class=\"muted-text\">—</span>";
+      const firstBuyVal = firstBuyDates[`${item.market}_${row.symbol}`] || '';
       return `
-        <tr class="symbol-row" data-symbol="${escapeHtml(row.symbol)}" tabindex="0" style="cursor:pointer">
+        <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0" style="cursor:pointer">
           <td>${escapeHtml(row.symbol)}</td>
           <td>${escapeHtml(row.name)}</td>
           <td>${escapeHtml(displayValue(row.shares))}</td>
           <td>${escapeHtml(displayValue(row.avgCost))}</td>
           <td>${priceCell}</td>
-          <td>${perfCell}</td>
+          <td>${rateDisplay}</td>
           <td>${escapeHtml(formatMoney(row.cost))}</td>
+          <td><input type="date" class="first-buy-input" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}" value="${escapeHtml(firstBuyVal)}"></td>
         </tr>
       `;
     }).join("");
@@ -4069,14 +4153,14 @@ function renderCloudSnapshot() {
                 <th>股數</th>
                 <th>成交均價</th>
                 <th>現價</th>
-                <th>表現率</th>
+                <th>損益率 / 表現率</th>
                 <th>估算成本</th>
+                <th>首次布局日</th>
               </tr>
             </thead>
-            <tbody>${rows || "<tr><td colspan=\"7\">沒有庫存</td></tr>"}</tbody>
+            <tbody>${rows || "<tr><td colspan=\"8\">沒有庫存</td></tr>"}</tbody>
           </table>
         </div>
-        <div class="symbol-chart-panel" id="symbol-chart-${escapeHtml(item.market)}" hidden></div>
       </section>
     `;
   }).join("");
@@ -4093,7 +4177,7 @@ function renderCloudSnapshot() {
   const top3 = performanceRows.slice(0, 3);
   const bottom3 = performanceRows.slice(-3).reverse();
   const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
-  const perfTable = (rows) => rows.length ? `<table class="parsed-table"><thead><tr><th>代號</th><th>名稱</th><th>表現率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table>` : '<p class="muted-text">尚無報價資料。</p>';
+  const perfTable = (rows) => rows.length ? `<table class="parsed-table"><thead><tr><th>代號</th><th>名稱</th><th>損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
     <div class="metric-grid">
       <div class="metric">
@@ -4130,9 +4214,9 @@ function renderCloudSnapshot() {
       <section class="dashboard-card">
         <div class="card-heading">
           <h3>近幾次快照趨勢</h3>
-          <span>綠色為成本，藍色為股數</span>
+          <span>台股／美股總股數折線圖</span>
         </div>
-        <div class="trend-chart">${trendBars || "<p class=\"muted-text\">尚無歷史快照。</p>"}</div>
+        <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory)}</div>
       </section>
     </div>
 
@@ -4146,8 +4230,8 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>表現率排名</h3>
-        <span>依（現價－均價）/ 均價排序</span>
+        <h3>損益率排名</h3>
+        <span>依（現價－均價）/ 均價排序，未來加入首次布局日後升級為表現率</span>
       </div>
       <div class="perf-rank-grid">
         <div>
@@ -4180,14 +4264,6 @@ function renderCloudSnapshot() {
   const holdingsContent = `
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>個股股數趨勢</h3>
-        <span>每支股票的股數時間序列，點擊下方明細列查看單檔走勢</span>
-      </div>
-      <div class="layout-shares-chart">${renderAllSymbolsChart(state.cloudHistory)}</div>
-    </section>
-
-    <section class="dashboard-card">
-      <div class="card-heading">
         <h3>每日庫存總覽</h3>
         <span>最近 ${history.length} 次雲端快照，依市場分開</span>
       </div>
@@ -4200,7 +4276,10 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看股數走勢</span>
+        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看單檔走勢</span>
+      </div>
+      <div id="symbol-chart-display" class="symbol-chart-display" style="display:none">
+        <div id="symbol-chart-content"></div>
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
@@ -4309,26 +4388,25 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  els.cloudSnapshot.querySelectorAll(".symbol-row").forEach((row) => {
-    const activate = () => {
-      const symbol = row.dataset.symbol;
-      if (!symbol) return;
-      const section = row.closest(".market-detail-section");
-      const panel = section?.querySelector(".symbol-chart-panel");
-      if (!panel) return;
-      const isOpen = !panel.hidden && panel.dataset.activeSymbol === symbol;
-      panel.hidden = isOpen;
-      if (!isOpen) {
-        panel.dataset.activeSymbol = symbol;
-        const name = row.querySelector("td:nth-child(2)")?.textContent || symbol;
-        const chartHtml = renderSymbolSharesChart(symbol, state.cloudHistory);
-        panel.innerHTML = chartHtml
-          ? `<div class="symbol-chart-heading"><strong>${escapeHtml(symbol)}</strong> ${escapeHtml(name)} 股數走勢</div>${chartHtml}`
-          : `<p class="muted-text">${escapeHtml(symbol)} 尚無足夠歷史資料。</p>`;
-      }
-    };
-    row.addEventListener("click", activate);
-    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); } });
+  els.cloudSnapshot.querySelectorAll("[data-symbol-row]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const symbol = row.dataset.symbolRow;
+      const name = row.dataset.symbolName || symbol;
+      const display = els.cloudSnapshot.querySelector("#symbol-chart-display");
+      const content = els.cloudSnapshot.querySelector("#symbol-chart-content");
+      if (!display || !content) return;
+      const chartHtml = renderSymbolSharesChart(symbol, state.cloudHistory);
+      content.innerHTML = chartHtml
+        ? `<div class="symbol-chart-heading"><strong>${escapeHtml(symbol)}</strong> ${escapeHtml(name)} 走勢</div>${chartHtml}`
+        : `<p class="muted-text">${escapeHtml(symbol)} 尚無歷史資料。</p>`;
+      display.style.display = "block";
+    });
+  });
+  els.cloudSnapshot.querySelectorAll(".first-buy-input").forEach((input) => {
+    input.addEventListener("change", () => {
+      saveFirstBuyDate(input.dataset.market, input.dataset.symbol, input.value);
+      renderCloudSnapshot();
+    });
   });
   renderSummaryLine();
 }
