@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.17.2";
+const APP_VERSION = "v0.17.3";
 const APP_VERSION_NOTE = "趨勢圖修正；損益率排名修正；刪除當日庫存紀錄；移除每日總覽；未解析列顯示；手機版布局";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -118,6 +118,7 @@ const els = {
 };
 
 let dbPromise = null;
+let swRegistration = null;
 let tesseractLoadPromise = null;
 let heicLoadPromise = null;
 let googleIdentityLoadPromise = null;
@@ -4349,7 +4350,10 @@ function renderCloudSnapshot() {
       ${dashboardTabButton("capture", "新增")}
     </nav>
   `;
-  els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => {
+    swRegistration?.update?.().catch(() => {});
+    loadLatestCloudSnapshot(true);
+  });
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
   els.cloudSnapshot.querySelector("#dashboard-open-capture")?.addEventListener("click", openCapturePanel);
   els.cloudSnapshot.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
@@ -4970,6 +4974,7 @@ function registerServiceWorker() {
     window.location.reload();
   });
   navigator.serviceWorker.register("./sw.js").then((registration) => {
+    swRegistration = registration;
     registration.update?.();
   }).catch((error) => console.warn("service worker", error));
 }
