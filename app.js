@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.19.1";
-const APP_VERSION_NOTE = "修正：截取線校正後正常解析的資料不再丟失（bindDraftPreviewAfterRender）";
+const APP_VERSION = "v0.20.0";
+const APP_VERSION_NOTE = "優化：水位↺圖案；損益率排名對齊；B tab 筆按鈕edit mode（含股數/均價編輯）；C tab 截圖管理列表";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -71,6 +71,7 @@ const state = {
   targetLevelHistory: [],
   firstBuyDates: loadFirstBuyDates(),
   detailSort: { key: "symbol", dir: "asc" },
+  detailEditMode: {},
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
   quotes: {},
   auth: {
@@ -354,6 +355,37 @@ async function saveFirstBuyDate(market, symbol, date) {
     await writeFirstBuyDatesToSheet().catch(() => {});
   }
 }
+async function savePositionEdits(market, symbol, shares, avgCost) {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  const latestSnap = (state.cloudHistory?.snapshots || [])
+    .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(market))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  if (!latestSnap) { alert("找不到對應快照"); return; }
+  try {
+    await ensureCloudSheetTables();
+    const values = await readSheetValues(SHEET_NAMES.positions, "A:J");
+    const matchingRows = values
+      .map((row, i) => ({ row, sheetRow: i + 1 }))
+      .filter(({ row }) => row[0] === latestSnap.snapshotId && row[3] === symbol);
+    if (!matchingRows.length) { alert(`找不到 ${symbol} 的列`); return; }
+    for (const { sheetRow } of matchingRows) {
+      await sheetsFetch(
+        `/values/${sheetRange(SHEET_NAMES.positions, `G${sheetRow}:H${sheetRow}`)}?valueInputOption=RAW`,
+        { method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[shares, avgCost]] }) }
+      );
+    }
+    state.cloudHistory.positions = (state.cloudHistory.positions || []).map((p) =>
+      p.snapshotId === latestSnap.snapshotId && p.symbol === symbol
+        ? { ...p, shares, avgCost }
+        : p
+    );
+    renderCloudSnapshot();
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "儲存失敗");
+  }
+}
+
 async function writeFirstBuyDatesToSheet() {
   await ensureCloudSheetTables();
   await clearSheetValues(SHEET_NAMES.firstBuy, "A2:C");
@@ -4202,7 +4234,7 @@ function renderCloudSnapshot() {
           <div class="level-update-row">
             <input class="target-level-input cell-input" data-target-level-market="${escapeHtml(item.market)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="水位%" value="${escapeHtml(String(inputVal))}">
             <span class="level-unit">%</span>
-            <button class="button compact level-update-btn" data-target-level-market="${escapeHtml(item.market)}">更新</button>
+            <button class="button compact icon-btn level-update-btn" title="更新水位" data-target-level-market="${escapeHtml(item.market)}">↺</button>
           </div>
           <div class="level-last-record" data-level-last="${escapeHtml(item.market)}">${escapeHtml(lastRecordText)}</div>
         </div>
@@ -4319,17 +4351,28 @@ function renderCloudSnapshot() {
       const rateDisplay = returnRate !== null
         ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%${perfRate !== null ? `<br><small>${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}%/日</small>` : ''}${deltaSpan}</span>`
         : "<span class=\"muted-text\">—</span>";
-      const firstBuyCell = firstBuyVal
-        ? `<span class="first-buy-date">${escapeHtml(firstBuyVal)}</span>
-           <button class="button compact secondary first-buy-edit-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}" data-current="${escapeHtml(firstBuyVal)}">修改</button>`
-        : `<input type="date" class="first-buy-input cell-input" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">
-           <button class="button compact first-buy-set-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">設定</button>`;
+      const editMode = !!state.detailEditMode[item.market];
+      const sharesCell = editMode
+        ? `<input class="cell-input edit-shares-input" type="number" step="0.001" value="${row.shares || 0}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
+        : escapeHtml(displayValue(row.shares));
+      const avgCostCell = editMode
+        ? `<input class="cell-input edit-avgcost-input" type="number" step="0.001" value="${row.avgCost || 0}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
+        : escapeHtml(displayValue(row.avgCost));
+      const firstBuyCell = editMode
+        ? (firstBuyVal
+          ? `<span class="first-buy-date">${escapeHtml(firstBuyVal)}</span>
+             <button class="button compact secondary first-buy-edit-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}" data-current="${escapeHtml(firstBuyVal)}">修改</button>
+             <button class="button compact primary edit-row-save-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">儲存</button>`
+          : `<input type="date" class="first-buy-input cell-input" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">
+             <button class="button compact first-buy-set-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">設定</button>
+             <button class="button compact primary edit-row-save-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">儲存</button>`)
+        : (firstBuyVal ? escapeHtml(firstBuyVal) : '<span class="muted-text">—</span>');
       return `
-        <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0" style="cursor:pointer">
+        <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0"${editMode ? '' : ' style="cursor:pointer"'}>
           <td>${escapeHtml(row.symbol)}</td>
           <td>${escapeHtml(row.name)}</td>
-          <td>${escapeHtml(displayValue(row.shares))}</td>
-          <td>${escapeHtml(displayValue(row.avgCost))}</td>
+          <td>${sharesCell}</td>
+          <td>${avgCostCell}</td>
           <td>${priceCell}</td>
           <td>${rateDisplay}</td>
           <td>${escapeHtml(formatMoney(row.cost))}</td>
@@ -4357,7 +4400,7 @@ function renderCloudSnapshot() {
                 <th class="sortable-th" data-sort-key="price">現價${sortArrow("price")}</th>
                 <th class="sortable-th" data-sort-key="rate">損益率 / 表現率${sortArrow("rate")}</th>
                 <th class="sortable-th" data-sort-key="cost">估算成本${sortArrow("cost")}</th>
-                <th class="sortable-th" data-sort-key="firstBuy">首次布局日${sortArrow("firstBuy")}</th>
+                <th class="sortable-th" data-sort-key="firstBuy">首次布局日${sortArrow("firstBuy")} <button class="detail-edit-toggle${state.detailEditMode[item.market] ? ' active' : ''}" data-edit-market="${escapeHtml(item.market)}" title="${state.detailEditMode[item.market] ? '關閉編輯模式' : '開啟編輯（可修改股數、均價、布局日）'}">✎</button></th>
               </tr>
             </thead>
             <tbody>${rows || "<tr><td colspan=\"8\">沒有庫存</td></tr>"}</tbody>
@@ -4383,7 +4426,7 @@ function renderCloudSnapshot() {
     .sort((a, b) => b.rate - a.rate);
   const top3 = performanceRows.slice(0, 3);
   const bottom3 = performanceRows.slice(-3).reverse();
-  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
+  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td style="text-align:right;font-variant-numeric:tabular-nums;min-width:60px;color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
   const perfTable = (rows) => rows.length ? `<table class="parsed-table"><thead><tr><th>代號</th><th>名稱</th><th>損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
     <div class="metric-grid">
@@ -4495,6 +4538,19 @@ function renderCloudSnapshot() {
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
   `;
+  const captureEntriesHtml = state.entries.length > 0
+    ? `<div class="capture-entries-list">
+        ${state.entries.slice(0, 30).map((e) => {
+          const parsedCount = (e.parsedRows || []).filter((r) => r.symbol).length;
+          return `<div class="capture-entry-row" data-entry-id="${escapeHtml(e.id)}">
+            <span class="entry-status ${escapeHtml(e.status)}">${statusLabel(e.status)}</span>
+            <span class="entry-name">${escapeHtml(e.title || e.date)}</span>
+            <span class="entry-count">${parsedCount ? `${parsedCount} 筆` : '—'}</span>
+            <span class="muted-text" style="white-space:nowrap">${escapeHtml(marketLabel(e.market))}</span>
+          </div>`;
+        }).join('')}
+      </div>`
+    : '<p class="muted-text">尚無已儲存截圖。</p>';
   const captureContent = `
     <section class="dashboard-card capture-tab-card">
       <div class="card-heading">
@@ -4503,6 +4559,13 @@ function renderCloudSnapshot() {
       </div>
       <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
       <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
+    </section>
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>已儲存截圖</h3>
+        <span>${state.entries.length} 張</span>
+      </div>
+      ${captureEntriesHtml}
     </section>
   `;
   const tabContent = {
@@ -4680,7 +4743,8 @@ function renderCloudSnapshot() {
   });
   els.cloudSnapshot.querySelectorAll(".sortable-th[data-sort-key]").forEach((th) => {
     th.style.cursor = "pointer";
-    th.addEventListener("click", () => {
+    th.addEventListener("click", (e) => {
+      if (e.target.closest(".detail-edit-toggle")) return; // 筆按鈕點擊不觸發排序
       const key = th.dataset.sortKey;
       if (state.detailSort.key === key) {
         state.detailSort.dir = state.detailSort.dir === "asc" ? "desc" : "asc";
@@ -4688,6 +4752,37 @@ function renderCloudSnapshot() {
         state.detailSort = { key, dir: "asc" };
       }
       renderCloudSnapshot();
+    });
+  });
+  // 筆按鈕：切換 edit mode
+  els.cloudSnapshot.querySelectorAll(".detail-edit-toggle").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const market = btn.dataset.editMarket;
+      state.detailEditMode[market] = !state.detailEditMode[market];
+      renderCloudSnapshot();
+    });
+  });
+  // edit mode 每行儲存按鈕（股數 + 均價）
+  els.cloudSnapshot.querySelectorAll(".edit-row-save-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const { market, symbol } = btn.dataset;
+      const tr = btn.closest("tr");
+      const shares = Number(tr?.querySelector(".edit-shares-input")?.value) || 0;
+      const avgCost = Number(tr?.querySelector(".edit-avgcost-input")?.value) || 0;
+      btn.disabled = true;
+      btn.textContent = "儲存中…";
+      await savePositionEdits(market, symbol, shares, avgCost);
+      btn.disabled = false;
+      btn.textContent = "儲存";
+    });
+  });
+  // C tab 已儲存截圖列表
+  els.cloudSnapshot.querySelectorAll(".capture-entry-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.entryId;
+      if (id) openDetail(id);
     });
   });
   renderSummaryLine();

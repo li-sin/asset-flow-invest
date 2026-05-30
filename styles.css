@@ -2035,3 +2035,87 @@ textarea {
   z-index: 10;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
+
+/* A1: 水位更新圖案按鈕 */
+.icon-btn {
+  font-size: 17px;
+  line-height: 1;
+  padding: 2px 8px;
+}
+
+/* B tab: 首次布局日 edit mode 筆按鈕 */
+.detail-edit-toggle {
+  background: none;
+  border: none;
+  padding: 2px 5px;
+  margin-left: 3px;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.45;
+  vertical-align: middle;
+  border-radius: 4px;
+  transition: opacity 0.15s, background 0.15s;
+}
+.detail-edit-toggle:hover {
+  opacity: 0.8;
+  background: rgba(0, 0, 0, 0.06);
+}
+.detail-edit-toggle.active {
+  opacity: 1;
+  color: var(--green-dark, #2d6a4f);
+  background: var(--green-light, #d8f3dc);
+}
+
+/* B tab: edit mode 輸入欄 */
+.edit-shares-input,
+.edit-avgcost-input {
+  width: 76px;
+  text-align: right;
+}
+
+/* C tab: 已儲存截圖列表 */
+.capture-entries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.capture-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.capture-entry-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.capture-entry-row .entry-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.capture-entry-row .entry-status.reviewed,
+.capture-entry-row .entry-status.imported {
+  background: var(--green-light, #d8f3dc);
+  color: var(--green-dark, #2d6a4f);
+}
+.capture-entry-row .entry-name {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capture-entry-row .entry-count {
+  color: var(--muted);
+  white-space: nowrap;
+}
