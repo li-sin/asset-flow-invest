@@ -1156,6 +1156,21 @@ textarea {
   overflow: hidden;
 }
 
+.first-buy-cell {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.first-buy-cell .first-buy-date {
+  font-size: 13px;
+  margin-right: 6px;
+}
+
+.first-buy-cell .first-buy-input {
+  width: 130px;
+  margin-right: 4px;
+}
+
 .skipped-rows-section {
   margin-top: 16px;
   border: 1.5px solid var(--yellow, #f0a500);

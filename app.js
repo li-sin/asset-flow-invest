@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.17.4";
-const APP_VERSION_NOTE = "手機版 card 框防超出；skipped rows 垂直佈局（擷取列+可填欄位）";
+const APP_VERSION = "v0.18.0";
+const APP_VERSION_NOTE = "首次布局日改存 Google Sheet（AssetFlowFirstBuy tab）；set/edit UI";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -26,11 +26,13 @@ const SHEET_NAMES = {
   positions: "AssetFlowPositions",
   levels: "水位",
   layout: "AssetFlowLayout",
+  firstBuy: "AssetFlowFirstBuy",
 };
 const SHEET_HEADERS = {
   snapshots: ["snapshot_id", "created_at", "date", "market", "source_entry_id", "source_title", "row_count", "app_version"],
   positions: ["snapshot_id", "date", "market", "symbol", "name", "kind", "shares", "avg_cost", "source", "created_at"],
   layout: ["date", "market", "symbol", "name", "shares", "prev_shares", "delta"],
+  firstBuy: ["symbol", "first_buy_date", "market"],
 };
 const SYMBOL_NAMES = {
   "0050": "元大台灣50",
@@ -67,6 +69,7 @@ const state = {
   levelChartRange: "1M",
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
+  firstBuyDates: loadFirstBuyDates(),
   quotes: {},
   auth: {
     signedIn: false,
@@ -342,13 +345,49 @@ const FIRST_BUY_DATES_KEY = "assetflow_invest_first_buy_dates_v1";
 function loadFirstBuyDates() {
   try { return JSON.parse(localStorage.getItem(FIRST_BUY_DATES_KEY) || "{}"); } catch { return {}; }
 }
-function saveFirstBuyDate(market, symbol, date) {
-  const dates = loadFirstBuyDates();
-  dates[`${market}_${symbol}`] = date;
-  localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(dates));
+async function saveFirstBuyDate(market, symbol, date) {
+  state.firstBuyDates[`${market}_${symbol}`] = date;
+  localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(state.firstBuyDates));
+  if (state.auth.authorized) {
+    await writeFirstBuyDatesToSheet().catch(() => {});
+  }
+}
+async function writeFirstBuyDatesToSheet() {
+  await ensureCloudSheetTables();
+  await clearSheetValues(SHEET_NAMES.firstBuy, "A2:C");
+  const rows = Object.entries(state.firstBuyDates)
+    .filter(([, d]) => d)
+    .map(([key, d]) => {
+      const idx = key.indexOf("_");
+      return [key.slice(idx + 1), d, key.slice(0, idx)];
+    });
+  if (rows.length) await updateSheetValues(SHEET_NAMES.firstBuy, "A2:C", rows);
+}
+async function loadFirstBuyDatesFromSheet() {
+  try {
+    const values = await readCloudSheetValues(SHEET_NAMES.firstBuy, "A2:C");
+    const rows = stripHeaderRow(values, SHEET_HEADERS.firstBuy);
+    const result = {};
+    for (const row of rows) {
+      const [symbol, date, market] = row;
+      if (symbol && date && market) result[`${market}_${symbol}`] = date;
+    }
+    if (Object.keys(result).length > 0) {
+      state.firstBuyDates = result;
+      localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(result));
+    } else {
+      const local = loadFirstBuyDates();
+      if (Object.keys(local).length > 0) {
+        state.firstBuyDates = local;
+        await writeFirstBuyDatesToSheet().catch(() => {});
+      }
+    }
+  } catch {
+    state.firstBuyDates = loadFirstBuyDates();
+  }
 }
 function holdingDays(market, symbol) {
-  const dates = loadFirstBuyDates();
+  const dates = state.firstBuyDates;
   const d = dates[`${market}_${symbol}`];
   if (!d) return null;
   const ms = Date.now() - new Date(d).getTime();
@@ -2832,6 +2871,7 @@ async function ensureSheetTables() {
   await updateSheetValues(SHEET_NAMES.snapshots, "A1:H1", [SHEET_HEADERS.snapshots]);
   await updateSheetValues(SHEET_NAMES.positions, "A1:J1", [SHEET_HEADERS.positions]);
   await updateSheetValues(SHEET_NAMES.layout, "A1:G1", [SHEET_HEADERS.layout]);
+  await updateSheetValues(SHEET_NAMES.firstBuy, "A1:C1", [SHEET_HEADERS.firstBuy]);
 }
 
 async function ensureCloudSheetTables() {
@@ -3495,7 +3535,10 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
     const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
-    await loadTargetLevelHistory();
+    await Promise.all([
+      loadTargetLevelHistory(),
+      loadFirstBuyDatesFromSheet().catch(() => {}),
+    ]);
     const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G").catch(() => []);
     const layout = parseLayoutRows(stripHeaderRow(layoutValues, SHEET_HEADERS.layout));
     state.cloudHistory = { snapshots, positions, layout };
@@ -4147,7 +4190,6 @@ function renderCloudSnapshot() {
     `;
   }).join("");
   const marketDetailSections = marketSummaries.map((item) => {
-    const firstBuyDates = loadFirstBuyDates();
     const rows = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
       const price = typeof quote === 'number' ? quote : (quote?.price ?? null);
@@ -4161,7 +4203,12 @@ function renderCloudSnapshot() {
       const rateDisplay = returnRate !== null
         ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%${perfRate !== null ? `<br><small>${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}%/日</small>` : ''}</span>`
         : "<span class=\"muted-text\">—</span>";
-      const firstBuyVal = firstBuyDates[`${item.market}_${row.symbol}`] || '';
+      const firstBuyVal = state.firstBuyDates[`${item.market}_${row.symbol}`] || '';
+      const firstBuyCell = firstBuyVal
+        ? `<span class="first-buy-date">${escapeHtml(firstBuyVal)}</span>
+           <button class="button compact secondary first-buy-edit-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}" data-current="${escapeHtml(firstBuyVal)}">修改</button>`
+        : `<input type="date" class="first-buy-input cell-input" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">
+           <button class="button compact first-buy-set-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">設定</button>`;
       return `
         <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0" style="cursor:pointer">
           <td>${escapeHtml(row.symbol)}</td>
@@ -4171,7 +4218,7 @@ function renderCloudSnapshot() {
           <td>${priceCell}</td>
           <td>${rateDisplay}</td>
           <td>${escapeHtml(formatMoney(row.cost))}</td>
-          <td><input type="date" class="first-buy-input" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}" value="${escapeHtml(firstBuyVal)}"></td>
+          <td class="first-buy-cell">${firstBuyCell}</td>
         </tr>
       `;
     }).join("");
@@ -4439,10 +4486,33 @@ function renderCloudSnapshot() {
       display.style.display = "block";
     });
   });
-  els.cloudSnapshot.querySelectorAll(".first-buy-input").forEach((input) => {
-    input.addEventListener("change", () => {
-      saveFirstBuyDate(input.dataset.market, input.dataset.symbol, input.value);
+  els.cloudSnapshot.querySelectorAll(".first-buy-set-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const input = btn.closest("td")?.querySelector(".first-buy-input");
+      if (!input?.value) { alert("請選擇日期"); return; }
+      await saveFirstBuyDate(btn.dataset.market, btn.dataset.symbol, input.value);
       renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll(".first-buy-edit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const cell = btn.closest("td");
+      if (!cell) return;
+      const { market, symbol, current } = btn.dataset;
+      cell.innerHTML = `
+        <input type="date" class="first-buy-input cell-input" value="${escapeHtml(current)}" data-market="${escapeHtml(market)}" data-symbol="${escapeHtml(symbol)}">
+        <button class="button compact first-buy-confirm-btn" data-market="${escapeHtml(market)}" data-symbol="${escapeHtml(symbol)}">確認</button>
+        <button class="button compact secondary first-buy-cancel-btn">取消</button>
+      `;
+      cell.querySelector(".first-buy-confirm-btn").addEventListener("click", async () => {
+        const newDate = cell.querySelector(".first-buy-input").value;
+        if (!newDate) { alert("請選擇日期"); return; }
+        await saveFirstBuyDate(market, symbol, newDate);
+        renderCloudSnapshot();
+      });
+      cell.querySelector(".first-buy-cancel-btn").addEventListener("click", () => {
+        renderCloudSnapshot();
+      });
     });
   });
   renderSummaryLine();
