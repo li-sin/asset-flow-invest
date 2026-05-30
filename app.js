@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.17.3";
-const APP_VERSION_NOTE = "趨勢圖修正；損益率排名修正；刪除當日庫存紀錄；移除每日總覽；未解析列顯示；手機版布局";
+const APP_VERSION = "v0.17.4";
+const APP_VERSION_NOTE = "手機版 card 框防超出；skipped rows 垂直佈局（擷取列+可填欄位）";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2417,19 +2417,21 @@ function renderSkippedRowCrops(skippedRowCrops) {
     const text = String(crop.text || "").trim();
     return `
       <div class="skipped-row-item">
-        <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "未解析橫列")}">
-        <div class="skipped-row-info">
-          <strong>${escapeHtml(crop.label || `列 ${i + 1}`)}</strong>
-          <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
-          <div class="skipped-row-inputs">
-            <input class="cell-input" type="text" placeholder="代號*" data-skipped-symbol autocomplete="off">
-            <input class="cell-input" type="text" placeholder="名稱" data-skipped-name autocomplete="off">
-            <input class="cell-input" type="number" placeholder="股數*" step="0.001" min="0" data-skipped-shares>
-            <input class="cell-input" type="number" placeholder="均價" step="0.001" min="0" data-skipped-avgcost>
-            <button class="button secondary compact" type="button" data-add-skipped>加入草稿</button>
+        <div class="skipped-row-header">
+          <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "未解析橫列")}">
+          <div class="skipped-row-info">
+            <strong>${escapeHtml(crop.label || `列 ${i + 1}`)}</strong>
+            <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
           </div>
+          <button class="skipped-row-dismiss" type="button" data-dismiss-skipped title="移除此列">×</button>
         </div>
-        <button class="skipped-row-dismiss" type="button" data-dismiss-skipped title="移除此列">×</button>
+        <div class="skipped-row-inputs">
+          <input class="cell-input" type="text" placeholder="代號*" data-skipped-symbol autocomplete="off">
+          <input class="cell-input" type="text" placeholder="名稱" data-skipped-name autocomplete="off">
+          <input class="cell-input" type="number" placeholder="股數*" step="0.001" min="0" data-skipped-shares>
+          <input class="cell-input" type="number" placeholder="均價" step="0.001" min="0" data-skipped-avgcost>
+          <button class="button secondary compact" type="button" data-add-skipped>加入草稿</button>
+        </div>
       </div>
     `;
   }).join("");
