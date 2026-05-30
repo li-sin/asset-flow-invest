@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.20.1";
-const APP_VERSION_NOTE = "修正：截圖標題 template bug；損益率排名欄不顯示；重複代號去重+名稱自動補查";
+const APP_VERSION = "v0.21.0";
+const APP_VERSION_NOTE = "強制 OCR 路徑；水位卡去 meter bar 常駐並排；損益率/title 修正";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -279,7 +279,8 @@ async function addFiles(files) {
 }
 
 function updateDraftState() {
-  els.save.disabled = state.draftImages.length === 0;
+  // 強制 OCR 路徑：save 按鈕只在 OCR 後有 draftEditedRows 才啟用
+  els.save.disabled = !(state.draftEditedRows?.length > 0);
   els.parseDraft.disabled = state.draftImages.length === 0;
   els.draftPreview.innerHTML = state.draftImages.map((image) => `
     <div class="draft-shot">
@@ -662,53 +663,11 @@ function escapeHtml(value) {
 
 async function saveEntry(event) {
   event.preventDefault();
-  if (!state.draftImages.length) return;
-  // OCR 後有解析資料 → 直接存雲端（合併流程）
-  if (state.draftEditedRows?.length) {
-    await saveDraftDirectToCloud();
+  if (!state.draftEditedRows?.length) {
+    alert("請先按「解析截圖」，確認資料後再存雲端。");
     return;
   }
-
-  const base = {
-    id: entryId(),
-    date: els.date.value || today(),
-    market: els.market.value,
-    kind: els.kind.value,
-    status: "reviewed",
-    title: `${els.market.value || "截圖"} ${els.date.value || today()}`,
-    text: els.text.value.trim(),
-    note: els.note.value.trim(),
-    parsedRows: parseHoldings(els.text.value.trim()),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  const entries = state.draftImages.map((image, index) => ({
-    ...base,
-    id: index === 0 ? base.id : entryId(),
-    title: state.draftImages.length === 1
-      ? base.title
-      : `${base.title || "截圖"} ${index + 1}`,
-    images: [image],
-    parsedRows: image.parsedRows || base.parsedRows,
-    ocrElapsedMs: image.ocrElapsedMs,
-    columnOcrMs: image.columnOcrMs,
-    rowOcrMs: image.rowOcrMs,
-    columnCrops: image.columnCrops || [],
-    rowCrops: image.rowCrops || [],
-    skippedRowCrops: image.skippedRowCrops || [],
-    completeCircleCount: image.completeCircleCount || 0,
-    missingRowCount: image.missingRowCount || 0,
-  }));
-
-  await txStore("readwrite", (store) => {
-    entries.forEach((entry) => store.put(entry));
-  });
-
-  state.entries.push(...entries);
-  clearDraft();
-  closeCapturePanel();
-  render();
+  await saveDraftDirectToCloud();
 }
 
 function clearDraft() {
@@ -1538,6 +1497,8 @@ function normalizeSymbolInput(value) {
 function bindDraftPreviewAfterRender(parsedRows) {
   // 初始化 draftEditedRows（深拷貝目前 parsedRows）
   state.draftEditedRows = parsedRows.map((r) => ({ ...r }));
+  // OCR 完成後依 draftEditedRows 更新 save 按鈕狀態
+  if (els.save) els.save.disabled = !(state.draftEditedRows.length > 0);
   // 綁定 live edit 事件
   els.parsePreview.querySelectorAll("[data-draft-symbol]").forEach((input) => {
     input.addEventListener("input", () => {
@@ -4256,9 +4217,6 @@ function renderCloudSnapshot() {
         <span>估算投入成本 <b>${formatMoney(item.totalCost)}</b></span>
         <span>總股數 <b>${formatNumber(item.totalShares, 3)}</b></span>
       </div>
-      <div class="meter" aria-label="${marketLabel(item.market)} 估算投入成本">
-        <span style="width: ${widthPercent(item.totalCost, maxMarketCost)}%"></span>
-      </div>
     </section>
   `;
   }).join("");
@@ -5203,8 +5161,9 @@ function bindEvents() {
       if (!symbol) { alert("請填入代號"); return; }
       if (!Number.isFinite(shares) || shares <= 0) { alert("請填入有效股數"); return; }
       if (!state.draftEditedRows) state.draftEditedRows = [];
-      state.draftEditedRows.push({ symbol, name, shares, avgCost: Number.isFinite(avgCost) ? avgCost : 0 });
+      state.draftEditedRows.push({ symbol, name: name || SYMBOL_NAMES[symbol] || "", shares, avgCost: Number.isFinite(avgCost) ? avgCost : 0 });
       const newIndex = state.draftEditedRows.length - 1;
+      if (els.save) els.save.disabled = false; // OCR 後 skipped row 加入也啟用 save
       const tbody = els.parsePreview?.querySelector(".parsed-table tbody");
       if (tbody) {
         const tr = document.createElement("tr");

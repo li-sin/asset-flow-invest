@@ -539,10 +539,10 @@ textarea {
 
 .market-water-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(120px, 160px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 150px);
+  gap: 8px;
   align-items: end;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .market-water-main span,
@@ -1741,7 +1741,11 @@ textarea {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
+  /* market-water-grid 保持 2 欄，不隨 dashboard-grid collapse */
+}
 
+@media (max-width: 480px) {
+  /* 小手機才讓水位卡疊排 */
   .market-water-grid {
     grid-template-columns: 1fr;
   }
