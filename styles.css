@@ -509,6 +509,34 @@ textarea {
   padding: 12px;
 }
 
+.level-update-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+}
+
+.level-update-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.level-update-row input {
+  width: 70px;
+  text-align: right;
+}
+
+.level-unit {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.level-last-record {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .market-water-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(120px, 160px);

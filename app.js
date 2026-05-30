@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.18.0";
-const APP_VERSION_NOTE = "首次布局日改存 Google Sheet（AssetFlowFirstBuy tab）；set/edit UI";
+const APP_VERSION = "v0.18.1";
+const APP_VERSION_NOTE = "首次布局日存 Sheet；首頁水位更新按鈕 + 上次記錄顯示";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -418,7 +418,6 @@ function updateTargetLevel(market, value) {
   }
   state.targetLevels[key] = number;
   saveTargetLevels();
-  saveTargetLevelToSheet(key, number);
   return true;
 }
 
@@ -4119,7 +4118,16 @@ function renderCloudSnapshot() {
   const maxHistoryShares = Math.max(...history.map((item) => item.totalShares), 0);
   const maxMarketCost = Math.max(...marketSummaries.map((item) => item.totalCost), 0);
   const layoutAnalysis = buildLayoutAnalysis();
-  const marketCards = marketSummaries.map((item) => `
+  const marketCards = marketSummaries.map((item) => {
+    const todayStr = today();
+    const mktHistory = state.targetLevelHistory.filter((h) => h.market === item.market);
+    const todayRecord = mktHistory.find((h) => h.date === todayStr);
+    const lastRecord = mktHistory[0];
+    const inputVal = todayRecord ? todayRecord.targetLevel : (item.targetLevel ?? "");
+    const lastRecordText = lastRecord
+      ? `上次：${lastRecord.date} ${formatPercent(lastRecord.targetLevel)}`
+      : "尚未記錄";
+    return `
     <section class="market-water-card">
       <div class="card-heading">
         <h3>${marketLabel(item.market)}</h3>
@@ -4130,10 +4138,14 @@ function renderCloudSnapshot() {
           <span>方舟建議總水位</span>
           <strong>${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</strong>
         </div>
-        <label>
-          調整建議水位
-          <input class="target-level-input" data-target-level-market="${item.market}" type="number" min="0" max="100" step="0.1" inputmode="decimal" value="${escapeHtml(item.targetLevel ?? "")}">
-        </label>
+        <div class="level-update-panel">
+          <div class="level-update-row">
+            <input class="target-level-input cell-input" data-target-level-market="${escapeHtml(item.market)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="水位%" value="${escapeHtml(String(inputVal))}">
+            <span class="level-unit">%</span>
+            <button class="button compact level-update-btn" data-target-level-market="${escapeHtml(item.market)}">更新</button>
+          </div>
+          <div class="level-last-record" data-level-last="${escapeHtml(item.market)}">${escapeHtml(lastRecordText)}</div>
+        </div>
       </div>
       <div class="market-stats">
         <span>估算投入成本 <b>${formatMoney(item.totalCost)}</b></span>
@@ -4143,7 +4155,8 @@ function renderCloudSnapshot() {
         <span style="width: ${widthPercent(item.totalCost, maxMarketCost)}%"></span>
       </div>
     </section>
-  `).join("");
+  `;
+  }).join("");
   const trendBars = history.map((item) => `
     <div class="trend-day">
       <div class="trend-bars">
@@ -4435,10 +4448,22 @@ function renderCloudSnapshot() {
   homeDeleteDate?.addEventListener("change", updateHomeDeletePreview);
   homeDeleteMarket?.addEventListener("change", updateHomeDeletePreview);
   els.cloudSnapshot.querySelector("#home-delete-cloud-snapshot")?.addEventListener("click", () => deleteSelectedCloudSnapshots({ buttonId: "home-delete-cloud-snapshot", dateId: "home-delete-snapshot-date", marketId: "home-delete-snapshot-market" }));
-  els.cloudSnapshot.querySelectorAll("[data-target-level-market]").forEach((input) => {
-    input.addEventListener("change", () => {
-      if (updateTargetLevel(input.dataset.targetLevelMarket, input.value)) {
+  els.cloudSnapshot.querySelectorAll(".level-update-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const market = btn.dataset.targetLevelMarket;
+      const panel = btn.closest(".level-update-panel");
+      const input = panel?.querySelector("input[data-target-level-market]");
+      if (!input) return;
+      if (!updateTargetLevel(market, input.value)) return;
+      const feedback = panel?.querySelector(".level-last-record");
+      if (feedback) feedback.textContent = "同步中…";
+      btn.disabled = true;
+      try {
+        await saveTargetLevelToSheet(market, state.targetLevels[market]);
         renderCloudSnapshot();
+      } catch {
+        if (feedback) feedback.textContent = "儲存失敗，請重試";
+        btn.disabled = false;
       }
     });
   });
