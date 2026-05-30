@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.19.0";
-const APP_VERSION_NOTE = "明細排序；損益率趨勢折線圖 + B tab delta；刪除快照改日曆 highlight";
+const APP_VERSION = "v0.19.1";
+const APP_VERSION_NOTE = "修正：截取線校正後正常解析的資料不再丟失（bindDraftPreviewAfterRender）";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1503,6 +1503,106 @@ function normalizeSymbolInput(value) {
     .toUpperCase();
 }
 
+function bindDraftPreviewAfterRender(parsedRows) {
+  // 初始化 draftEditedRows（深拷貝目前 parsedRows）
+  state.draftEditedRows = parsedRows.map((r) => ({ ...r }));
+  // 綁定 live edit 事件
+  els.parsePreview.querySelectorAll("[data-draft-symbol]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const i = Number(input.dataset.draftSymbol);
+      if (state.draftEditedRows?.[i]) {
+        state.draftEditedRows[i].symbol = input.value.trim().toUpperCase();
+        state.draftEditedRows[i].name = SYMBOL_NAMES[state.draftEditedRows[i].symbol] || state.draftEditedRows[i].name;
+      }
+    });
+  });
+  els.parsePreview.querySelectorAll("[data-draft-shares]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const i = Number(input.dataset.draftShares);
+      if (state.draftEditedRows?.[i]) state.draftEditedRows[i].shares = Number(input.value) || 0;
+    });
+  });
+  els.parsePreview.querySelectorAll("[data-draft-avgcost]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const i = Number(input.dataset.draftAvgcost);
+      if (state.draftEditedRows?.[i]) state.draftEditedRows[i].avgCost = Number(input.value) || 0;
+    });
+  });
+  els.parsePreview.querySelectorAll("[data-draft-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const i = Number(input.dataset.draftName);
+      if (state.draftEditedRows?.[i]) state.draftEditedRows[i].name = input.value.trim();
+    });
+  });
+  els.parsePreview.querySelectorAll("[data-draft-kind]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const i = Number(input.dataset.draftKind);
+      if (state.draftEditedRows?.[i]) state.draftEditedRows[i].kind = input.value.trim();
+    });
+  });
+  // 若有 parsedRows，顯示確認存雲端按鈕
+  if (parsedRows.length > 0) {
+    const confirmDiv = document.createElement("div");
+    confirmDiv.className = "draft-confirm-actions";
+    confirmDiv.innerHTML = `<button class="button primary" type="button" id="draft-confirm-save">確認並存雲端</button>`;
+    els.parsePreview.appendChild(confirmDiv);
+    confirmDiv.querySelector("#draft-confirm-save").addEventListener("click", saveDraftDirectToCloud);
+  }
+  // 比對現有庫存 vs OCR 結果，缺少代號顯示確認列
+  const latestSnap = (state.cloudHistory?.snapshots || [])
+    .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(els.market.value))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  if (latestSnap) {
+    const existingSymbols = (state.cloudHistory?.positions || [])
+      .filter((p) => p.snapshotId === latestSnap.snapshotId)
+      .map((p) => p.symbol);
+    const parsedSymbols = new Set((state.draftEditedRows || []).map((r) => r.symbol).filter(Boolean));
+    const missingFromOcr = existingSymbols.filter((s) => !parsedSymbols.has(s));
+    if (missingFromOcr.length > 0) {
+      const missingDiv = document.createElement("div");
+      missingDiv.className = "ocr-missing-confirm";
+      missingDiv.innerHTML = `
+        <p class="ocr-completeness warning"><strong>⚠ 庫存中有但 OCR 未解析到（${missingFromOcr.length} 支）</strong></p>
+        ${missingFromOcr.map((sym) => {
+          const name = SYMBOL_NAMES[sym] || sym;
+          return `<div class="missing-symbol-row" data-missing-symbol="${escapeHtml(sym)}">
+            <span class="missing-symbol-label">${escapeHtml(sym)} ${escapeHtml(name)}</span>
+            <label>股數<input type="number" step="0.001" class="missing-shares" placeholder="股數"></label>
+            <label>均價<input type="number" step="0.001" class="missing-avgcost" placeholder="均價"></label>
+            <button class="button secondary compact missing-add-btn" type="button">加入</button>
+            <button class="button ghost compact missing-skip-btn" type="button">略過</button>
+          </div>`;
+        }).join("")}
+      `;
+      els.parsePreview.appendChild(missingDiv);
+      missingDiv.querySelectorAll(".missing-add-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const row = btn.closest("[data-missing-symbol]");
+          const sym = row.dataset.missingSymbol;
+          const shares = Number(row.querySelector(".missing-shares").value) || 0;
+          const avgCost = Number(row.querySelector(".missing-avgcost").value) || 0;
+          state.draftEditedRows.push({
+            symbol: sym,
+            name: SYMBOL_NAMES[sym] || sym,
+            kind: "現股",
+            shares,
+            avgCost,
+            needsReview: false,
+          });
+          row.remove();
+          if (!missingDiv.querySelector("[data-missing-symbol]")) missingDiv.remove();
+        });
+      });
+      missingDiv.querySelectorAll(".missing-skip-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          btn.closest("[data-missing-symbol]").remove();
+          if (!missingDiv.querySelector("[data-missing-symbol]")) missingDiv.remove();
+        });
+      });
+    }
+  }
+}
+
 async function parseDraftImages() {
   if (!state.draftImages.length || els.parseDraft.disabled) return;
   els.parseDraft.disabled = true;
@@ -1586,105 +1686,7 @@ async function parseDraftImages() {
         renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
         renderParsedRows(parsedRows, "draft", "", columnCrops, rowCrops, skippedRowCrops),
       ].filter(Boolean).join("");
-      // 初始化 draftEditedRows（深拷貝目前 parsedRows）
-      state.draftEditedRows = parsedRows.map((r) => ({ ...r }));
-      // 綁定 live edit 事件
-      els.parsePreview.querySelectorAll("[data-draft-symbol]").forEach((input) => {
-        input.addEventListener("input", () => {
-          const i = Number(input.dataset.draftSymbol);
-          if (state.draftEditedRows?.[i]) {
-            state.draftEditedRows[i].symbol = input.value.trim().toUpperCase();
-            state.draftEditedRows[i].name = SYMBOL_NAMES[state.draftEditedRows[i].symbol] || state.draftEditedRows[i].name;
-          }
-        });
-      });
-      els.parsePreview.querySelectorAll("[data-draft-shares]").forEach((input) => {
-        input.addEventListener("input", () => {
-          const i = Number(input.dataset.draftShares);
-          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].shares = Number(input.value) || 0;
-        });
-      });
-      els.parsePreview.querySelectorAll("[data-draft-avgcost]").forEach((input) => {
-        input.addEventListener("input", () => {
-          const i = Number(input.dataset.draftAvgcost);
-          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].avgCost = Number(input.value) || 0;
-        });
-      });
-      els.parsePreview.querySelectorAll("[data-draft-name]").forEach((input) => {
-        input.addEventListener("input", () => {
-          const i = Number(input.dataset.draftName);
-          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].name = input.value.trim();
-        });
-      });
-      els.parsePreview.querySelectorAll("[data-draft-kind]").forEach((input) => {
-        input.addEventListener("input", () => {
-          const i = Number(input.dataset.draftKind);
-          if (state.draftEditedRows?.[i]) state.draftEditedRows[i].kind = input.value.trim();
-        });
-      });
-      // 若有 parsedRows，顯示確認存雲端按鈕
-      if (parsedRows.length > 0) {
-        const confirmDiv = document.createElement("div");
-        confirmDiv.className = "draft-confirm-actions";
-        confirmDiv.innerHTML = `<button class="button primary" type="button" id="draft-confirm-save">確認並存雲端</button>`;
-        els.parsePreview.appendChild(confirmDiv);
-        confirmDiv.querySelector("#draft-confirm-save").addEventListener("click", saveDraftDirectToCloud);
-      }
-      // 任務 3：比對現有庫存 vs OCR 結果，缺少代號顯示確認列
-      const latestSnap = (state.cloudHistory?.snapshots || [])
-        .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(els.market.value))
-        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-      if (latestSnap) {
-        const existingSymbols = (state.cloudHistory?.positions || [])
-          .filter((p) => p.snapshotId === latestSnap.snapshotId)
-          .map((p) => p.symbol);
-        const parsedSymbols = new Set((state.draftEditedRows || []).map((r) => r.symbol).filter(Boolean));
-        const missingFromOcr = existingSymbols.filter((s) => !parsedSymbols.has(s));
-        if (missingFromOcr.length > 0) {
-          const missingDiv = document.createElement("div");
-          missingDiv.className = "ocr-missing-confirm";
-          missingDiv.innerHTML = `
-            <p class="ocr-completeness warning"><strong>⚠ 庫存中有但 OCR 未解析到（${missingFromOcr.length} 支）</strong></p>
-            ${missingFromOcr.map((sym) => {
-              const name = SYMBOL_NAMES[sym] || sym;
-              return `<div class="missing-symbol-row" data-missing-symbol="${escapeHtml(sym)}">
-                <span class="missing-symbol-label">${escapeHtml(sym)} ${escapeHtml(name)}</span>
-                <label>股數<input type="number" step="0.001" class="missing-shares" placeholder="股數"></label>
-                <label>均價<input type="number" step="0.001" class="missing-avgcost" placeholder="均價"></label>
-                <button class="button secondary compact missing-add-btn" type="button">加入</button>
-                <button class="button ghost compact missing-skip-btn" type="button">略過</button>
-              </div>`;
-            }).join("")}
-          `;
-          els.parsePreview.appendChild(missingDiv);
-          // 綁定「加入」按鈕
-          missingDiv.querySelectorAll(".missing-add-btn").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              const row = btn.closest("[data-missing-symbol]");
-              const sym = row.dataset.missingSymbol;
-              const shares = Number(row.querySelector(".missing-shares").value) || 0;
-              const avgCost = Number(row.querySelector(".missing-avgcost").value) || 0;
-              state.draftEditedRows.push({
-                symbol: sym,
-                name: SYMBOL_NAMES[sym] || sym,
-                kind: "現股",
-                shares,
-                avgCost,
-                needsReview: false,
-              });
-              row.remove();
-              if (!missingDiv.querySelector("[data-missing-symbol]")) missingDiv.remove();
-            });
-          });
-          // 綁定「略過」按鈕
-          missingDiv.querySelectorAll(".missing-skip-btn").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              btn.closest("[data-missing-symbol]").remove();
-              if (!missingDiv.querySelector("[data-missing-symbol]")) missingDiv.remove();
-            });
-          });
-        }
-      }
+      bindDraftPreviewAfterRender(parsedRows);
     }
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     const countText = expectedTotal ? `總共 ${expectedTotal} 檔，` : (expectedRows ? `完整圈 ${expectedRows} 個，` : "");
@@ -1836,6 +1838,7 @@ async function parseDraftImagesWithRowLines() {
       renderOcrCompleteness(expectedRows, parsedRows.length, missingRows, "draft", expectedTotal ? "total" : "circle"),
       renderParsedRows(parsedRows, "draft", "", [], rowCrops, skippedRowCrops),
     ].join("");
+    bindDraftPreviewAfterRender(parsedRows);
     const elapsed = state.draftImages.reduce((sum, image) => sum + (image.ocrElapsedMs || 0), 0);
     setOcrStatus(`截圖解析完成，應有 ${expectedRows || "?"} 筆，目前解析 ${parsedRows.length} 筆${missingRows ? `，可能少 ${missingRows} 筆` : ""}（${formatDuration(elapsed)}）`);
   } catch (error) {
@@ -1884,6 +1887,7 @@ async function parseDraftImageWithRowLines(imageIndex) {
       renderOcrCompleteness(expectedRows, parsedRows.length, Math.max(0, expectedRows - parsedRows.length), "draft", image.expectedTotalCount ? "total" : "circle"),
       renderParsedRows(parsedRows, "draft", "", [], image.rowCrops || [], image.skippedRowCrops || []),
     ].join("");
+    bindDraftPreviewAfterRender(parsedRows);
     setOcrStatus(`完成，${image.expectedTotalCount ? `總共 ${image.expectedTotalCount} 檔` : `完整圈 ${image.completeCircleCount || 0} 個`}，抓到 ${parsedRows.length} 筆候選庫存（${formatDuration(result.elapsedMs || 0)}）`);
   } catch (error) {
     console.error(error);
