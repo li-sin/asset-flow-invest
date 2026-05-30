@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.16.0";
-const APP_VERSION_NOTE = "損益率/表現率；首次布局日；快照折線圖；OCR 比對庫存；截取線優化";
+const APP_VERSION = "v0.17.0";
+const APP_VERSION_NOTE = "趨勢圖修正；損益率排名修正；刪除當日庫存紀錄；移除每日總覽；未解析列顯示；手機版布局";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2341,13 +2341,16 @@ function renderOcrCompleteness(expectedRows, parsedRows, missingRows, context, s
 function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrops = [], skippedRowCrops = []) {
   const rowDiagnostics = renderRowCropDiagnostics(rowCrops, skippedRowCrops);
   if (!rows?.length) {
-    const crops = rowDiagnostics || renderColumnCrops(columnCrops);
+    const skippedSection = renderSkippedRowCrops(skippedRowCrops);
+    const crops = skippedSection || rowDiagnostics || renderColumnCrops(columnCrops);
     if (crops) {
       return `
         <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
           <span>解析庫存</span>
           <div class="pre-wrap">尚未抓到庫存列</div>
-          ${crops}
+          ${skippedSection}
+          ${rowDiagnostics}
+          ${renderColumnCrops(columnCrops)}
         </div>
       `;
     }
@@ -2389,6 +2392,7 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
           <tbody>${body}</tbody>
         </table>
       </div>
+      ${renderSkippedRowCrops(skippedRowCrops)}
       ${rowDiagnostics}
       ${renderColumnCrops(columnCrops)}
     </div>
@@ -2405,10 +2409,34 @@ function renderRowCropCell(row) {
   `;
 }
 
+function renderSkippedRowCrops(skippedRowCrops) {
+  const crops = (skippedRowCrops || []).filter((c) => c?.dataUrl && c.status !== "imported");
+  if (!crops.length) return "";
+  const items = crops.map((crop, i) => {
+    const text = String(crop.text || "").trim();
+    return `
+      <div class="skipped-row-item">
+        <img src="${crop.dataUrl}" alt="${escapeHtml(crop.label || "未解析橫列")}">
+        <div class="skipped-row-info">
+          <strong>${escapeHtml(crop.label || `列 ${i + 1}`)}</strong>
+          <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
+        </div>
+        <button class="skipped-row-dismiss" type="button" data-dismiss-skipped title="移除此列">×</button>
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="skipped-rows-section">
+      <strong>未解析的列（${crops.length} 列）</strong>
+      ${items}
+    </div>
+  `;
+}
+
 function renderRowCropDiagnostics(rowCrops, skippedRowCrops = []) {
   const unique = [];
   const seen = new Set();
-  for (const crop of [...(rowCrops || []), ...(skippedRowCrops || [])]) {
+  for (const crop of (rowCrops || [])) {
     const key = crop?.key || crop?.dataUrl;
     if (!crop?.dataUrl || seen.has(key)) continue;
     seen.add(key);
@@ -4110,7 +4138,7 @@ function renderCloudSnapshot() {
     const firstBuyDates = loadFirstBuyDates();
     const rows = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
-      const price = quote?.price ?? null;
+      const price = typeof quote === 'number' ? quote : (quote?.price ?? null);
       const avgCost = Number(row.avgCost || 0);
       const returnRate = (price !== null && avgCost > 0)
         ? ((price - avgCost) / avgCost * 100)
@@ -4167,9 +4195,14 @@ function renderCloudSnapshot() {
   const validDashboardTabs = new Set(["home", "holdings", "capture"]);
   if (!validDashboardTabs.has(state.dashboardTab)) state.dashboardTab = "home";
   const performanceRows = positions
-    .filter((p) => p.avgCost > 0 && state.quotes[p.symbol] > 0)
+    .filter((p) => {
+      const q = state.quotes[p.symbol];
+      const price = typeof q === 'number' ? q : (q?.price ?? null);
+      return p.avgCost > 0 && price !== null && price > 0;
+    })
     .map((p) => {
-      const price = state.quotes[p.symbol];
+      const q = state.quotes[p.symbol];
+      const price = typeof q === 'number' ? q : (q?.price ?? 0);
       const rate = (price - p.avgCost) / p.avgCost * 100;
       return { symbol: p.symbol, name: p.name, rate };
     })
@@ -4247,12 +4280,12 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>刪除快照</h3>
+        <h3>刪除當日庫存紀錄</h3>
       </div>
       <div class="snapshot-delete-row">
         <input type="date" id="home-delete-snapshot-date">
         <select id="home-delete-snapshot-market">
-          <option value="all">台股+美股</option>
+          <option value="all" selected>台股+美股</option>
           <option value="TW">台股</option>
           <option value="US">美股</option>
         </select>
@@ -4262,17 +4295,6 @@ function renderCloudSnapshot() {
     </section>
   `;
   const holdingsContent = `
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>每日庫存總覽</h3>
-        <span>最近 ${history.length} 次雲端快照，依市場分開</span>
-      </div>
-      ${dailyRowsByMarket || "<p class=\"muted-text\">尚無歷史快照。</p>"}
-      <div class="snapshot-actions">
-        <button id="cleanup-duplicates" class="button secondary compact" type="button">清理重複</button>
-      </div>
-    </section>
-
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>目前明細</h3>
@@ -4799,6 +4821,11 @@ function bindEvents() {
   els.backupInput.addEventListener("change", (event) => importBackup(event.target.files[0]));
   els.openCapture?.addEventListener("click", openCapturePanel);
   els.closeCapture?.addEventListener("click", closeCapturePanel);
+  els.capturePanel?.addEventListener("click", (e) => {
+    if (e.target.matches("[data-dismiss-skipped]")) {
+      e.target.closest(".skipped-row-item")?.remove();
+    }
+  });
   els.dropZone.addEventListener("click", () => els.fileInput.click());
   els.dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
