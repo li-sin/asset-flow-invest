@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.17.0";
+const APP_VERSION = "v0.17.1";
 const APP_VERSION_NOTE = "趨勢圖修正；損益率排名修正；刪除當日庫存紀錄；移除每日總覽；未解析列顯示；手機版布局";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3527,7 +3527,9 @@ async function fetchQuotes(symbols, retryCount = 0) {
     const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
     const data = await res.json();
     if (data?.quotes) {
-      Object.assign(state.quotes, data.quotes);
+      for (const [k, v] of Object.entries(data.quotes)) {
+        state.quotes[k.replace(/\.TW$/i, "")] = v;
+      }
       renderCloudSnapshot();
     } else if (retryCount < 2) {
       setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
