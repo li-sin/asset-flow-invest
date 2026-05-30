@@ -2036,6 +2036,27 @@ textarea {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
+/* 損益率排名 grid（前三名/倒數三名並排） */
+.perf-rank-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+/* perf rank 專用 table（不帶 min-width 1040px） */
+.perf-rank-table {
+  min-width: 0 !important;
+}
+
+/* 損益率欄右對齊 + 等寬數字 */
+.perf-rate-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 56px;
+}
+
 /* A1: 水位更新圖案按鈕 */
 .icon-btn {
   font-size: 17px;

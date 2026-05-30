@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.20.0";
-const APP_VERSION_NOTE = "優化：水位↺圖案；損益率排名對齊；B tab 筆按鈕edit mode（含股數/均價編輯）；C tab 截圖管理列表";
+const APP_VERSION = "v0.20.1";
+const APP_VERSION_NOTE = "修正：截圖標題 template bug；損益率排名欄不顯示；重複代號去重+名稱自動補查";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -675,7 +675,7 @@ async function saveEntry(event) {
     market: els.market.value,
     kind: els.kind.value,
     status: "reviewed",
-    title: `\${els.market.value || "截圖"} \${els.date.value || today()}`,
+    title: `${els.market.value || "截圖"} ${els.date.value || today()}`,
     text: els.text.value.trim(),
     note: els.note.value.trim(),
     parsedRows: parseHoldings(els.text.value.trim()),
@@ -730,7 +730,7 @@ function buildEntry() {
     market: els.market.value,
     kind: els.kind.value,
     status: "reviewed",
-    title: `\${els.market.value || "截圖"} \${els.date.value || today()}`,
+    title: `${els.market.value || "截圖"} ${els.date.value || today()}`,
     text: els.text.value.trim(),
     note: els.note.value.trim(),
     parsedRows: parseHoldings(els.text.value.trim()),
@@ -2918,7 +2918,20 @@ async function ensureCloudSheetTables() {
 }
 
 function validSnapshotRows(rows) {
-  return (rows || []).filter((row) => row?.symbol && row?.shares !== null && row?.shares !== undefined && row?.avgCost !== null && row?.avgCost !== undefined);
+  const seen = new Map();
+  const filtered = (rows || []).filter((row) =>
+    row?.symbol &&
+    row?.shares !== null && row?.shares !== undefined &&
+    row?.avgCost !== null && row?.avgCost !== undefined
+  );
+  // 同代號取最後一筆（分數最完整的）；空名稱從 SYMBOL_NAMES 補查
+  for (const row of filtered) {
+    seen.set(row.symbol, {
+      ...row,
+      name: row.name || SYMBOL_NAMES[row.symbol] || row.name || "",
+    });
+  }
+  return [...seen.values()];
 }
 
 function snapshotId(createdAt = new Date().toISOString()) {
@@ -4426,8 +4439,8 @@ function renderCloudSnapshot() {
     .sort((a, b) => b.rate - a.rate);
   const top3 = performanceRows.slice(0, 3);
   const bottom3 = performanceRows.slice(-3).reverse();
-  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td style="text-align:right;font-variant-numeric:tabular-nums;min-width:60px;color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
-  const perfTable = (rows) => rows.length ? `<table class="parsed-table"><thead><tr><th>代號</th><th>名稱</th><th>損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table>` : '<p class="muted-text">尚無報價資料。</p>';
+  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
+  const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
     <div class="metric-grid">
       <div class="metric">
