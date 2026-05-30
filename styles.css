@@ -344,6 +344,8 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .metric {
@@ -1178,7 +1180,23 @@ textarea {
   flex-shrink: 0;
 }
 
-.skipped-row-info { flex: 1; }
+.skipped-row-info { flex: 1; min-width: 0; }
+
+.skipped-row-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.skipped-row-inputs .cell-input[type="text"] {
+  width: 90px;
+}
+
+.skipped-row-inputs .cell-input[type="number"] {
+  width: 80px;
+}
 
 .skipped-row-dismiss {
   background: none;

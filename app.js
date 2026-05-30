@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.17.1";
+const APP_VERSION = "v0.17.2";
 const APP_VERSION_NOTE = "趨勢圖修正；損益率排名修正；刪除當日庫存紀錄；移除每日總覽；未解析列顯示；手機版布局";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -2420,6 +2420,13 @@ function renderSkippedRowCrops(skippedRowCrops) {
         <div class="skipped-row-info">
           <strong>${escapeHtml(crop.label || `列 ${i + 1}`)}</strong>
           <small>${escapeHtml(text || "OCR 沒辨識到文字")}</small>
+          <div class="skipped-row-inputs">
+            <input class="cell-input" type="text" placeholder="代號*" data-skipped-symbol autocomplete="off">
+            <input class="cell-input" type="text" placeholder="名稱" data-skipped-name autocomplete="off">
+            <input class="cell-input" type="number" placeholder="股數*" step="0.001" min="0" data-skipped-shares>
+            <input class="cell-input" type="number" placeholder="均價" step="0.001" min="0" data-skipped-avgcost>
+            <button class="button secondary compact" type="button" data-add-skipped>加入草稿</button>
+          </div>
         </div>
         <button class="skipped-row-dismiss" type="button" data-dismiss-skipped title="移除此列">×</button>
       </div>
@@ -4826,6 +4833,47 @@ function bindEvents() {
   els.capturePanel?.addEventListener("click", (e) => {
     if (e.target.matches("[data-dismiss-skipped]")) {
       e.target.closest(".skipped-row-item")?.remove();
+    }
+    if (e.target.matches("[data-add-skipped]")) {
+      const item = e.target.closest(".skipped-row-item");
+      if (!item) return;
+      const symbol = (item.querySelector("[data-skipped-symbol]")?.value || "").trim().toUpperCase();
+      const name = (item.querySelector("[data-skipped-name]")?.value || "").trim();
+      const shares = parseFloat(item.querySelector("[data-skipped-shares]")?.value || "");
+      const avgCost = parseFloat(item.querySelector("[data-skipped-avgcost]")?.value || "");
+      if (!symbol) { alert("請填入代號"); return; }
+      if (!Number.isFinite(shares) || shares <= 0) { alert("請填入有效股數"); return; }
+      if (!state.draftEditedRows) state.draftEditedRows = [];
+      state.draftEditedRows.push({ symbol, name, shares, avgCost: Number.isFinite(avgCost) ? avgCost : 0 });
+      const newIndex = state.draftEditedRows.length - 1;
+      const tbody = els.parsePreview?.querySelector(".parsed-table tbody");
+      if (tbody) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td></td>
+          <td><input class="cell-input" data-draft-symbol="${newIndex}" type="text" value="${escapeHtml(symbol)}" placeholder="代號"></td>
+          <td><input class="cell-input" data-draft-name="${newIndex}" type="text" value="${escapeHtml(name)}" placeholder="名稱"></td>
+          <td><input class="cell-input" data-draft-kind="${newIndex}" type="text" value="" placeholder="種類"></td>
+          <td><input class="cell-input" data-draft-shares="${newIndex}" type="number" step="0.001" value="${shares}"></td>
+          <td><input class="cell-input" data-draft-avgcost="${newIndex}" type="number" step="0.001" value="${Number.isFinite(avgCost) ? avgCost : ""}"></td>
+          <td></td>
+          <td class="raw-cell"></td>
+        `;
+        tr.querySelector("[data-draft-symbol]")?.addEventListener("input", (ev) => {
+          if (state.draftEditedRows?.[newIndex]) state.draftEditedRows[newIndex].symbol = ev.target.value.trim().toUpperCase();
+        });
+        tr.querySelector("[data-draft-name]")?.addEventListener("input", (ev) => {
+          if (state.draftEditedRows?.[newIndex]) state.draftEditedRows[newIndex].name = ev.target.value.trim();
+        });
+        tr.querySelector("[data-draft-shares]")?.addEventListener("input", (ev) => {
+          if (state.draftEditedRows?.[newIndex]) state.draftEditedRows[newIndex].shares = Number(ev.target.value) || 0;
+        });
+        tr.querySelector("[data-draft-avgcost]")?.addEventListener("input", (ev) => {
+          if (state.draftEditedRows?.[newIndex]) state.draftEditedRows[newIndex].avgCost = Number(ev.target.value) || 0;
+        });
+        tbody.appendChild(tr);
+      }
+      item.remove();
     }
   });
   els.dropZone.addEventListener("click", () => els.fileInput.click());
