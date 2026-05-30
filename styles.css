@@ -1184,6 +1184,16 @@ textarea {
   overflow: hidden;
 }
 
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sortable-th:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
 .first-buy-cell {
   white-space: nowrap;
   vertical-align: middle;
@@ -1937,6 +1947,77 @@ textarea {
     max-width: 100%;
     height: auto;
   }
+}
+
+.snap-calendar {
+  margin-top: 10px;
+}
+
+.snap-cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.snap-cal-month {
+  flex: 1;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.snap-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.snap-cal-weekday {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.snap-cal-empty {
+  /* empty cell */
+}
+
+.snap-cal-day {
+  position: relative;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 2px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+  color: var(--ink);
+}
+
+.snap-cal-day:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.snap-cal-day.has-snap::after {
+  content: '';
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  margin: 2px auto 0;
+}
+
+.snap-cal-day.selected {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+
+.snap-cal-day.selected::after {
+  background: #fff;
 }
 
 .chart-tooltip {

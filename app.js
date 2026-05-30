@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.18.1";
-const APP_VERSION_NOTE = "首次布局日存 Sheet；首頁水位更新按鈕 + 上次記錄顯示";
+const APP_VERSION = "v0.19.0";
+const APP_VERSION_NOTE = "明細排序；損益率趨勢折線圖 + B tab delta；刪除快照改日曆 highlight";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -70,6 +70,8 @@ const state = {
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
   firstBuyDates: loadFirstBuyDates(),
+  detailSort: { key: "symbol", dir: "asc" },
+  homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
   quotes: {},
   auth: {
     signedIn: false,
@@ -3997,6 +3999,60 @@ function renderSnapshotTrendChart(cloudHistory) {
   return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
 }
 
+function renderPerfRateTrendChart(cloudHistory, quotes) {
+  const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)));
+  const positions = cloudHistory?.positions || [];
+  if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
+  const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
+  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const series = ["TW", "US"].map((market) => {
+    const pts = dates.map((d, i) => {
+      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      if (!snap) return null;
+      const mktPos = positions.filter((p) => p.snapshotId === snap.snapshotId && Number(p.avgCost) > 0);
+      if (!mktPos.length) return null;
+      const rates = mktPos.map((p) => {
+        const q = quotes[p.symbol];
+        const price = typeof q === "number" ? q : (q?.price ?? null);
+        if (price === null || price <= 0) return null;
+        return (price - Number(p.avgCost)) / Number(p.avgCost) * 100;
+      }).filter((r) => r !== null);
+      if (!rates.length) return null;
+      const avg = rates.reduce((s, v) => s + v, 0) / rates.length;
+      return { i, v: Math.round(avg * 10) / 10 };
+    }).filter(Boolean);
+    return { market, pts, color: colors[market] };
+  });
+  if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算趨勢。</p>";
+  const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
+}
+
+function renderSnapCalendar(year, month, selectedDate, snapshotDates) {
+  const monthLabel = `${year}年${month + 1}月`;
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+  const headers = weekDays.map((d) => `<span class="snap-cal-weekday">${d}</span>`).join("");
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push('<span class="snap-cal-empty"></span>');
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const cls = ["snap-cal-day", snapshotDates.has(dateStr) ? "has-snap" : "", selectedDate === dateStr ? "selected" : ""].filter(Boolean).join(" ");
+    cells.push(`<button class="${cls}" type="button" data-cal-date="${dateStr}">${d}</button>`);
+  }
+  return `
+    <div class="snap-calendar">
+      <div class="snap-cal-nav">
+        <button class="button compact secondary snap-cal-prev" type="button">◀</button>
+        <span class="snap-cal-month">${escapeHtml(monthLabel)}</span>
+        <button class="button compact secondary snap-cal-next" type="button">▶</button>
+      </div>
+      <div class="snap-cal-grid">${headers}${cells.join("")}</div>
+    </div>
+  `;
+}
+
 function renderLayoutSharesChart(cloudHistory) {
   const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
@@ -4203,20 +4259,62 @@ function renderCloudSnapshot() {
     `;
   }).join("");
   const marketDetailSections = marketSummaries.map((item) => {
-    const rows = item.rows.map((row) => {
+    // 上一筆快照（同市場）用來計算損益率 delta
+    const mktSnaps = (state.cloudHistory.snapshots || [])
+      .filter((s) => normalizeMarketKey(s.market) === item.market)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const curSnapIdx = mktSnaps.findIndex((s) => s.snapshotId === state.cloudSnapshot?.snapshot?.snapshotId);
+    const prevSnap = curSnapIdx >= 0 ? mktSnaps[curSnapIdx + 1] : null;
+    const prevPositions = prevSnap
+      ? (state.cloudHistory.positions || []).filter((p) => p.snapshotId === prevSnap.snapshotId)
+      : [];
+    // 1. 計算每列數值
+    const augmented = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
       const price = typeof quote === 'number' ? quote : (quote?.price ?? null);
       const avgCost = Number(row.avgCost || 0);
-      const returnRate = (price !== null && avgCost > 0)
-        ? ((price - avgCost) / avgCost * 100)
-        : null;
+      const returnRate = (price !== null && avgCost > 0) ? ((price - avgCost) / avgCost * 100) : null;
       const days = holdingDays(item.market, row.symbol);
       const perfRate = (returnRate !== null && days) ? returnRate / days : null;
-      const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
-      const rateDisplay = returnRate !== null
-        ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%${perfRate !== null ? `<br><small>${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}%/日</small>` : ''}</span>`
-        : "<span class=\"muted-text\">—</span>";
       const firstBuyVal = state.firstBuyDates[`${item.market}_${row.symbol}`] || '';
+      const prevPos = prevPositions.find((p) => p.symbol === row.symbol);
+      const prevAvgCost = prevPos ? Number(prevPos.avgCost || 0) : null;
+      const prevRate = (price !== null && prevAvgCost && prevAvgCost > 0)
+        ? ((price - prevAvgCost) / prevAvgCost * 100)
+        : null;
+      const rateDelta = (returnRate !== null && prevRate !== null) ? returnRate - prevRate : null;
+      return { row, price, avgCost, returnRate, perfRate, firstBuyVal, rateDelta };
+    });
+    // 2. 排序
+    const { key: sKey, dir: sDir } = state.detailSort;
+    augmented.sort((a, b) => {
+      let va, vb;
+      switch (sKey) {
+        case "symbol":   va = a.row.symbol;    vb = b.row.symbol;    break;
+        case "name":     va = a.row.name;      vb = b.row.name;      break;
+        case "shares":   va = a.row.shares;    vb = b.row.shares;    break;
+        case "avgCost":  va = a.avgCost;       vb = b.avgCost;       break;
+        case "price":    va = a.price;         vb = b.price;         break;
+        case "rate":     va = a.returnRate;    vb = b.returnRate;    break;
+        case "cost":     va = a.row.cost;      vb = b.row.cost;      break;
+        case "firstBuy": va = a.firstBuyVal;   vb = b.firstBuyVal;   break;
+        default:         va = a.row.symbol;    vb = b.row.symbol;
+      }
+      if (va == null || va === '') return 1;
+      if (vb == null || vb === '') return -1;
+      const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+      return sDir === 'asc' ? cmp : -cmp;
+    });
+    // 3. Render
+    const sortArrow = (key) => state.detailSort.key === key ? (state.detailSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    const rows = augmented.map(({ row, price, returnRate, perfRate, firstBuyVal, rateDelta }) => {
+      const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
+      const deltaSpan = rateDelta !== null
+        ? `<br><small style="color:${rateDelta >= 0 ? 'var(--green)' : 'var(--red)'}">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
+        : '';
+      const rateDisplay = returnRate !== null
+        ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%${perfRate !== null ? `<br><small>${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}%/日</small>` : ''}${deltaSpan}</span>`
+        : "<span class=\"muted-text\">—</span>";
       const firstBuyCell = firstBuyVal
         ? `<span class="first-buy-date">${escapeHtml(firstBuyVal)}</span>
            <button class="button compact secondary first-buy-edit-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}" data-current="${escapeHtml(firstBuyVal)}">修改</button>`
@@ -4248,14 +4346,14 @@ function renderCloudSnapshot() {
           <table class="parsed-table">
             <thead>
               <tr>
-                <th>代號</th>
-                <th>名稱</th>
-                <th>股數</th>
-                <th>成交均價</th>
-                <th>現價</th>
-                <th>損益率 / 表現率</th>
-                <th>估算成本</th>
-                <th>首次布局日</th>
+                <th class="sortable-th" data-sort-key="symbol">代號${sortArrow("symbol")}</th>
+                <th class="sortable-th" data-sort-key="name">名稱${sortArrow("name")}</th>
+                <th class="sortable-th" data-sort-key="shares">股數${sortArrow("shares")}</th>
+                <th class="sortable-th" data-sort-key="avgCost">成交均價${sortArrow("avgCost")}</th>
+                <th class="sortable-th" data-sort-key="price">現價${sortArrow("price")}</th>
+                <th class="sortable-th" data-sort-key="rate">損益率 / 表現率${sortArrow("rate")}</th>
+                <th class="sortable-th" data-sort-key="cost">估算成本${sortArrow("cost")}</th>
+                <th class="sortable-th" data-sort-key="firstBuy">首次布局日${sortArrow("firstBuy")}</th>
               </tr>
             </thead>
             <tbody>${rows || "<tr><td colspan=\"8\">沒有庫存</td></tr>"}</tbody>
@@ -4336,7 +4434,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益率排名</h3>
-        <span>依（現價－均價）/ 均價排序，未來加入首次布局日後升級為表現率</span>
+        <span>依（現價－均價）/ 均價；有首次布局日者另顯示表現率</span>
       </div>
       <div class="perf-rank-grid">
         <div>
@@ -4352,10 +4450,25 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>刪除當日庫存紀錄</h3>
+        <h3>損益率趨勢</h3>
+        <span>各市場整體平均損益率（依各快照均價 × 現價估算，單位 %）</span>
       </div>
-      <div class="snapshot-delete-row">
-        <input type="date" id="home-delete-snapshot-date">
+      <div class="trend-chart">${renderPerfRateTrendChart(state.cloudHistory, state.quotes)}</div>
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>刪除當日庫存紀錄</h3>
+        <span>點選有庫存的日期（圓點標示）後刪除</span>
+      </div>
+      ${renderSnapCalendar(
+        state.homeCalendar.year,
+        state.homeCalendar.month,
+        state.homeCalendar.selectedDate,
+        new Set((state.cloudHistory.snapshots || []).map((s) => s.date || "").filter(Boolean))
+      )}
+      <input type="hidden" id="home-delete-snapshot-date" value="${escapeHtml(state.homeCalendar.selectedDate)}">
+      <div class="snapshot-delete-row" style="margin-top:10px">
         <select id="home-delete-snapshot-market">
           <option value="all" selected>台股+美股</option>
           <option value="TW">台股</option>
@@ -4363,7 +4476,7 @@ function renderCloudSnapshot() {
         </select>
         <button id="home-delete-cloud-snapshot" class="button danger compact" type="button">刪除</button>
       </div>
-      <p id="home-delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText("", "all"))}</p>
+      <p id="home-delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText(state.homeCalendar.selectedDate, "all"))}</p>
     </section>
   `;
   const holdingsContent = `
@@ -4438,16 +4551,37 @@ function renderCloudSnapshot() {
   deleteDate?.addEventListener("change", updateDeletePreview);
   deleteMarket?.addEventListener("change", updateDeletePreview);
   els.cloudSnapshot.querySelector("#delete-cloud-snapshot")?.addEventListener("click", deleteSelectedCloudSnapshots);
-  const homeDeleteDate = els.cloudSnapshot.querySelector("#home-delete-snapshot-date");
   const homeDeleteMarket = els.cloudSnapshot.querySelector("#home-delete-snapshot-market");
   const homeDeletePreview = els.cloudSnapshot.querySelector("#home-delete-snapshot-preview");
   const updateHomeDeletePreview = () => {
-    if (!homeDeletePreview || !homeDeleteDate || !homeDeleteMarket) return;
-    homeDeletePreview.textContent = snapshotDeletePreviewText(homeDeleteDate.value, homeDeleteMarket.value);
+    if (!homeDeletePreview || !homeDeleteMarket) return;
+    homeDeletePreview.textContent = snapshotDeletePreviewText(state.homeCalendar.selectedDate, homeDeleteMarket.value);
   };
-  homeDeleteDate?.addEventListener("change", updateHomeDeletePreview);
   homeDeleteMarket?.addEventListener("change", updateHomeDeletePreview);
   els.cloudSnapshot.querySelector("#home-delete-cloud-snapshot")?.addEventListener("click", () => deleteSelectedCloudSnapshots({ buttonId: "home-delete-cloud-snapshot", dateId: "home-delete-snapshot-date", marketId: "home-delete-snapshot-market" }));
+  els.cloudSnapshot.querySelector(".snap-cal-prev")?.addEventListener("click", () => {
+    let { year, month, selectedDate } = state.homeCalendar;
+    month--; if (month < 0) { month = 11; year--; }
+    state.homeCalendar = { year, month, selectedDate };
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelector(".snap-cal-next")?.addEventListener("click", () => {
+    let { year, month, selectedDate } = state.homeCalendar;
+    month++; if (month > 11) { month = 0; year++; }
+    state.homeCalendar = { year, month, selectedDate };
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelectorAll(".snap-cal-day").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.homeCalendar.selectedDate = btn.dataset.calDate;
+      renderCloudSnapshot();
+      const preview = els.cloudSnapshot.querySelector("#home-delete-snapshot-preview");
+      const market = els.cloudSnapshot.querySelector("#home-delete-snapshot-market");
+      if (preview && market) {
+        preview.textContent = snapshotDeletePreviewText(state.homeCalendar.selectedDate, market.value);
+      }
+    });
+  });
   els.cloudSnapshot.querySelectorAll(".level-update-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const market = btn.dataset.targetLevelMarket;
@@ -4538,6 +4672,18 @@ function renderCloudSnapshot() {
       cell.querySelector(".first-buy-cancel-btn").addEventListener("click", () => {
         renderCloudSnapshot();
       });
+    });
+  });
+  els.cloudSnapshot.querySelectorAll(".sortable-th[data-sort-key]").forEach((th) => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const key = th.dataset.sortKey;
+      if (state.detailSort.key === key) {
+        state.detailSort.dir = state.detailSort.dir === "asc" ? "desc" : "asc";
+      } else {
+        state.detailSort = { key, dir: "asc" };
+      }
+      renderCloudSnapshot();
     });
   });
   renderSummaryLine();
