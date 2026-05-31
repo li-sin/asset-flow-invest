@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.5";
+const APP_VERSION = "v0.22.6";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3726,8 +3726,9 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     renderCloudSnapshot();
     renderSummaryLine();
     if (showAlert) alert(`已讀取雲端庫存：${latestPositions.length} 筆`);
-    const symbols = [...new Set(latestPositions.map((p) => p.symbol).filter(Boolean))];
-    fetchQuotes(symbols);
+    // 所有歷史快照的代號都要抓報價（趨勢圖需要用今日報價算各期損益率）
+    const allSymbols = [...new Set(positions.map((p) => p.symbol).filter(Boolean))];
+    fetchQuotes(allSymbols);
   } catch (error) {
     console.error(error);
     state.cloudLoading = false;
@@ -4157,7 +4158,9 @@ function renderSnapshotTrendChart(cloudHistory) {
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
   const series = ["TW", "US"].map((market) => {
     const pts = dates.map((d, i) => {
-      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      // 同日多個快照取最新
+      const snapsForDate = snapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      const snap = snapsForDate[snapsForDate.length - 1];
       if (!snap) return null;
       const total = positions.filter((p) => p.snapshotId === snap.snapshotId).reduce((sum, p) => sum + Number(p.shares || 0), 0);
       return total > 0 ? { i, v: total } : null;
@@ -4176,7 +4179,9 @@ function renderPerfRateTrendChart(cloudHistory, quotes) {
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
   const series = ["TW", "US"].map((market) => {
     const pts = dates.map((d, i) => {
-      const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      // 同一天可能有多個快照（舊的錯的 + 新的修正的）→ 取最新那個（sort ascending，所以取最後一個）
+      const snapsForDate = snapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
+      const snap = snapsForDate[snapsForDate.length - 1];
       if (!snap) return null;
       const mktPos = positions.filter((p) => p.snapshotId === snap.snapshotId && Number(p.avgCost) > 0);
       if (!mktPos.length) return null;
