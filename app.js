@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.7";
+const APP_VERSION = "v0.22.8";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -412,9 +412,14 @@ async function cleanupZeroPositions() {
 
 async function savePositionEdits(market, symbol, shares, avgCost) {
   if (!state.auth.authorized) { alert("請先登入"); return; }
-  const latestSnap = (state.cloudHistory?.snapshots || [])
+  // 使用 B tab 當前選擇的日期（selectedSnapshotDate），不寫死最新快照
+  const mktSnaps = (state.cloudHistory?.snapshots || [])
     .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(market))
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const selectedDate = state.selectedSnapshotDate;
+  const latestSnap = selectedDate
+    ? (mktSnaps.find((s) => s.date === selectedDate) || mktSnaps[0])
+    : mktSnaps[0];
   if (!latestSnap) { alert("找不到對應快照"); return; }
   try {
     await ensureCloudSheetTables();
