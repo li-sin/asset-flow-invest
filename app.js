@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.23.5";
-const APP_VERSION_NOTE = "損益趨勢加日期範圍過濾（1M/3M/ALL）；移除歷史建議水位 metric";
+const APP_VERSION = "v0.23.6";
+const APP_VERSION_NOTE = "損益趨勢改時間比例 x 軸，解決多快照擠壓問題";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4214,7 +4214,7 @@ function renderSnapshotTrendChart(cloudHistory, quotes) {
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
   const series = ["TW", "US"].map((market) => {
-    const pts = dates.map((d, i) => {
+    const pts = dates.map((d) => {
       // 同日多個快照取最新
       const snapsForDate = snapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
       const snap = snapsForDate[snapsForDate.length - 1];
@@ -4232,7 +4232,7 @@ function renderSnapshotTrendChart(cloudHistory, quotes) {
         totalPL += (price - avgCost) * shares;
         hasQuote = true;
       }
-      return hasQuote ? { i, v: Math.round(totalPL) } : null;
+      return hasQuote ? { d, v: Math.round(totalPL) } : null;
     }).filter(Boolean);
     return { market, pts, color: colors[market] };
   });
@@ -4241,7 +4241,54 @@ function renderSnapshotTrendChart(cloudHistory, quotes) {
   const rangeBtns = ["1M", "3M", "ALL"].map((r) =>
     `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-pl-trend-range="${r}">${r}</button>`
   ).join("");
-  return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-chart-legend">${legend}</div><div class="level-range-btns">${rangeBtns}</div></div>${renderSharesSvg(series, dates, colors)}`;
+  return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-chart-legend">${legend}</div><div class="level-range-btns">${rangeBtns}</div></div>${renderTimedSvg(series, dates)}`;
+}
+
+// 時間比例 x 軸 SVG — x 位置依實際日期比例計算，避免多日期等距擠壓
+function renderTimedSvg(series, dates, W = 600, H = 140) {
+  if (!dates.length) return "<p class=\"muted-text\">尚無資料。</p>";
+  const PL = 52; const PR = 8; const PT = 8; const PB = 24;
+  const cW = W - PL - PR; const cH = H - PT - PB;
+  const minMs = new Date(dates[0]).getTime();
+  const maxMs = new Date(dates[dates.length - 1]).getTime();
+  const msRange = maxMs - minMs || 1;
+  const xPos = (d) => PL + ((new Date(d).getTime() - minMs) / msRange) * cW;
+  const allVals = series.flatMap((s) => s.pts.map((p) => p.v));
+  if (!allVals.length) return "<p class=\"muted-text\">尚無資料。</p>";
+  const rawMin = Math.min(...allVals); const rawMax = Math.max(...allVals);
+  const vRange = rawMax - rawMin || 1;
+  const minV = rawMin >= 0 ? Math.max(0, rawMin - vRange * 0.2) : rawMin - vRange * 0.1;
+  const maxV = rawMax + vRange * 0.1;
+  const yPos = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
+  // Y 軸格線
+  const yStep = Math.abs(maxV) > 500000 ? 100000 : Math.abs(maxV) > 50000 ? 10000 : Math.abs(maxV) > 5000 ? 1000 : Math.abs(maxV) > 500 ? 100 : 50;
+  const yLines = [];
+  for (let v = Math.floor(minV / yStep) * yStep; v <= maxV + yStep; v += yStep) {
+    const y = yPos(v); if (y < PT - 2 || y > H - PB + 2) continue;
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    const lbl = Math.abs(v) >= 10000 ? `${Math.round(v / 1000)}k` : v;
+    yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${lbl}</text>`);
+  }
+  if (minV < 0) {
+    const y0 = yPos(0); if (y0 >= PT && y0 <= H - PB)
+      yLines.push(`<line x1="${PL}" y1="${y0}" x2="${W - PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>`);
+  }
+  // X 軸標籤：最多 6 個，均勻取樣
+  const maxLabels = 6;
+  const labelStep = Math.max(1, Math.floor(dates.length / maxLabels));
+  const xLabels = dates.map((d, i) => {
+    if (i % labelStep !== 0 && i !== dates.length - 1) return "";
+    return `<text x="${xPos(d)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
+  }).join("");
+  // 折線與圓點
+  const svgLines = series.map(({ pts, color }) => {
+    if (!pts.length) return "";
+    const sorted = [...pts].sort((a, b) => a.d.localeCompare(b.d));
+    const polyline = `<polyline points="${sorted.map((p) => `${xPos(p.d)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+    const dots = sorted.map((p) => `<circle cx="${xPos(p.d)}" cy="${yPos(p.v)}" r="2.5" fill="${color}" data-tooltip="${p.d} ${p.v.toLocaleString()}"><title>${p.d} ${p.v.toLocaleString()}</title></circle>`).join("");
+    return polyline + dots;
+  }).join("");
+  return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
 function renderPerfRateTrendChart(cloudHistory, quotes) {
