@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.5";
-const APP_VERSION_NOTE = "修正散點圖金額 Y 軸格線爆炸：改 nice step 演算法";
+const APP_VERSION = "v0.24.6";
+const APP_VERSION_NOTE = "散點圖加持有天數窗口過濾按鈕（≤90/180/365天）";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -70,6 +70,8 @@ const state = {
   plTrendRange: "1M",
   scatterRateCap: null,
   scatterAmountCap: null,
+  scatterRateDaysCap: null,
+  scatterAmountDaysCap: null,
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
   firstBuyDates: loadFirstBuyDates(),
@@ -4357,16 +4359,19 @@ function renderPLContributionChart(positions, quotes) {
   return `<div style="padding:4px 0">${rows}</div>`;
 }
 
-// ── 共用：散點圖 SVG 渲染（支援 Y 軸上限裁切）──────────────────────────────
-function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, W = 600, H = 200, PL = 44, PR = 20, PT = 16, PB = 30 }) {
+// ── 共用：散點圖 SVG 渲染（支援 Y 軸上限裁切 + X 軸天數窗口）──────────────
+function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, dayCapKey = null, dayCapOptions = [], W = 600, H = 200, PL = 44, PR = 20, PT = 16, PB = 30 }) {
   const cW = W - PL - PR, cH = H - PT - PB;
+  const dayCap = dayCapKey ? state[dayCapKey] : null;
+  const visItems = dayCap !== null ? items.filter(i => getX(i) <= dayCap) : items;
+  const effMaxX = dayCap !== null ? dayCap : maxX;
   const cap = state[capKey];  // null = 全部顯示
-  const allVals = items.map(getY);
+  const allVals = visItems.map(getY);
   const rawMin = Math.min(...allVals, 0), rawMax = Math.max(...allVals, 0);
   const effMax = cap !== null ? cap : rawMax;
   const vPad = (effMax - rawMin || 10) * 0.18;
   const minV = rawMin - vPad, maxV = effMax + vPad;
-  const xP = (v) => PL + (v / (maxX || 1)) * cW;
+  const xP = (v) => PL + (v / (effMaxX || 1)) * cW;
   const yP = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
   const y0 = yP(0);
   // Y 格線：動態 nice step，目標約 6 條格線，適用任意數值範圍
@@ -4384,7 +4389,7 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
   }
   const zeroLine = y0 >= PT && y0 <= H - PB
     ? `<line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4,3"/>` : "";
-  const xLabels = [0, Math.round(maxX/2), maxX].map((d) =>
+  const xLabels = [0, Math.round(effMaxX/2), effMaxX].map((d) =>
     `<text x="${xP(d)}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d}天</text>`).join("");
   // 裁切指示線
   const clipLine = cap !== null
@@ -4393,7 +4398,7 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
   // 碰撞迴避
   const CHAR_W = 5.5, LABEL_H = 11, LABEL_PAD_X = 3, LABEL_PAD_Y = 2;
   const placed = [];
-  const withLabel = [...items]
+  const withLabel = [...visItems]
     .sort((a, b) => xP(getX(a)) - xP(getX(b)))
     .map((item) => {
       const cx = xP(getX(item));
@@ -4429,13 +4434,24 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
     const active = state[capKey] === value;
     return `<button class="level-range-btn${active ? " is-active" : ""}" type="button" data-scatter-cap-key="${capKey}" data-scatter-cap-val="${value === null ? "null" : value}">${label}</button>`;
   }).join("");
+  // X 軸天數窗口按鈕
+  const dayCapBtns = (dayCapKey && dayCapOptions.length > 0)
+    ? dayCapOptions.map(({ label, value }) => {
+        const active = state[dayCapKey] === value;
+        return `<button class="level-range-btn${active ? " is-active" : ""}" type="button" data-scatter-days-key="${dayCapKey}" data-scatter-days-val="${value === null ? "null" : value}">${label}</button>`;
+      }).join("")
+    : "";
   const svg = `<div class="shares-chart-container" style="position:relative">
     <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
       ${yLines.join("")}${zeroLine}${clipLine}${xLabels}${dots}
       <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">Y ▲</text>
       <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>
     </svg></div>`;
-  return `<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><div class="level-range-btns">${capBtns}</div></div>${svg}`;
+  const btnRow = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <div class="level-range-btns">${dayCapBtns}</div>
+    <div class="level-range-btns">${capBtns}</div>
+  </div>`;
+  return `${btnRow}${svg}`;
 }
 
 // ── 損益率 vs 持有天數 散點圖 ────────────────────────────────────────────────
@@ -4461,8 +4477,13 @@ function renderScatterChart(positions, quotes, firstBuyDates) {
     { label: `≤${Math.round(maxRate * 0.35)}%`, value: Math.round(maxRate * 0.35) },
     { label: "≤30%", value: 30 },
   ].filter((o, i, arr) => i === 0 || o.value === null || o.value > 10);
+  const dayCapOptions = [
+    { label: "全部", value: null },
+    ...[90, 180, 365].filter(d => d < maxDays).map(d => ({ label: `≤${d}天`, value: d })),
+  ];
   return buildScatterSvg({
     items, maxX: maxDays, capKey: "scatterRateCap", capOptions, unitLabel: "%",
+    dayCapKey: "scatterRateDaysCap", dayCapOptions,
     getX: (i) => i.days, getY: (i) => i.rate,
     getColor: (i) => i.rate >= 0 ? "var(--green)" : "var(--red)",
     getTip: (i) => `${i.symbol} ${i.days}天 ${i.rate>=0?'+':''}${i.rate.toFixed(1)}%`,
@@ -4491,8 +4512,13 @@ function renderPLAmountScatterChart(positions, quotes, firstBuyDates) {
     { label: `≤${Math.round(maxPL * 0.6 / 1000)}k`, value: Math.round(maxPL * 0.6) },
     { label: `≤${Math.round(maxPL * 0.35 / 1000)}k`, value: Math.round(maxPL * 0.35) },
   ].filter((o) => o.value === null || o.value > 0);
+  const dayCapOptions = [
+    { label: "全部", value: null },
+    ...[90, 180, 365].filter(d => d < maxDays).map(d => ({ label: `≤${d}天`, value: d })),
+  ];
   return buildScatterSvg({
     items, maxX: maxDays, capKey: "scatterAmountCap", capOptions, unitLabel: "",
+    dayCapKey: "scatterAmountDaysCap", dayCapOptions,
     getX: (i) => i.days, getY: (i) => i.pl,
     getColor: (i) => i.pl >= 0 ? "var(--green)" : "var(--red)",
     getTip: (i) => `${i.symbol} ${i.days}天 ${i.pl>=0?'+':''}${Math.round(i.pl).toLocaleString()}`,
@@ -5286,6 +5312,14 @@ function renderCloudSnapshot() {
     btn.addEventListener("click", () => {
       const key = btn.dataset.scatterCapKey;
       const raw = btn.dataset.scatterCapVal;
+      state[key] = raw === "null" ? null : Number(raw);
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-scatter-days-key]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.scatterDaysKey;
+      const raw = btn.dataset.scatterDaysVal;
       state[key] = raw === "null" ? null : Number(raw);
       renderCloudSnapshot();
     });
