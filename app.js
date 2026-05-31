@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.8";
+const APP_VERSION = "v0.23.0";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4484,6 +4484,9 @@ function renderCloudSnapshot() {
       const returnRate = (price !== null && avgCost > 0) ? ((price - avgCost) / avgCost * 100) : null;
       const days = holdingDays(item.market, row.symbol);
       const perfRate = (returnRate !== null && days) ? returnRate / days : null;
+      const shares = Number(row.shares || 0);
+      const unrealizedPnl = (price !== null && avgCost > 0) ? ((price - avgCost) * shares) : null;
+      const dailyGain = (unrealizedPnl !== null && days) ? unrealizedPnl / days : null;
       const firstBuyVal = state.firstBuyDates[`${item.market}_${row.symbol}`] || '';
       const prevPos = prevPositions.find((p) => p.symbol === row.symbol);
       const prevAvgCost = prevPos ? Number(prevPos.avgCost || 0) : null;
@@ -4491,7 +4494,7 @@ function renderCloudSnapshot() {
         ? ((price - prevAvgCost) / prevAvgCost * 100)
         : null;
       const rateDelta = (returnRate !== null && prevRate !== null) ? returnRate - prevRate : null;
-      return { row, price, avgCost, returnRate, perfRate, firstBuyVal, rateDelta };
+      return { row, price, avgCost, returnRate, perfRate, dailyGain, firstBuyVal, rateDelta };
     });
     // 2. 排序
     const { key: sKey, dir: sDir } = state.detailSort;
@@ -4503,9 +4506,11 @@ function renderCloudSnapshot() {
         case "shares":   va = a.row.shares;    vb = b.row.shares;    break;
         case "avgCost":  va = a.avgCost;       vb = b.avgCost;       break;
         case "price":    va = a.price;         vb = b.price;         break;
-        case "rate":     va = a.returnRate;    vb = b.returnRate;    break;
-        case "cost":     va = a.row.cost;      vb = b.row.cost;      break;
-        case "firstBuy": va = a.firstBuyVal;   vb = b.firstBuyVal;   break;
+        case "rate":      va = a.returnRate;    vb = b.returnRate;    break;
+        case "perf":      va = a.perfRate;      vb = b.perfRate;      break;
+        case "dailyGain": va = a.dailyGain;     vb = b.dailyGain;     break;
+        case "cost":      va = a.row.cost;      vb = b.row.cost;      break;
+        case "firstBuy":  va = a.firstBuyVal;   vb = b.firstBuyVal;   break;
         default:         va = a.row.symbol;    vb = b.row.symbol;
       }
       if (va == null || va === '') return 1;
@@ -4515,13 +4520,21 @@ function renderCloudSnapshot() {
     });
     // 3. Render
     const sortArrow = (key) => state.detailSort.key === key ? (state.detailSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-    const rows = augmented.map(({ row, price, returnRate, perfRate, firstBuyVal, rateDelta }) => {
+    const rows = augmented.map(({ row, price, returnRate, perfRate, dailyGain, firstBuyVal, rateDelta }) => {
       const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
       const deltaSpan = rateDelta !== null
-        ? `<br><small style="color:${rateDelta >= 0 ? 'var(--green)' : 'var(--red)'}">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
+        ? `<small style="color:${rateDelta >= 0 ? 'var(--green)' : 'var(--red)'};display:block">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
         : '';
       const rateDisplay = returnRate !== null
-        ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%${perfRate !== null ? `<br><small>${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}%/日</small>` : ''}${deltaSpan}</span>`
+        ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%</span>${deltaSpan}`
+        : "<span class=\"muted-text\">—</span>";
+      const perfColor = perfRate !== null ? (perfRate >= 0 ? 'var(--green)' : 'var(--red)') : '';
+      const perfDisplay = perfRate !== null
+        ? `<span style="color:${perfColor};font-variant-numeric:tabular-nums">${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}</span>`
+        : "<span class=\"muted-text\">—</span>";
+      const gainColor = dailyGain !== null ? (dailyGain >= 0 ? 'var(--green)' : 'var(--red)') : '';
+      const dailyGainDisplay = dailyGain !== null
+        ? `<span style="color:${gainColor};font-variant-numeric:tabular-nums">${dailyGain >= 0 ? '+' : ''}${formatNumber(Math.round(dailyGain))}</span>`
         : "<span class=\"muted-text\">—</span>";
       const editMode = !!state.detailEditMode[item.market];
       const sharesCell = editMode
@@ -4547,6 +4560,8 @@ function renderCloudSnapshot() {
           <td>${avgCostCell}</td>
           <td>${priceCell}</td>
           <td>${rateDisplay}</td>
+          <td>${perfDisplay}</td>
+          <td>${dailyGainDisplay}</td>
           <td>${escapeHtml(formatMoney(row.cost))}</td>
           <td class="first-buy-cell">${firstBuyCell}</td>
         </tr>
@@ -4570,12 +4585,14 @@ function renderCloudSnapshot() {
                 <th class="sortable-th" data-sort-key="shares">股數${sortArrow("shares")}</th>
                 <th class="sortable-th" data-sort-key="avgCost">成交均價${sortArrow("avgCost")}</th>
                 <th class="sortable-th" data-sort-key="price">現價${sortArrow("price")}</th>
-                <th class="sortable-th" data-sort-key="rate">損益率 / 表現率${sortArrow("rate")}</th>
+                <th class="sortable-th" data-sort-key="rate">損益率${sortArrow("rate")}</th>
+                <th class="sortable-th" data-sort-key="perf">表現率（%/日）${sortArrow("perf")}</th>
+                <th class="sortable-th" data-sort-key="dailyGain">日均損益（元）${sortArrow("dailyGain")}</th>
                 <th class="sortable-th" data-sort-key="cost">估算成本${sortArrow("cost")}</th>
                 <th class="sortable-th" data-sort-key="firstBuy">首次布局日${sortArrow("firstBuy")} <button class="detail-edit-toggle${state.detailEditMode[item.market] ? ' active' : ''}" data-edit-market="${escapeHtml(item.market)}" title="${state.detailEditMode[item.market] ? '關閉編輯模式' : '開啟編輯（可修改股數、均價、布局日）'}">✎</button></th>
               </tr>
             </thead>
-            <tbody>${rows || "<tr><td colspan=\"8\">沒有庫存</td></tr>"}</tbody>
+            <tbody>${rows || "<tr><td colspan=\"10\">沒有庫存</td></tr>"}</tbody>
           </table>
         </div>
       </section>
