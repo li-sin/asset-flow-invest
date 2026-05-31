@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.0";
-const APP_VERSION_NOTE = "B tab 歷史快照日期選擇器 + 查看截圖；C tab 以日期顯示；同天同市場存檔詢問合併";
+const APP_VERSION = "v0.22.1";
+const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4590,6 +4590,9 @@ function renderCloudSnapshot() {
       <div class="trend-chart">${renderPerfRateTrendChart(state.cloudHistory, state.quotes)}</div>
     </section>
 
+
+  `;
+  const snapshotDeleteContent = `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>刪除當日庫存紀錄</h3>
@@ -4614,6 +4617,7 @@ function renderCloudSnapshot() {
     </section>
   `;
   const holdingsContent = `
+    ${snapshotDeleteContent}
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>庫存明細</h3>
