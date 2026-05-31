@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.23.2";
-const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
+const APP_VERSION = "v0.23.3";
+const APP_VERSION_NOTE = "A 首頁「損益趨勢」更名；個股走勢圖第一筆設為 basis（顯示 0）";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4308,6 +4308,7 @@ function renderSymbolSharesChart(symbol, cloudHistory) {
       const row = layoutRows.find((r) => r.date === d);
       return row ? { i, v: row.delta } : null;
     }).filter(Boolean);
+    if (pts.length > 0) pts[0] = { ...pts[0], v: 0 }; // 第一筆為 basis，不顯示原始庫存值
     if (pts.length) return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
   }
   const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -4710,7 +4711,7 @@ function renderCloudSnapshot() {
 
       <section class="dashboard-card">
         <div class="card-heading">
-          <h3>近幾次快照趨勢</h3>
+          <h3>損益趨勢</h3>
           <span>台股／美股總股數折線圖</span>
         </div>
         <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory)}</div>
