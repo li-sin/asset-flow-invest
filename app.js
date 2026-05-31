@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.21.1";
-const APP_VERSION_NOTE = "D1 清除截圖功能；移除標記已匯入；批量清舊截圖";
+const APP_VERSION = "v0.21.2";
+const APP_VERSION_NOTE = "修正：detail 頁「加入草稿」按鈕無效（事件未綁 detailContent）";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -790,6 +790,35 @@ function openDetail(id) {
   els.detailContent.querySelector('[data-action="mark-reviewed"]').addEventListener("click", () => updateStatus(id, "reviewed"));
   els.detailContent.querySelector('[data-action="clear-images"]')?.addEventListener("click", () => clearEntryImages(id));
   els.detailContent.querySelector('[data-action="save-cloud-snapshot"]').addEventListener("click", () => saveEntrySnapshotToGoogleSheet(id));
+  // detail 頁的「加入草稿」→ 加進 entry.parsedRows（非 draftEditedRows）
+  els.detailContent.addEventListener("click", async (e) => {
+    if (!e.target.matches("[data-add-skipped]")) return;
+    const item = e.target.closest(".skipped-row-item");
+    if (!item) return;
+    const symbol = (item.querySelector("[data-skipped-symbol]")?.value || "").trim().toUpperCase();
+    const name = (item.querySelector("[data-skipped-name]")?.value || "").trim();
+    const shares = parseFloat(item.querySelector("[data-skipped-shares]")?.value || "");
+    const avgCost = parseFloat(item.querySelector("[data-skipped-avgcost]")?.value || "");
+    if (!symbol) { alert("請填入代號"); return; }
+    if (!Number.isFinite(shares) || shares <= 0) { alert("請填入有效股數"); return; }
+    const entry = state.entries.find((item) => item.id === id);
+    if (!entry) return;
+    entry.parsedRows = entry.parsedRows || [];
+    entry.parsedRows.push({
+      symbol,
+      name: name || SYMBOL_NAMES[symbol] || "",
+      kind: "現股",
+      shares,
+      avgCost: Number.isFinite(avgCost) ? avgCost : 0,
+      manualSymbol: true,
+      manualShares: true,
+      manualAvgCost: true,
+    });
+    entry.updatedAt = new Date().toISOString();
+    await txStore("readwrite", (store) => store.put(entry));
+    render();
+    openDetail(id);
+  });
   els.detailContent.querySelector('[data-action="delete"]').addEventListener("click", () => deleteEntry(id));
   els.detailContent.querySelectorAll('[data-action="apply-row-fix"]').forEach((button) => {
     button.addEventListener("click", () => {
