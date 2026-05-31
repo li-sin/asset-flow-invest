@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.21.2";
-const APP_VERSION_NOTE = "修正：detail 頁「加入草稿」按鈕無效（事件未綁 detailContent）";
+const APP_VERSION = "v0.21.3";
+const APP_VERSION_NOTE = "修正：合併存雲端改只合「已確認」，不混入其他日期的已匯入資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3388,7 +3388,7 @@ function positionToSheetRow(row) {
 
 function mergeSnapshotEntries(entries) {
   const candidates = entries
-    .filter((entry) => entry.kind === "ark_position" && ["reviewed", "imported"].includes(entry.status))
+    .filter((entry) => entry.kind === "ark_position" && entry.status === "reviewed")
     .map((entry) => ({
       entry,
       rows: validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "")),
@@ -3422,7 +3422,7 @@ function mergeSnapshotEntries(entries) {
 async function saveMergedSnapshotToGoogleSheet() {
   const { candidates, rows, conflicts } = mergeSnapshotEntries(state.entries);
   if (!candidates.length) {
-    alert("目前沒有已確認或已匯入的方舟庫存截圖可合併。");
+    alert("目前沒有「已確認」狀態的方舟庫存截圖可合併。\n請先：① 重新解析截圖 → ② 標記已確認，再使用合併功能。");
     return;
   }
   if (!rows.length) {
