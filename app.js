@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.3";
+const APP_VERSION = "v0.22.4";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -357,6 +357,37 @@ async function saveFirstBuyDate(market, symbol, date) {
     await writeFirstBuyDatesToSheet().catch(() => {});
   }
 }
+// 直接修正 Sheet 裡所有缺 "00" 前綴的台股 ETF 代號
+async function fixSheetSymbols() {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  try {
+    const values = await readSheetValues(SHEET_NAMES.positions, "A:J");
+    const toFix = [];
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+      const orig = String(row[3] || "").trim();
+      const fixed = normalizeTWSymbol(orig);
+      if (fixed !== orig) {
+        toFix.push({ sheetRow: i + 1, orig, fixed, name: SYMBOL_NAMES[fixed] || row[4] || "" });
+      }
+    }
+    if (!toFix.length) { alert("Sheet 中沒有需要修正的代號。"); return; }
+    const preview = toFix.slice(0, 5).map((r) => `${r.orig} → ${r.fixed}`).join("\n");
+    if (!confirm(`找到 ${toFix.length} 筆需修正的代號：\n${preview}${toFix.length > 5 ? "\n…" : ""}\n\n確定直接修正 Sheet？`)) return;
+    for (const { sheetRow, fixed, name } of toFix) {
+      await sheetsFetch(
+        `/values/${sheetRange(SHEET_NAMES.positions, `D${sheetRow}:E${sheetRow}`)}?valueInputOption=RAW`,
+        { method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[fixed, name]] }) }
+      );
+    }
+    await loadLatestCloudSnapshot(true);
+    alert(`已修正 ${toFix.length} 筆代號，資料已重新載入。`);
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "修正失敗");
+  }
+}
+
 async function savePositionEdits(market, symbol, shares, avgCost) {
   if (!state.auth.authorized) { alert("請先登入"); return; }
   const latestSnap = (state.cloudHistory?.snapshots || [])
@@ -4649,6 +4680,9 @@ function renderCloudSnapshot() {
           ${matchingEntry
             ? `<button class="button compact secondary" id="view-entry-btn" data-entry-id="${escapeHtml(matchingEntry.id)}">查看截圖</button>`
             : ""}
+          ${(state.cloudHistory.positions || []).some((p) => normalizeTWSymbol(p.symbol) !== p.symbol)
+            ? `<button class="button compact ghost danger" id="fix-symbols-btn" title="偵測到 Sheet 有代號缺 00 前綴">修正代號</button>`
+            : ""}
         </div>
       </div>
       <div id="symbol-chart-display" class="symbol-chart-display" style="display:none">
@@ -4887,6 +4921,8 @@ function renderCloudSnapshot() {
     const id = e.currentTarget.dataset.entryId;
     if (id) openDetail(id);
   });
+  // B tab：修正 Sheet 代號
+  els.cloudSnapshot.querySelector("#fix-symbols-btn")?.addEventListener("click", () => fixSheetSymbols());
   // 筆按鈕：切換 edit mode
   els.cloudSnapshot.querySelectorAll(".detail-edit-toggle").forEach((btn) => {
     btn.addEventListener("click", (e) => {
