@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.4";
+const APP_VERSION = "v0.22.5";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -385,6 +385,28 @@ async function fixSheetSymbols() {
   } catch (err) {
     console.error(err);
     alert(err.message || "修正失敗");
+  }
+}
+
+// 清除 Sheet 裡股數=0 且均價=0 的廢棄倉位列
+async function cleanupZeroPositions() {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  try {
+    const values = await readSheetValues(SHEET_NAMES.positions, "A:J");
+    if (values.length <= 1) { alert("沒有資料可清理。"); return; }
+    const dataRows = values.slice(1);
+    const zeroRows = dataRows.filter((r) => Number(r[6] || 0) === 0 && Number(r[7] || 0) === 0 && r[3]);
+    if (!zeroRows.length) { alert("沒有股數=0 且均價=0 的廢棄倉位。"); return; }
+    const preview = zeroRows.slice(0, 5).map((r) => `${r[1]} ${r[3]} ${r[4]}`).join("\n");
+    if (!confirm(`找到 ${zeroRows.length} 筆廢棄倉位（股數=0、均價=0）：\n${preview}\n\n確定從 Sheet 刪除？`)) return;
+    const keepRows = dataRows.filter((r) => !(Number(r[6] || 0) === 0 && Number(r[7] || 0) === 0));
+    await clearSheetValues(SHEET_NAMES.positions, `A2:J${values.length}`);
+    if (keepRows.length) await updateSheetValues(SHEET_NAMES.positions, `A2:J${keepRows.length + 1}`, keepRows);
+    await loadLatestCloudSnapshot(true);
+    alert(`已刪除 ${zeroRows.length} 筆廢棄倉位，資料已重新載入。`);
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "清理失敗");
   }
 }
 
@@ -4683,6 +4705,9 @@ function renderCloudSnapshot() {
           ${(state.cloudHistory.positions || []).some((p) => normalizeTWSymbol(p.symbol) !== p.symbol)
             ? `<button class="button compact ghost danger" id="fix-symbols-btn" title="偵測到 Sheet 有代號缺 00 前綴">修正代號</button>`
             : ""}
+          ${(state.cloudHistory.positions || []).some((p) => Number(p.shares || 0) === 0 && Number(p.avgCost || 0) === 0)
+            ? `<button class="button compact ghost danger" id="cleanup-zero-btn" title="偵測到 Sheet 有股數=0 且均價=0 的廢棄倉位">清除廢棄列</button>`
+            : ""}
         </div>
       </div>
       <div id="symbol-chart-display" class="symbol-chart-display" style="display:none">
@@ -4825,30 +4850,21 @@ function renderCloudSnapshot() {
       }
     });
   });
-  els.cloudSnapshot.querySelectorAll(".level-chart-container circle[data-tooltip]").forEach((dot) => {
-    dot.style.cursor = "pointer";
-    dot.addEventListener("click", (e) => {
-      const container = dot.closest(".level-chart-container");
-      let tip = container.querySelector(".chart-tooltip");
-      if (!tip) { tip = document.createElement("div"); tip.className = "chart-tooltip"; container.appendChild(tip); }
-      tip.textContent = dot.dataset.tooltip;
-      tip.style.display = "block";
-      setTimeout(() => { tip.style.display = "none"; }, 2500);
-      e.stopPropagation();
-    });
-  });
-  els.cloudSnapshot.querySelectorAll(".shares-chart-container circle[data-tooltip]").forEach((dot) => {
-    dot.style.cursor = "pointer";
-    dot.addEventListener("click", (e) => {
-      const container = dot.closest(".shares-chart-container");
-      let tip = container.querySelector(".chart-tooltip");
-      if (!tip) { tip = document.createElement("div"); tip.className = "chart-tooltip"; container.appendChild(tip); }
-      tip.textContent = dot.dataset.tooltip;
-      tip.style.display = "block";
-      setTimeout(() => { tip.style.display = "none"; }, 2500);
-      e.stopPropagation();
-    });
-  });
+  // 所有趨勢圖 tooltip：用事件委派取代靜態綁定，確保動態插入的個股走勢圖也生效
+  els.cloudSnapshot.addEventListener("click", (e) => {
+    const dot = e.target.closest
+      ? e.target.closest("circle[data-tooltip]")
+      : (e.target.tagName === "circle" && e.target.dataset.tooltip ? e.target : null);
+    if (!dot?.dataset.tooltip) return;
+    const container = dot.closest(".shares-chart-container") || dot.closest(".level-chart-container");
+    if (!container) return;
+    let tip = container.querySelector(".chart-tooltip");
+    if (!tip) { tip = document.createElement("div"); tip.className = "chart-tooltip"; container.appendChild(tip); }
+    tip.textContent = dot.dataset.tooltip;
+    tip.style.display = "block";
+    setTimeout(() => { tip.style.display = "none"; }, 2500);
+    e.stopPropagation();
+  }, { capture: false });
   els.cloudSnapshot.querySelectorAll("[data-level-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.levelChartRange = btn.dataset.levelRange;
@@ -4923,6 +4939,8 @@ function renderCloudSnapshot() {
   });
   // B tab：修正 Sheet 代號
   els.cloudSnapshot.querySelector("#fix-symbols-btn")?.addEventListener("click", () => fixSheetSymbols());
+  // B tab：清除廢棄倉位
+  els.cloudSnapshot.querySelector("#cleanup-zero-btn")?.addEventListener("click", () => cleanupZeroPositions());
   // 筆按鈕：切換 edit mode
   els.cloudSnapshot.querySelectorAll(".detail-edit-toggle").forEach((btn) => {
     btn.addEventListener("click", (e) => {
