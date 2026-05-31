@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.21.3";
-const APP_VERSION_NOTE = "修正：合併存雲端改只合「已確認」，不混入其他日期的已匯入資料";
+const APP_VERSION = "v0.22.0";
+const APP_VERSION_NOTE = "B tab 歷史快照日期選擇器 + 查看截圖；C tab 以日期顯示；同天同市場存檔詢問合併";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -72,6 +72,7 @@ const state = {
   firstBuyDates: loadFirstBuyDates(),
   detailSort: { key: "symbol", dir: "asc" },
   detailEditMode: {},
+  selectedSnapshotDate: null,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
   quotes: {},
   auth: {
@@ -728,12 +729,39 @@ async function saveDraftDirectToCloud() {
   const btn = els.parsePreview.querySelector("#draft-confirm-save");
   if (btn) { btn.disabled = true; btn.textContent = "存入中…"; }
   try {
-    const entry = buildEntry();
-    entry.parsedRows = state.draftEditedRows;
-    entry.status = "reviewed";
-    await txStore("readwrite", (store) => store.put(entry));
-    state.entries.unshift(entry);
-    await saveEntrySnapshotToGoogleSheet(entry.id);
+    const newEntry = buildEntry();
+    // 檢查同天同市場是否已有 entry → 若有則詢問合併
+    const sameDay = state.entries.find((e) =>
+      e.date === newEntry.date &&
+      e.market === newEntry.market &&
+      e.kind === newEntry.kind &&
+      (e.status === "reviewed" || e.status === "imported")
+    );
+    if (sameDay) {
+      const ok = confirm(
+        `${newEntry.date} ${marketLabel(newEntry.market)} 已有一筆快照（${(sameDay.parsedRows || []).length} 筆庫存）。\n` +
+        `要將新解析的 ${state.draftEditedRows.length} 筆合併進去嗎？（同代號以新資料覆蓋）`
+      );
+      if (ok) {
+        // 合併：舊在前，新在後，dedupeRows 以新覆蓋舊
+        sameDay.parsedRows = dedupeRows([...(sameDay.parsedRows || []), ...state.draftEditedRows]);
+        sameDay.images = [...(sameDay.images || []), ...(newEntry.images || [])];
+        sameDay.updatedAt = new Date().toISOString();
+        await txStore("readwrite", (store) => store.put(sameDay));
+        const idx = state.entries.findIndex((e) => e.id === sameDay.id);
+        if (idx !== -1) state.entries[idx] = sameDay;
+        await saveEntrySnapshotToGoogleSheet(sameDay.id);
+        clearDraft();
+        state.draftEditedRows = null;
+        return;
+      }
+      // 使用者選「否」→ 繼續建立新 entry
+    }
+    newEntry.parsedRows = state.draftEditedRows;
+    newEntry.status = "reviewed";
+    await txStore("readwrite", (store) => store.put(newEntry));
+    state.entries.unshift(newEntry);
+    await saveEntrySnapshotToGoogleSheet(newEntry.id);
     clearDraft();
     state.draftEditedRows = null;
   } catch (err) {
@@ -4213,6 +4241,35 @@ function renderCloudSnapshot() {
     return;
   }
   const positions = cloud.positions || [];
+  // B tab：歷史快照選擇器所需變數
+  const availableSnapshotDates = [...new Set(
+    (state.cloudHistory.snapshots || []).map((s) => s.date).filter(Boolean)
+  )].sort().reverse();
+  const selectedDate = state.selectedSnapshotDate || availableSnapshotDates[0] || cloud.snapshot.date;
+  const selectedSnapshotIds = new Set(
+    (state.cloudHistory.snapshots || []).filter((s) => s.date === selectedDate).map((s) => s.snapshotId)
+  );
+  const holdingsRaw = selectedSnapshotIds.size > 0
+    ? (state.cloudHistory.positions || []).filter((p) => selectedSnapshotIds.has(p.snapshotId))
+    : positions;
+  const holdingsWithMarket = holdingsRaw.map((row) => ({
+    ...row, marketKey: marketForPosition(row), cost: estimatedCost(row),
+  }));
+  const holdingsMarketSummaries = ["TW", "US"].map((market) => {
+    const marketRows = holdingsWithMarket.filter((r) => r.marketKey === market).sort((a, b) => b.cost - a.cost);
+    return {
+      market,
+      rows: marketRows,
+      stockCount: marketRows.length,
+      totalShares: marketRows.reduce((sum, r) => sum + Number(r.shares || 0), 0),
+      totalCost: marketRows.reduce((sum, r) => sum + r.cost, 0),
+      targetLevel: targetLevelForMarket(market, selectedDate),
+    };
+  });
+  // 查找對應截圖 entry
+  const matchingEntry = state.entries.find((e) =>
+    e.sheetSnapshotId && [...selectedSnapshotIds].some((id) => e.sheetSnapshotId.split(",").map((s) => s.trim()).includes(id))
+  ) || null;
   const positionsWithMarket = positions.map((row) => ({
     ...row,
     marketKey: marketForPosition(row),
@@ -4324,12 +4381,12 @@ function renderCloudSnapshot() {
       </div>
     `;
   }).join("");
-  const marketDetailSections = marketSummaries.map((item) => {
-    // 上一筆快照（同市場）用來計算損益率 delta
+  const marketDetailSections = holdingsMarketSummaries.map((item) => {
+    // 上一筆快照（同市場，相對於選擇的日期）用來計算損益率 delta
     const mktSnaps = (state.cloudHistory.snapshots || [])
       .filter((s) => normalizeMarketKey(s.market) === item.market)
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    const curSnapIdx = mktSnaps.findIndex((s) => s.snapshotId === state.cloudSnapshot?.snapshot?.snapshotId);
+    const curSnapIdx = mktSnaps.findIndex((s) => selectedSnapshotIds.has(s.snapshotId));
     const prevSnap = curSnapIdx >= 0 ? mktSnaps[curSnapIdx + 1] : null;
     const prevPositions = prevSnap
       ? (state.cloudHistory.positions || []).filter((p) => p.snapshotId === prevSnap.snapshotId)
@@ -4559,8 +4616,18 @@ function renderCloudSnapshot() {
   const holdingsContent = `
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>目前明細</h3>
-        <span>${positions.length} 筆庫存，依台股與美股分開。點擊個股列查看單檔走勢</span>
+        <h3>庫存明細</h3>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="holdings-date-select" class="cell-input" style="width:auto">
+            ${availableSnapshotDates.map((d) =>
+              `<option value="${escapeHtml(d)}"${d === selectedDate ? " selected" : ""}>${escapeHtml(d)}</option>`
+            ).join("")}
+          </select>
+          <span class="muted-text">${holdingsRaw.length} 筆庫存</span>
+          ${matchingEntry
+            ? `<button class="button compact secondary" id="view-entry-btn" data-entry-id="${escapeHtml(matchingEntry.id)}">查看截圖</button>`
+            : ""}
+        </div>
       </div>
       <div id="symbol-chart-display" class="symbol-chart-display" style="display:none">
         <div id="symbol-chart-content"></div>
@@ -4574,9 +4641,9 @@ function renderCloudSnapshot() {
           const parsedCount = (e.parsedRows || []).filter((r) => r.symbol).length;
           return `<div class="capture-entry-row" data-entry-id="${escapeHtml(e.id)}">
             <span class="entry-status ${escapeHtml(e.status)}">${statusLabel(e.status)}</span>
-            <span class="entry-name">${escapeHtml(e.title || e.date)}</span>
-            <span class="entry-count">${parsedCount ? `${parsedCount} 筆` : '—'}</span>
+            <span class="entry-name" style="font-variant-numeric:tabular-nums">${escapeHtml(e.date || '—')}</span>
             <span class="muted-text" style="white-space:nowrap">${escapeHtml(marketLabel(e.market))}</span>
+            <span class="entry-count">${parsedCount ? `${parsedCount} 筆` : '—'}</span>
           </div>`;
         }).join('')}
       </div>`
@@ -4786,6 +4853,16 @@ function renderCloudSnapshot() {
       }
       renderCloudSnapshot();
     });
+  });
+  // B tab：日期選擇器
+  els.cloudSnapshot.querySelector("#holdings-date-select")?.addEventListener("change", (e) => {
+    state.selectedSnapshotDate = e.target.value;
+    renderCloudSnapshot();
+  });
+  // B tab：查看截圖連結
+  els.cloudSnapshot.querySelector("#view-entry-btn")?.addEventListener("click", (e) => {
+    const id = e.currentTarget.dataset.entryId;
+    if (id) openDetail(id);
   });
   // 筆按鈕：切換 edit mode
   els.cloudSnapshot.querySelectorAll(".detail-edit-toggle").forEach((btn) => {
