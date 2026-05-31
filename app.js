@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.23.4";
-const APP_VERSION_NOTE = "損益趨勢改為未實現總損益（price-avgCost）×shares；個股走勢 basis 修正";
+const APP_VERSION = "v0.23.5";
+const APP_VERSION_NOTE = "損益趨勢加日期範圍過濾（1M/3M/ALL）；移除歷史建議水位 metric";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -67,6 +67,7 @@ const state = {
   },
   dashboardTab: "home",
   levelChartRange: "1M",
+  plTrendRange: "1M",
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
   firstBuyDates: loadFirstBuyDates(),
@@ -4203,7 +4204,11 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
 }
 
 function renderSnapshotTrendChart(cloudHistory, quotes) {
-  const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const rangeKey = state.plTrendRange || "1M";
+  const rangeDays = { "1M": 31, "3M": 92, "ALL": 9999 };
+  const cutoff = new Date(Date.now() - (rangeDays[rangeKey] || 31) * 86400000).toISOString().slice(0, 10);
+  const allSnapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const snapshots = allSnapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10) || "") >= cutoff);
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
@@ -4233,7 +4238,10 @@ function renderSnapshotTrendChart(cloudHistory, quotes) {
   });
   if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算損益。</p>";
   const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
-  return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
+  const rangeBtns = ["1M", "3M", "ALL"].map((r) =>
+    `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-pl-trend-range="${r}">${r}</button>`
+  ).join("");
+  return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-chart-legend">${legend}</div><div class="level-range-btns">${rangeBtns}</div></div>${renderSharesSvg(series, dates, colors)}`;
 }
 
 function renderPerfRateTrendChart(cloudHistory, quotes) {
@@ -4707,10 +4715,6 @@ function renderCloudSnapshot() {
         <span>雲端快照</span>
         <strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong>
       </div>
-      <div class="metric">
-        <span>歷史建議水位</span>
-        <strong>${formatNumber(state.targetLevelHistory.length)}</strong>
-      </div>
     </div>
 
     <div class="dashboard-grid">
@@ -4973,6 +4977,12 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-level-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.levelChartRange = btn.dataset.levelRange;
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-pl-trend-range]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.plTrendRange = btn.dataset.plTrendRange;
       renderCloudSnapshot();
     });
   });
