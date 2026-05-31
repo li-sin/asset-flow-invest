@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.0";
-const APP_VERSION_NOTE = "新增三圖：個股損益貢獻、表現率 vs 持有天數散點圖、損益率分布直方圖";
+const APP_VERSION = "v0.24.1";
+const APP_VERSION_NOTE = "散點圖 label 碰撞迴避：重疊時往上推，不再遮蔽";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4396,12 +4396,32 @@ function renderScatterChart(positions, quotes, firstBuyDates) {
   const axisLabels = `
     <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">損益率 ▲</text>
     <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>`;
-  const dots = items.map((item) => {
-    const x = xP(item.days), y = yP(item.rate);
+  // 碰撞迴避：按 x 排序後逐一配置 label，與已放置的 label 重疊時往上推
+  const CHAR_W = 5.5, LABEL_H = 11, LABEL_PAD_X = 3, LABEL_PAD_Y = 2;
+  const placed = []; // { cx, cy, hw } (half-width)
+  const withLabel = [...items]
+    .sort((a, b) => xP(a.days) - xP(b.days))
+    .map((item) => {
+      const cx = xP(item.days), dotY = yP(item.rate);
+      const hw = (item.symbol.length * CHAR_W) / 2;
+      let ly = dotY - 7;
+      // 最多嘗試 10 次往上推
+      for (let t = 0; t < 10; t++) {
+        const clash = placed.some(
+          (p) => Math.abs(p.cx - cx) < hw + p.hw + LABEL_PAD_X &&
+                 Math.abs(p.cy - ly) < LABEL_H + LABEL_PAD_Y
+        );
+        if (!clash) break;
+        ly -= (LABEL_H + LABEL_PAD_Y);
+      }
+      placed.push({ cx, cy: ly, hw });
+      return { ...item, cx, dotY, ly };
+    });
+  const dots = withLabel.map((item) => {
     const color = item.rate >= 0 ? "var(--green)" : "var(--red)";
     const tip = `${item.symbol} ${item.days}天 ${item.rate>=0?'+':''}${item.rate.toFixed(1)}%`;
-    return `<circle cx="${x}" cy="${y}" r="4.5" fill="${color}" opacity="0.8" data-tooltip="${tip}"><title>${tip}</title></circle>
-      <text x="${x}" y="${y-7}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600">${escapeHtml(item.symbol)}</text>`;
+    return `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.8" data-tooltip="${tip}"><title>${tip}</title></circle>
+      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600">${escapeHtml(item.symbol)}</text>`;
   }).join("");
   return `<div class="shares-chart-container" style="position:relative">
     <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
