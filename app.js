@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.6";
+const APP_VERSION = "v0.22.7";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4189,7 +4189,10 @@ function renderPerfRateTrendChart(cloudHistory, quotes) {
         const q = quotes[p.symbol];
         const price = typeof q === "number" ? q : (q?.price ?? null);
         if (price === null || price <= 0) return null;
-        return (price - Number(p.avgCost)) / Number(p.avgCost) * 100;
+        const rate = (price - Number(p.avgCost)) / Number(p.avgCost) * 100;
+        // 異常值過濾：均價錯誤（如 OCR 誤讀）會產生數千%，排除
+        if (!Number.isFinite(rate) || Math.abs(rate) > 500) return null;
+        return rate;
       }).filter((r) => r !== null);
       if (!rates.length) return null;
       const avg = rates.reduce((s, v) => s + v, 0) / rates.length;
