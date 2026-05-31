@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.3";
-const APP_VERSION_NOTE = "新增損益金額 vs 持有天數散點圖；修正舊散點圖標題（表現率→損益率）";
+const APP_VERSION = "v0.24.4";
+const APP_VERSION_NOTE = "散點圖加 Y 軸上限切換按鈕；超出上限顯示 ▲ 三角裁切標記";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -68,6 +68,8 @@ const state = {
   dashboardTab: "home",
   levelChartRange: "1M",
   plTrendRange: "1M",
+  scatterRateCap: null,
+  scatterAmountCap: null,
   targetLevels: loadTargetLevels(),
   targetLevelHistory: [],
   firstBuyDates: loadFirstBuyDates(),
@@ -4355,7 +4357,85 @@ function renderPLContributionChart(positions, quotes) {
   return `<div style="padding:4px 0">${rows}</div>`;
 }
 
-// ── 表現率 vs 持有天數 散點圖 ────────────────────────────────────────────────
+// ── 共用：散點圖 SVG 渲染（支援 Y 軸上限裁切）──────────────────────────────
+function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, W = 600, H = 200, PL = 44, PR = 20, PT = 16, PB = 30 }) {
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const cap = state[capKey];  // null = 全部顯示
+  const allVals = items.map(getY);
+  const rawMin = Math.min(...allVals, 0), rawMax = Math.max(...allVals, 0);
+  const effMax = cap !== null ? cap : rawMax;
+  const vPad = (effMax - rawMin || 10) * 0.18;
+  const minV = rawMin - vPad, maxV = effMax + vPad;
+  const xP = (v) => PL + (v / (maxX || 1)) * cW;
+  const yP = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
+  const y0 = yP(0);
+  // Y 格線
+  const span = effMax - rawMin;
+  const yStep = span > 200 ? 50 : span > 100 ? 20 : span > 40 ? 10 : span > 10 ? 5 : 2;
+  const yLines = [];
+  for (let v = Math.ceil(rawMin / yStep) * yStep; v <= effMax + yStep; v += yStep) {
+    const y = yP(v); if (y < PT - 2 || y > H - PB + 2) continue;
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
+    const lbl = Math.abs(v) >= 10000 ? `${Math.round(v/1000)}k` : `${v>=0?'+':''}${v}${unitLabel}`;
+    yLines.push(`<text x="${PL-3}" y="${y+4}" text-anchor="end" font-size="9" fill="var(--muted)">${lbl}</text>`);
+  }
+  const zeroLine = y0 >= PT && y0 <= H - PB
+    ? `<line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4,3"/>` : "";
+  const xLabels = [0, Math.round(maxX/2), maxX].map((d) =>
+    `<text x="${xP(d)}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d}天</text>`).join("");
+  // 裁切指示線
+  const clipLine = cap !== null
+    ? `<line x1="${PL}" y1="${PT}" x2="${W-PR}" y2="${PT}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="5,3" opacity="0.6"/>`
+    : "";
+  // 碰撞迴避
+  const CHAR_W = 5.5, LABEL_H = 11, LABEL_PAD_X = 3, LABEL_PAD_Y = 2;
+  const placed = [];
+  const withLabel = [...items]
+    .sort((a, b) => xP(getX(a)) - xP(getX(b)))
+    .map((item) => {
+      const cx = xP(getX(item));
+      const rawDotY = yP(getY(item));
+      const clipped = cap !== null && getY(item) > cap;
+      const dotY = clipped ? PT + 4 : rawDotY;
+      const hw = (item.symbol.length * CHAR_W) / 2;
+      let ly = clipped ? PT - 6 : dotY - 7;
+      for (let t = 0; t < 10; t++) {
+        const clash = placed.some(
+          (p) => Math.abs(p.cx - cx) < hw + p.hw + LABEL_PAD_X && Math.abs(p.cy - ly) < LABEL_H + LABEL_PAD_Y
+        );
+        if (!clash) break;
+        ly -= (LABEL_H + LABEL_PAD_Y);
+      }
+      placed.push({ cx, cy: ly, hw });
+      return { ...item, cx, dotY, ly, clipped };
+    });
+  const dots = withLabel.map((item) => {
+    const color = getColor(item);
+    const tip = getTip(item);
+    const lineY1 = item.ly + 2, lineY2 = item.dotY - 5.5;
+    const leaderLine = !item.clipped && lineY2 - lineY1 > 4
+      ? `<line x1="${item.cx}" y1="${lineY1}" x2="${item.cx}" y2="${lineY2}" stroke="var(--muted)" stroke-width="0.8" opacity="0.5" stroke-dasharray="2,2"/>` : "";
+    const shape = item.clipped
+      ? `<polygon points="${item.cx},${PT+1} ${item.cx-4.5},${PT+9} ${item.cx+4.5},${PT+9}" fill="${color}" opacity="0.9" data-tooltip="${tip}"><title>${tip}</title></polygon>`
+      : `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"><title>${tip}</title></circle>`;
+    return `${leaderLine}${shape}
+      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
+  }).join("");
+  // Y 軸上限切換按鈕
+  const capBtns = capOptions.map(({ label, value }) => {
+    const active = state[capKey] === value;
+    return `<button class="level-range-btn${active ? " is-active" : ""}" type="button" data-scatter-cap-key="${capKey}" data-scatter-cap-val="${value === null ? "null" : value}">${label}</button>`;
+  }).join("");
+  const svg = `<div class="shares-chart-container" style="position:relative">
+    <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
+      ${yLines.join("")}${zeroLine}${clipLine}${xLabels}${dots}
+      <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">Y ▲</text>
+      <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>
+    </svg></div>`;
+  return `<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><div class="level-range-btns">${capBtns}</div></div>${svg}`;
+}
+
+// ── 損益率 vs 持有天數 散點圖 ────────────────────────────────────────────────
 function renderScatterChart(positions, quotes, firstBuyDates) {
   const today = new Date();
   const items = positions.map((p) => {
@@ -4367,72 +4447,23 @@ function renderScatterChart(positions, quotes, firstBuyDates) {
     if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
     const days = Math.max(0, Math.floor((today - new Date(firstBuy)) / 86400000));
     const rate = (price - p.avgCost) / p.avgCost * 100;
-    if (Math.abs(rate) > 300) return null;
     return { symbol: p.symbol, days, rate };
   }).filter(Boolean);
   if (items.length < 2) return "<p class=\"muted-text\">需要至少 2 支有首次布局日的標的才能顯示。</p>";
-  const W = 600, H = 200;
-  const PL = 40, PR = 20, PT = 16, PB = 30;
-  const cW = W - PL - PR, cH = H - PT - PB;
   const maxDays = Math.max(...items.map((i) => i.days), 1);
-  const allRates = items.map((i) => i.rate);
-  const minR = Math.min(...allRates, 0), maxR = Math.max(...allRates, 0);
-  const rPad = (maxR - minR || 10) * 0.18;
-  const minV = minR - rPad, maxV = maxR + rPad;
-  const xP = (d) => PL + (d / maxDays) * cW;
-  const yP = (r) => PT + (1 - (r - minV) / (maxV - minV || 1)) * cH;
-  const y0 = yP(0);
-  const yStep = (maxR - minR) > 40 ? 20 : (maxR - minR) > 15 ? 10 : 5;
-  const yLines = [];
-  for (let v = Math.ceil(minV / yStep) * yStep; v <= maxV; v += yStep) {
-    const y = yP(v); if (y < PT - 2 || y > H - PB + 2) continue;
-    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
-    yLines.push(`<text x="${PL-3}" y="${y+4}" text-anchor="end" font-size="9" fill="var(--muted)">${v>=0?'+':''}${v}%</text>`);
-  }
-  const zeroLine = y0 >= PT && y0 <= H - PB
-    ? `<line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4,3"/>` : "";
-  const xLabels = [0, Math.round(maxDays/2), maxDays].map((d) =>
-    `<text x="${xP(d)}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d}天</text>`).join("");
-  const axisLabels = `
-    <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">損益率 ▲</text>
-    <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>`;
-  // 碰撞迴避：按 x 排序後逐一配置 label，與已放置的 label 重疊時往上推
-  const CHAR_W = 5.5, LABEL_H = 11, LABEL_PAD_X = 3, LABEL_PAD_Y = 2;
-  const placed = []; // { cx, cy, hw } (half-width)
-  const withLabel = [...items]
-    .sort((a, b) => xP(a.days) - xP(b.days))
-    .map((item) => {
-      const cx = xP(item.days), dotY = yP(item.rate);
-      const hw = (item.symbol.length * CHAR_W) / 2;
-      let ly = dotY - 7;
-      // 最多嘗試 10 次往上推
-      for (let t = 0; t < 10; t++) {
-        const clash = placed.some(
-          (p) => Math.abs(p.cx - cx) < hw + p.hw + LABEL_PAD_X &&
-                 Math.abs(p.cy - ly) < LABEL_H + LABEL_PAD_Y
-        );
-        if (!clash) break;
-        ly -= (LABEL_H + LABEL_PAD_Y);
-      }
-      placed.push({ cx, cy: ly, hw });
-      return { ...item, cx, dotY, ly };
-    });
-  const dots = withLabel.map((item) => {
-    const color = item.rate >= 0 ? "var(--green)" : "var(--red)";
-    const tip = `${item.symbol} ${item.days}天 ${item.rate>=0?'+':''}${item.rate.toFixed(1)}%`;
-    // 引線：從標籤底部連到圓點頂部（距離夠遠才畫）
-    const lineY1 = item.ly + 2, lineY2 = item.dotY - 5.5;
-    const leaderLine = lineY2 - lineY1 > 4
-      ? `<line x1="${item.cx}" y1="${lineY1}" x2="${item.cx}" y2="${lineY2}" stroke="var(--muted)" stroke-width="0.8" opacity="0.5" stroke-dasharray="2,2"/>`
-      : "";
-    return `${leaderLine}
-      <circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"><title>${tip}</title></circle>
-      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
-  }).join("");
-  return `<div class="shares-chart-container" style="position:relative">
-    <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
-      ${yLines.join("")}${zeroLine}${xLabels}${axisLabels}${dots}
-    </svg></div>`;
+  const maxRate = Math.max(...items.map((i) => i.rate), 0);
+  const capOptions = [
+    { label: "全部", value: null },
+    { label: `≤${Math.round(maxRate * 0.6)}%`, value: Math.round(maxRate * 0.6) },
+    { label: `≤${Math.round(maxRate * 0.35)}%`, value: Math.round(maxRate * 0.35) },
+    { label: "≤30%", value: 30 },
+  ].filter((o, i, arr) => i === 0 || o.value === null || o.value > 10);
+  return buildScatterSvg({
+    items, maxX: maxDays, capKey: "scatterRateCap", capOptions, unitLabel: "%",
+    getX: (i) => i.days, getY: (i) => i.rate,
+    getColor: (i) => i.rate >= 0 ? "var(--green)" : "var(--red)",
+    getTip: (i) => `${i.symbol} ${i.days}天 ${i.rate>=0?'+':''}${i.rate.toFixed(1)}%`,
+  });
 }
 
 // ── 損益金額 vs 持有天數 散點圖 ─────────────────────────────────────────────
@@ -4450,68 +4481,20 @@ function renderPLAmountScatterChart(positions, quotes, firstBuyDates) {
     return { symbol: p.symbol, days, pl };
   }).filter(Boolean);
   if (items.length < 2) return "<p class=\"muted-text\">需要至少 2 支有首次布局日的標的才能顯示。</p>";
-  const W = 600, H = 200;
-  const PL = 52, PR = 20, PT = 16, PB = 30;
-  const cW = W - PL - PR, cH = H - PT - PB;
   const maxDays = Math.max(...items.map((i) => i.days), 1);
-  const allPL = items.map((i) => i.pl);
-  const minP = Math.min(...allPL, 0), maxP = Math.max(...allPL, 0);
-  const pPad = (maxP - minP || 1000) * 0.18;
-  const minV = minP - pPad, maxV = maxP + pPad;
-  const xP = (d) => PL + (d / maxDays) * cW;
-  const yP = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
-  const y0 = yP(0);
-  // Y 軸格線
-  const absMax = Math.max(Math.abs(maxV), Math.abs(minV));
-  const yStep = absMax > 500000 ? 100000 : absMax > 100000 ? 50000 : absMax > 50000 ? 10000 : absMax > 10000 ? 5000 : 1000;
-  const yLines = [];
-  for (let v = Math.ceil(minV / yStep) * yStep; v <= maxV + yStep; v += yStep) {
-    const y = yP(v); if (y < PT - 2 || y > H - PB + 2) continue;
-    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
-    const lbl = Math.abs(v) >= 10000 ? `${Math.round(v/1000)}k` : v;
-    yLines.push(`<text x="${PL-3}" y="${y+4}" text-anchor="end" font-size="9" fill="var(--muted)">${lbl}</text>`);
-  }
-  const zeroLine = y0 >= PT && y0 <= H - PB
-    ? `<line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4,3"/>` : "";
-  const xLabels = [0, Math.round(maxDays/2), maxDays].map((d) =>
-    `<text x="${xP(d)}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d}天</text>`).join("");
-  const axisLabels = `
-    <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">損益金額 ▲</text>
-    <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>`;
-  // 碰撞迴避 + 引線
-  const CHAR_W = 5.5, LABEL_H = 11, LABEL_PAD_X = 3, LABEL_PAD_Y = 2;
-  const placed = [];
-  const withLabel = [...items]
-    .sort((a, b) => xP(a.days) - xP(b.days))
-    .map((item) => {
-      const cx = xP(item.days), dotY = yP(item.pl);
-      const hw = (item.symbol.length * CHAR_W) / 2;
-      let ly = dotY - 7;
-      for (let t = 0; t < 10; t++) {
-        const clash = placed.some(
-          (p) => Math.abs(p.cx - cx) < hw + p.hw + LABEL_PAD_X && Math.abs(p.cy - ly) < LABEL_H + LABEL_PAD_Y
-        );
-        if (!clash) break;
-        ly -= (LABEL_H + LABEL_PAD_Y);
-      }
-      placed.push({ cx, cy: ly, hw });
-      return { ...item, cx, dotY, ly };
-    });
-  const dots = withLabel.map((item) => {
-    const color = item.pl >= 0 ? "var(--green)" : "var(--red)";
-    const amt = Math.round(item.pl).toLocaleString();
-    const tip = `${item.symbol} ${item.days}天 ${item.pl>=0?'+':''}${amt}`;
-    const lineY1 = item.ly + 2, lineY2 = item.dotY - 5.5;
-    const leaderLine = lineY2 - lineY1 > 4
-      ? `<line x1="${item.cx}" y1="${lineY1}" x2="${item.cx}" y2="${lineY2}" stroke="var(--muted)" stroke-width="0.8" opacity="0.5" stroke-dasharray="2,2"/>` : "";
-    return `${leaderLine}
-      <circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"><title>${tip}</title></circle>
-      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
-  }).join("");
-  return `<div class="shares-chart-container" style="position:relative">
-    <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
-      ${yLines.join("")}${zeroLine}${xLabels}${axisLabels}${dots}
-    </svg></div>`;
+  const maxPL = Math.max(...items.map((i) => i.pl), 0);
+  const capOptions = [
+    { label: "全部", value: null },
+    { label: `≤${Math.round(maxPL * 0.6 / 1000)}k`, value: Math.round(maxPL * 0.6) },
+    { label: `≤${Math.round(maxPL * 0.35 / 1000)}k`, value: Math.round(maxPL * 0.35) },
+  ].filter((o) => o.value === null || o.value > 0);
+  return buildScatterSvg({
+    items, maxX: maxDays, capKey: "scatterAmountCap", capOptions, unitLabel: "",
+    getX: (i) => i.days, getY: (i) => i.pl,
+    getColor: (i) => i.pl >= 0 ? "var(--green)" : "var(--red)",
+    getTip: (i) => `${i.symbol} ${i.days}天 ${i.pl>=0?'+':''}${Math.round(i.pl).toLocaleString()}`,
+    PL: 52,
+  });
 }
 
 // ── 損益率分布直方圖 ────────────────────────────────────────────────────────
@@ -5293,6 +5276,14 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-pl-trend-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.plTrendRange = btn.dataset.plTrendRange;
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-scatter-cap-key]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.scatterCapKey;
+      const raw = btn.dataset.scatterCapVal;
+      state[key] = raw === "null" ? null : Number(raw);
       renderCloudSnapshot();
     });
   });
