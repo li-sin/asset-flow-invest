@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.22.2";
+const APP_VERSION = "v0.22.3";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -2323,6 +2323,16 @@ function lookupSymbolName(symbol) {
   return SYMBOL_NAMES[String(symbol || "").toUpperCase()] || "";
 }
 
+// 台股 ETF 代號補 "00" 前綴（OCR 常漏掉）
+// 規則：SYMBOL_NAMES 裡找不到原代號，但 "00"+代號 找得到 → 補上
+function normalizeTWSymbol(symbol) {
+  if (!symbol) return symbol;
+  const s = String(symbol).toUpperCase().trim();
+  if (SYMBOL_NAMES[s]) return s;           // 已知代號，直接用
+  if (SYMBOL_NAMES["00" + s]) return "00" + s; // 漏 "00" → 補上
+  return s;                                // 不在 SYMBOL_NAMES，維持原樣
+}
+
 function compactText(value) {
   return String(value || "").replace(/\s+/g, "");
 }
@@ -2390,12 +2400,19 @@ function dedupeRows(rows) {
       result.push(row);
       continue;
     }
-    if (seen.has(row.symbol)) {
-      result[seen.get(row.symbol)] = row;
+    // 台股 ETF 代號補 00（OCR 常漏前綴）
+    const normalizedSymbol = normalizeTWSymbol(row.symbol);
+    const normalizedRow = {
+      ...row,
+      symbol: normalizedSymbol,
+      name: row.name || SYMBOL_NAMES[normalizedSymbol] || row.name || "",
+    };
+    if (seen.has(normalizedSymbol)) {
+      result[seen.get(normalizedSymbol)] = normalizedRow;
       continue;
     }
-    seen.set(row.symbol, result.length);
-    result.push(row);
+    seen.set(normalizedSymbol, result.length);
+    result.push(normalizedRow);
   }
   return result;
 }
@@ -2972,11 +2989,13 @@ function validSnapshotRows(rows) {
     row?.shares !== null && row?.shares !== undefined &&
     row?.avgCost !== null && row?.avgCost !== undefined
   );
-  // 同代號取最後一筆（分數最完整的）；空名稱從 SYMBOL_NAMES 補查
+  // 同代號取最後一筆；代號補 00；空名稱從 SYMBOL_NAMES 補查
   for (const row of filtered) {
-    seen.set(row.symbol, {
+    const sym = normalizeTWSymbol(row.symbol);
+    seen.set(sym, {
       ...row,
-      name: row.name || SYMBOL_NAMES[row.symbol] || row.name || "",
+      symbol: sym,
+      name: row.name || SYMBOL_NAMES[sym] || row.name || "",
     });
   }
   return [...seen.values()];
