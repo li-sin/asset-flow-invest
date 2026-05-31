@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.1";
-const APP_VERSION_NOTE = "散點圖 label 碰撞迴避：重疊時往上推，不再遮蔽";
+const APP_VERSION = "v0.24.2";
+const APP_VERSION_NOTE = "散點圖加引線（leader line）連標籤到圓點；文字加背景描邊";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4420,8 +4420,14 @@ function renderScatterChart(positions, quotes, firstBuyDates) {
   const dots = withLabel.map((item) => {
     const color = item.rate >= 0 ? "var(--green)" : "var(--red)";
     const tip = `${item.symbol} ${item.days}天 ${item.rate>=0?'+':''}${item.rate.toFixed(1)}%`;
-    return `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.8" data-tooltip="${tip}"><title>${tip}</title></circle>
-      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600">${escapeHtml(item.symbol)}</text>`;
+    // 引線：從標籤底部連到圓點頂部（距離夠遠才畫）
+    const lineY1 = item.ly + 2, lineY2 = item.dotY - 5.5;
+    const leaderLine = lineY2 - lineY1 > 4
+      ? `<line x1="${item.cx}" y1="${lineY1}" x2="${item.cx}" y2="${lineY2}" stroke="var(--muted)" stroke-width="0.8" opacity="0.5" stroke-dasharray="2,2"/>`
+      : "";
+    return `${leaderLine}
+      <circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"><title>${tip}</title></circle>
+      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
   }).join("");
   return `<div class="shares-chart-container" style="position:relative">
     <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
