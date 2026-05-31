@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.4";
-const APP_VERSION_NOTE = "散點圖加 Y 軸上限切換按鈕；超出上限顯示 ▲ 三角裁切標記";
+const APP_VERSION = "v0.24.5";
+const APP_VERSION_NOTE = "修正散點圖金額 Y 軸格線爆炸：改 nice step 演算法";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4369,14 +4369,17 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
   const xP = (v) => PL + (v / (maxX || 1)) * cW;
   const yP = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
   const y0 = yP(0);
-  // Y 格線
-  const span = effMax - rawMin;
-  const yStep = span > 200 ? 50 : span > 100 ? 20 : span > 40 ? 10 : span > 10 ? 5 : 2;
+  // Y 格線：動態 nice step，目標約 6 條格線，適用任意數值範圍
+  const vRange = (maxV - minV) || 1;
+  const rawStep = vRange / 6;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const yStep = (norm < 1.5 ? 1 : norm < 3.5 ? 2 : norm < 7.5 ? 5 : 10) * mag;
   const yLines = [];
-  for (let v = Math.ceil(rawMin / yStep) * yStep; v <= effMax + yStep; v += yStep) {
+  for (let v = Math.ceil(minV / yStep) * yStep; v <= maxV + yStep * 0.1; v += yStep) {
     const y = yP(v); if (y < PT - 2 || y > H - PB + 2) continue;
     yLines.push(`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
-    const lbl = Math.abs(v) >= 10000 ? `${Math.round(v/1000)}k` : `${v>=0?'+':''}${v}${unitLabel}`;
+    const lbl = Math.abs(v) >= 10000 ? `${(v/1000).toFixed(v % 1000 === 0 ? 0 : 1)}k` : `${v>=0&&v!==0?'+':''}${v}${unitLabel}`;
     yLines.push(`<text x="${PL-3}" y="${y+4}" text-anchor="end" font-size="9" fill="var(--muted)">${lbl}</text>`);
   }
   const zeroLine = y0 >= PT && y0 <= H - PB
