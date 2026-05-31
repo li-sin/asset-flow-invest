@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.23.3";
-const APP_VERSION_NOTE = "A 首頁「損益趨勢」更名；個股走勢圖第一筆設為 basis（顯示 0）";
+const APP_VERSION = "v0.23.4";
+const APP_VERSION_NOTE = "損益趨勢改為未實現總損益（price-avgCost）×shares；個股走勢 basis 修正";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4202,7 +4202,7 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
-function renderSnapshotTrendChart(cloudHistory) {
+function renderSnapshotTrendChart(cloudHistory, quotes) {
   const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
@@ -4214,11 +4214,24 @@ function renderSnapshotTrendChart(cloudHistory) {
       const snapsForDate = snapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
       const snap = snapsForDate[snapsForDate.length - 1];
       if (!snap) return null;
-      const total = positions.filter((p) => p.snapshotId === snap.snapshotId).reduce((sum, p) => sum + Number(p.shares || 0), 0);
-      return total > 0 ? { i, v: total } : null;
+      const mktPos = positions.filter((p) => p.snapshotId === snap.snapshotId && Number(p.avgCost) > 0);
+      if (!mktPos.length) return null;
+      let totalPL = 0; let hasQuote = false;
+      for (const p of mktPos) {
+        const q = quotes?.[p.symbol];
+        const price = typeof q === "number" ? q : (q?.price ?? null);
+        if (price === null || price <= 0) continue;
+        const shares = Number(p.shares || 0);
+        const avgCost = Number(p.avgCost || 0);
+        if (avgCost <= 0 || shares <= 0) continue;
+        totalPL += (price - avgCost) * shares;
+        hasQuote = true;
+      }
+      return hasQuote ? { i, v: Math.round(totalPL) } : null;
     }).filter(Boolean);
     return { market, pts, color: colors[market] };
   });
+  if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算損益。</p>";
   const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
   return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
 }
@@ -4712,9 +4725,9 @@ function renderCloudSnapshot() {
       <section class="dashboard-card">
         <div class="card-heading">
           <h3>損益趨勢</h3>
-          <span>台股／美股總股數折線圖</span>
+          <span>各市場未實現總損益（以現價估算，TWD / USD）</span>
         </div>
-        <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory)}</div>
+        <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes)}</div>
       </section>
     </div>
 
