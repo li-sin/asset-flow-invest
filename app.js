@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.21.0";
-const APP_VERSION_NOTE = "強制 OCR 路徑；水位卡去 meter bar 常駐並排；損益率/title 修正";
+const APP_VERSION = "v0.21.1";
+const APP_VERSION_NOTE = "D1 清除截圖功能；移除標記已匯入；批量清舊截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -760,7 +760,9 @@ function openDetail(id) {
         <button class="button secondary" type="button" data-action="parse-entry">重新解析截圖</button>
         <button class="button secondary" type="button" data-action="export-diagnostics">匯出診斷</button>
         <button class="button secondary" type="button" data-action="mark-reviewed">標記已確認</button>
-        <button class="button secondary" type="button" data-action="mark-imported">標記已匯入</button>
+        ${entry.status === "imported" && entry.images?.some((img) => img.dataUrl)
+          ? `<button class="button secondary" type="button" data-action="clear-images">清除截圖（釋放空間）</button>`
+          : ""}
         <button class="button primary" type="button" data-action="save-cloud-snapshot">存到 Google Sheet</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
       </div>
@@ -786,7 +788,7 @@ function openDetail(id) {
   els.detailContent.querySelector('[data-action="parse-entry"]').addEventListener("click", () => parseExistingEntry(id));
   els.detailContent.querySelector('[data-action="export-diagnostics"]').addEventListener("click", () => exportEntryDiagnostics(id));
   els.detailContent.querySelector('[data-action="mark-reviewed"]').addEventListener("click", () => updateStatus(id, "reviewed"));
-  els.detailContent.querySelector('[data-action="mark-imported"]').addEventListener("click", () => updateStatus(id, "imported"));
+  els.detailContent.querySelector('[data-action="clear-images"]')?.addEventListener("click", () => clearEntryImages(id));
   els.detailContent.querySelector('[data-action="save-cloud-snapshot"]').addEventListener("click", () => saveEntrySnapshotToGoogleSheet(id));
   els.detailContent.querySelector('[data-action="delete"]').addEventListener("click", () => deleteEntry(id));
   els.detailContent.querySelectorAll('[data-action="apply-row-fix"]').forEach((button) => {
@@ -2574,6 +2576,34 @@ async function deleteEntry(id) {
   state.entries = state.entries.filter((item) => item.id !== id);
   closeDetail();
   render();
+}
+
+// D1：清除截圖圖片（保留 entry metadata）
+async function clearEntryImages(id) {
+  const entry = state.entries.find((item) => item.id === id);
+  if (!entry) return;
+  entry.images = (entry.images || []).map((img) => ({ ...img, dataUrl: "" }));
+  entry.updatedAt = new Date().toISOString();
+  await txStore("readwrite", (store) => store.put(entry));
+  render();
+  openDetail(id);
+}
+
+// 批量清除：壞標題（含 ${els.）且狀態為已匯入的 entry → 直接刪除
+async function bulkClearOldEntries() {
+  const badEntries = state.entries.filter(
+    (e) => e.status === "imported" && e.title?.includes("${els.")
+  );
+  if (!badEntries.length) { alert("沒有符合條件的舊截圖（壞標題 + 已匯入）。"); return; }
+  const confirmed = confirm(`找到 ${badEntries.length} 筆壞標題且已匯入的舊截圖，資料已在 Sheet，確定刪除本地紀錄？`);
+  if (!confirmed) return;
+  const ids = new Set(badEntries.map((e) => e.id));
+  await txStore("readwrite", (store) => {
+    for (const id of ids) store.delete(id);
+  });
+  state.entries = state.entries.filter((e) => !ids.has(e.id));
+  render();
+  alert(`已刪除 ${ids.size} 筆舊截圖紀錄。`);
 }
 
 function normalizeEmail(value) {
@@ -4537,6 +4567,9 @@ function renderCloudSnapshot() {
         <span>${state.entries.length} 張</span>
       </div>
       ${captureEntriesHtml}
+      ${state.entries.some((e) => e.status === "imported" && e.title?.includes("${els."))
+        ? `<button id="bulk-clear-old" class="button ghost danger" type="button" style="margin-top:10px;font-size:12px;">清除壞標題舊截圖（已匯入）</button>`
+        : ""}
     </section>
   `;
   const tabContent = {
@@ -4756,6 +4789,8 @@ function renderCloudSnapshot() {
       if (id) openDetail(id);
     });
   });
+  // C tab 批量清除舊截圖
+  els.cloudSnapshot.querySelector("#bulk-clear-old")?.addEventListener("click", () => bulkClearOldEntries());
   renderSummaryLine();
 }
 
