@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.23.6";
-const APP_VERSION_NOTE = "損益趨勢改時間比例 x 軸，解決多快照擠壓問題";
+const APP_VERSION = "v0.24.0";
+const APP_VERSION_NOTE = "新增三圖：個股損益貢獻、表現率 vs 持有天數散點圖、損益率分布直方圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4325,6 +4325,133 @@ function renderPerfRateTrendChart(cloudHistory, quotes) {
   return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
 }
 
+// ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────
+function renderPLContributionChart(positions, quotes) {
+  const items = positions.map((p) => {
+    const q = quotes[p.symbol];
+    const price = typeof q === "number" ? q : (q?.price ?? null);
+    if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
+    const pl = (price - p.avgCost) * Number(p.shares || 0);
+    return { symbol: p.symbol, name: p.name || p.symbol, pl };
+  }).filter(Boolean).sort((a, b) => b.pl - a.pl);
+  if (!items.length) return "<p class=\"muted-text\">尚無報價資料。</p>";
+  // 取前 8 獲利 + 後 5 虧損（若有）
+  const gainers = items.filter((i) => i.pl >= 0).slice(0, 8);
+  const losers = items.filter((i) => i.pl < 0).slice(-5).reverse();
+  const shown = [...gainers, ...losers];
+  const maxAbs = Math.max(...shown.map((i) => Math.abs(i.pl)), 1);
+  const rows = shown.map((item) => {
+    const pct = (Math.abs(item.pl) / maxAbs * 100).toFixed(1);
+    const color = item.pl >= 0 ? "var(--green)" : "var(--red)";
+    const lbl = item.pl >= 0 ? `+${Math.round(item.pl).toLocaleString()}` : `${Math.round(item.pl).toLocaleString()}`;
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="min-width:52px;font-size:12px;font-weight:600;text-align:right">${escapeHtml(item.symbol)}</span>
+      <div style="flex:1;background:var(--card-bg);border-radius:3px;height:14px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;opacity:0.85"></div>
+      </div>
+      <span style="min-width:80px;font-size:11px;color:${color};text-align:right">${lbl}</span>
+    </div>`;
+  }).join("");
+  return `<div style="padding:4px 0">${rows}</div>`;
+}
+
+// ── 表現率 vs 持有天數 散點圖 ────────────────────────────────────────────────
+function renderScatterChart(positions, quotes, firstBuyDates) {
+  const today = new Date();
+  const items = positions.map((p) => {
+    const key = `${p.market}_${p.symbol}`;
+    const firstBuy = firstBuyDates[key];
+    if (!firstBuy) return null;
+    const q = quotes[p.symbol];
+    const price = typeof q === "number" ? q : (q?.price ?? null);
+    if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
+    const days = Math.max(0, Math.floor((today - new Date(firstBuy)) / 86400000));
+    const rate = (price - p.avgCost) / p.avgCost * 100;
+    if (Math.abs(rate) > 300) return null;
+    return { symbol: p.symbol, days, rate };
+  }).filter(Boolean);
+  if (items.length < 2) return "<p class=\"muted-text\">需要至少 2 支有首次布局日的標的才能顯示。</p>";
+  const W = 600, H = 200;
+  const PL = 40, PR = 20, PT = 16, PB = 30;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const maxDays = Math.max(...items.map((i) => i.days), 1);
+  const allRates = items.map((i) => i.rate);
+  const minR = Math.min(...allRates, 0), maxR = Math.max(...allRates, 0);
+  const rPad = (maxR - minR || 10) * 0.18;
+  const minV = minR - rPad, maxV = maxR + rPad;
+  const xP = (d) => PL + (d / maxDays) * cW;
+  const yP = (r) => PT + (1 - (r - minV) / (maxV - minV || 1)) * cH;
+  const y0 = yP(0);
+  const yStep = (maxR - minR) > 40 ? 20 : (maxR - minR) > 15 ? 10 : 5;
+  const yLines = [];
+  for (let v = Math.ceil(minV / yStep) * yStep; v <= maxV; v += yStep) {
+    const y = yP(v); if (y < PT - 2 || y > H - PB + 2) continue;
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
+    yLines.push(`<text x="${PL-3}" y="${y+4}" text-anchor="end" font-size="9" fill="var(--muted)">${v>=0?'+':''}${v}%</text>`);
+  }
+  const zeroLine = y0 >= PT && y0 <= H - PB
+    ? `<line x1="${PL}" y1="${y0}" x2="${W-PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4,3"/>` : "";
+  const xLabels = [0, Math.round(maxDays/2), maxDays].map((d) =>
+    `<text x="${xP(d)}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d}天</text>`).join("");
+  const axisLabels = `
+    <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">損益率 ▲</text>
+    <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>`;
+  const dots = items.map((item) => {
+    const x = xP(item.days), y = yP(item.rate);
+    const color = item.rate >= 0 ? "var(--green)" : "var(--red)";
+    const tip = `${item.symbol} ${item.days}天 ${item.rate>=0?'+':''}${item.rate.toFixed(1)}%`;
+    return `<circle cx="${x}" cy="${y}" r="4.5" fill="${color}" opacity="0.8" data-tooltip="${tip}"><title>${tip}</title></circle>
+      <text x="${x}" y="${y-7}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600">${escapeHtml(item.symbol)}</text>`;
+  }).join("");
+  return `<div class="shares-chart-container" style="position:relative">
+    <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
+      ${yLines.join("")}${zeroLine}${xLabels}${axisLabels}${dots}
+    </svg></div>`;
+}
+
+// ── 損益率分布直方圖 ────────────────────────────────────────────────────────
+function renderRateHistogram(positions, quotes) {
+  const buckets = [
+    { label: "<-15%", min: -Infinity, max: -15, color: "#c0392b" },
+    { label: "-15~-10", min: -15, max: -10, color: "#e74c3c" },
+    { label: "-10~-5", min: -10, max: -5, color: "#e67e22" },
+    { label: "-5~0", min: -5, max: 0, color: "#f39c12" },
+    { label: "0~5%", min: 0, max: 5, color: "#27ae60" },
+    { label: "5~10", min: 5, max: 10, color: "#2ecc71" },
+    { label: "10~20", min: 10, max: 20, color: "#1abc9c" },
+    { label: ">20%", min: 20, max: Infinity, color: "#16a085" },
+  ];
+  const rates = positions.map((p) => {
+    const q = quotes[p.symbol];
+    const price = typeof q === "number" ? q : (q?.price ?? null);
+    if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
+    return (price - p.avgCost) / p.avgCost * 100;
+  }).filter((r) => r !== null);
+  if (!rates.length) return "<p class=\"muted-text\">尚無報價資料。</p>";
+  const counts = buckets.map((b) => rates.filter((r) => r >= b.min && r < b.max).length);
+  const maxCount = Math.max(...counts, 1);
+  const W = 600, H = 140;
+  const PL = 18, PR = 10, PT = 18, PB = 36;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const bW = cW / buckets.length;
+  const baselineY = PT + cH;
+  const bars = buckets.map((b, i) => {
+    const cnt = counts[i];
+    const barH = (cnt / maxCount) * cH;
+    const x = PL + i * bW;
+    const y = baselineY - barH;
+    return `
+      <rect x="${x+2}" y="${y}" width="${bW-4}" height="${barH}" fill="${b.color}" rx="2" opacity="0.85"/>
+      ${cnt > 0 ? `<text x="${x+bW/2}" y="${y-3}" text-anchor="middle" font-size="10" fill="var(--text)" font-weight="600">${cnt}</text>` : ""}
+      <text x="${x+bW/2}" y="${baselineY+12}" text-anchor="middle" font-size="8.5" fill="var(--muted)">${b.label}</text>`;
+  }).join("");
+  return `<div class="shares-chart-container">
+    <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
+      <line x1="${PL}" y1="${baselineY}" x2="${W-PR}" y2="${baselineY}" stroke="var(--line)" stroke-width="1"/>
+      ${bars}
+    </svg></div>`;
+}
+
 function renderSnapCalendar(year, month, selectedDate, snapshotDates) {
   const monthLabel = `${year}年${month + 1}月`;
   const firstDay = new Date(year, month, 1).getDay();
@@ -4815,6 +4942,29 @@ function renderCloudSnapshot() {
       <div class="trend-chart">${renderPerfRateTrendChart(state.cloudHistory, state.quotes)}</div>
     </section>
 
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>個股損益貢獻</h3>
+        <span>各標的未實現損益金額（現價估算）</span>
+      </div>
+      ${renderPLContributionChart(positions, state.quotes)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>表現率 vs 持有天數</h3>
+        <span>X 軸：首次布局至今；Y 軸：損益率（需有首次布局日）</span>
+      </div>
+      ${renderScatterChart(positions, state.quotes, state.firstBuyDates)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>損益率分布</h3>
+        <span>各損益率區間持有幾支</span>
+      </div>
+      ${renderRateHistogram(positions, state.quotes)}
+    </section>
 
   `;
   const snapshotDeleteContent = `
