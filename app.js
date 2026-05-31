@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.23.1";
+const APP_VERSION = "v0.23.2";
 const APP_VERSION_NOTE = "刪除當日庫存紀錄移至庫存 tab 底部；B tab 歷史快照日期選擇器 + 查看截圖";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3324,6 +3324,53 @@ async function writeMarketSnapshotPayloads(payloads) {
   };
 }
 
+// 從現有快照重建 AssetFlowLayout 完整歷史（Layout tab 是空的時才需用）
+async function rebuildLayoutHistory() {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  const snapshots = (state.cloudHistory.snapshots || [])
+    .slice()
+    .sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)));
+  const positions = state.cloudHistory.positions || [];
+  if (!snapshots.length) { alert("沒有快照資料"); return; }
+  if (!confirm(`即將從 ${snapshots.length} 個快照重建 AssetFlowLayout 歷史。\n舊資料會先清空再重寫。確定？`)) return;
+  try {
+    await ensureCloudSheetTables();
+    // 先清空 layout 資料列
+    await clearSheetValues(SHEET_NAMES.layout, "A2:G");
+    const rows = [];
+    // 以 market 為 key，依日期排序的快照 list
+    const byMarket = {};
+    for (const s of snapshots) {
+      const mk = normalizeMarketKey(s.market) || "TW";
+      if (!byMarket[mk]) byMarket[mk] = [];
+      byMarket[mk].push(s);
+    }
+    for (const [market, mktSnaps] of Object.entries(byMarket)) {
+      for (let i = 0; i < mktSnaps.length; i++) {
+        const snap = mktSnaps[i];
+        const curPos = positions.filter((p) => p.snapshotId === snap.snapshotId);
+        const prevPos = i > 0
+          ? positions.filter((p) => p.snapshotId === mktSnaps[i - 1].snapshotId)
+          : [];
+        for (const pos of curPos) {
+          const prev = prevPos.find((p) => p.symbol === pos.symbol);
+          const prevShares = prev ? Number(prev.shares ?? 0) : 0;
+          const delta = Number(pos.shares ?? 0) - prevShares;
+          if (delta !== 0 || !prev) {
+            rows.push([snap.date || "", market, pos.symbol, pos.name || "", Number(pos.shares ?? 0), prevShares, delta]);
+          }
+        }
+      }
+    }
+    if (rows.length) await updateSheetValues(SHEET_NAMES.layout, `A2:G${rows.length + 1}`, rows);
+    await loadLatestCloudSnapshot(false);
+    alert(`已重建 ${rows.length} 筆布局歷史，請重新整理 B tab 查看累積布局進度。`);
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "重建失敗");
+  }
+}
+
 async function saveLayoutDeltaToSheet(newPayloads) {
   if (!newPayloads?.length) return;
   try {
@@ -4749,6 +4796,9 @@ function renderCloudSnapshot() {
           ${(state.cloudHistory.positions || []).some((p) => Number(p.shares || 0) === 0 && Number(p.avgCost || 0) === 0)
             ? `<button class="button compact ghost danger" id="cleanup-zero-btn" title="偵測到 Sheet 有股數=0 且均價=0 的廢棄倉位">清除廢棄列</button>`
             : ""}
+          ${!(state.cloudHistory.layout || []).length
+            ? `<button class="button compact secondary" id="rebuild-layout-btn" title="AssetFlowLayout tab 是空的，點此從現有快照重建">重建布局歷史</button>`
+            : ""}
         </div>
       </div>
       <div id="symbol-chart-display" class="symbol-chart-display" style="display:none">
@@ -4982,6 +5032,8 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelector("#fix-symbols-btn")?.addEventListener("click", () => fixSheetSymbols());
   // B tab：清除廢棄倉位
   els.cloudSnapshot.querySelector("#cleanup-zero-btn")?.addEventListener("click", () => cleanupZeroPositions());
+  // B tab：重建布局歷史
+  els.cloudSnapshot.querySelector("#rebuild-layout-btn")?.addEventListener("click", () => rebuildLayoutHistory());
   // 筆按鈕：切換 edit mode
   els.cloudSnapshot.querySelectorAll(".detail-edit-toggle").forEach((btn) => {
     btn.addEventListener("click", (e) => {
