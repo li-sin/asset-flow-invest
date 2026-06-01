@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.6";
-const APP_VERSION_NOTE = "修正 AVGO/PL 無現價：Sheet symbol 欄位空白導致 quote lookup 鍵值不符";
+const APP_VERSION = "v0.25.7";
+const APP_VERSION_NOTE = "診斷模式：console.log fetchQuotes 送出/收到 + 無報價 symbol";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3902,12 +3902,15 @@ async function fetchQuotes(symbols, retryCount = 0) {
   if (!symbols?.length || !googleAccessToken) return;
   try {
     const symbolList = symbols.map((s) => { const t = String(s || "").trim(); return /^\d/.test(t) ? `${t}.TW` : t; }).filter(Boolean).join(",");
+    console.log("[fetchQuotes] 送出:", symbolList);
     const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
     const data = await res.json();
     if (data?.quotes) {
       for (const [k, v] of Object.entries(data.quotes)) {
         state.quotes[k.replace(/\.TW$/i, "")] = v;
       }
+      console.log("[fetchQuotes] 收到:", Object.keys(data.quotes).join(","));
+      console.log("[fetchQuotes] AVGO:", state.quotes["AVGO"], "PL:", state.quotes["PL"]);
       renderCloudSnapshot();
     } else if (retryCount < 2) {
       setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
@@ -4983,6 +4986,7 @@ function renderCloudSnapshot() {
     // 1. 計算每列數值
     const augmented = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
+      if (!quote) console.log(`[detail][${item.market}] ${JSON.stringify(row.symbol)} 無報價, state.quotes keys:`, Object.keys(state.quotes).filter(k => /^[A-Z]/.test(k)).join(","));
       const price = typeof quote === 'number' ? quote : (quote?.price ?? null);
       const avgCost = Number(row.avgCost || 0);
       const returnRate = (price !== null && avgCost > 0) ? ((price - avgCost) / avgCost * 100) : null;
