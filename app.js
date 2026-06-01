@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.8";
-const APP_VERSION_NOTE = "豎向欄位裁切：股數欄 + 均價欄獨立 OCR 提高數值精確度";
+const APP_VERSION = "v0.24.9";
+const APP_VERSION_NOTE = "首頁重排、水位趨勢市場切換、刪累積布局、明細行動版 label:value";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -85,6 +85,7 @@ const state = {
   },
   dashboardTab: "home",
   levelChartRange: "1M",
+  levelChartMarket: "TW",
   plTrendRange: "1M",
   scatterRateCap: null,
   scatterAmountCap: null,
@@ -4113,13 +4114,14 @@ function renderDailyShareMatrix(points) {
 
 function renderTargetLevelChart(history) {
   const rangeKey = state.levelChartRange || "1M";
+  const marketKey = state.levelChartMarket || "TW";
   const rangeDays = { "1M": 31, "6M": 183, "1Y": 365 };
   const days = rangeDays[rangeKey] || 31;
   const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const filtered = history.filter((item) => item.date >= cutoff);
+  const filtered = history.filter((item) => item.date >= cutoff && (marketKey === "ALL" || item.market === marketKey));
   const allDates = [...new Set(filtered.map((item) => item.date))].sort();
   if (!allDates.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
-  const markets = ["TW", "US"];
+  const markets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
   const allVals = filtered.map((i) => i.targetLevel);
   const minVal = Math.max(0, Math.floor(Math.min(...allVals) / 10) * 10 - 5);
@@ -4167,10 +4169,13 @@ function renderTargetLevelChart(history) {
   const rangeBtns = ["1M", "6M", "1Y"].map((r) =>
     `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-level-range="${r}">${r}</button>`
   ).join("");
+  const marketBtns = [["TW", "台股"], ["US", "美股"], ["ALL", "全部"]].map(([m, label]) =>
+    `<button class="level-range-btn${m === marketKey ? " is-active" : ""}" type="button" data-level-market="${m}">${label}</button>`
+  ).join("");
   return `
     <div class="level-chart-wrap">
       <div class="level-chart-topbar">
-        <div class="level-chart-legend">${legend}</div>
+        <div class="level-range-btns">${marketBtns}</div>
         <div class="level-range-btns">${rangeBtns}</div>
       </div>
       <div class="level-chart-container" style="position:relative">
@@ -4929,12 +4934,7 @@ function renderCloudSnapshot() {
         ? ((price - prevAvgCost) / prevAvgCost * 100)
         : null;
       const rateDelta = (returnRate !== null && prevRate !== null) ? returnRate - prevRate : null;
-      // 累積布局進度：目前持股 / 歷史正向 delta 合計
-      const layoutRows = (state.cloudHistory.layout || [])
-        .filter((r) => r.symbol === row.symbol && normalizeMarketKey(r.market) === item.market);
-      const cumulativeAdded = layoutRows.reduce((sum, r) => sum + Math.max(0, Number(r.delta || 0)), 0);
-      const layoutProgress = cumulativeAdded > 0 ? (shares / cumulativeAdded) * 100 : null;
-      return { row, price, avgCost, returnRate, perfRate, dailyGain, firstBuyVal, rateDelta, layoutProgress, cumulativeAdded };
+      return { row, price, avgCost, returnRate, perfRate, dailyGain, firstBuyVal, rateDelta };
     });
     // 2. 排序
     const { key: sKey, dir: sDir } = state.detailSort;
@@ -4949,7 +4949,6 @@ function renderCloudSnapshot() {
         case "rate":      va = a.returnRate;    vb = b.returnRate;    break;
         case "perf":     va = a.perfRate;       vb = b.perfRate;       break;
         case "dailyGain":va = a.dailyGain;      vb = b.dailyGain;      break;
-        case "layout":   va = a.layoutProgress; vb = b.layoutProgress; break;
         case "cost":      va = a.row.cost;      vb = b.row.cost;      break;
         case "firstBuy":  va = a.firstBuyVal;   vb = b.firstBuyVal;   break;
         default:         va = a.row.symbol;    vb = b.row.symbol;
@@ -4961,7 +4960,7 @@ function renderCloudSnapshot() {
     });
     // 3. Render
     const sortArrow = (key) => state.detailSort.key === key ? (state.detailSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-    const rows = augmented.map(({ row, price, returnRate, perfRate, dailyGain, firstBuyVal, rateDelta, layoutProgress, cumulativeAdded }) => {
+    const rows = augmented.map(({ row, price, returnRate, perfRate, dailyGain, firstBuyVal, rateDelta }) => {
       const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
       const deltaSpan = rateDelta !== null
         ? `<small style="color:${rateDelta >= 0 ? 'var(--green)' : 'var(--red)'};display:block">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
@@ -4976,9 +4975,6 @@ function renderCloudSnapshot() {
       const gainColor = dailyGain !== null ? (dailyGain >= 0 ? 'var(--green)' : 'var(--red)') : '';
       const dailyGainDisplay = dailyGain !== null
         ? `<span style="color:${gainColor};font-variant-numeric:tabular-nums">${dailyGain >= 0 ? '+' : ''}${formatNumber(Math.round(dailyGain))}</span>`
-        : "<span class=\"muted-text\">—</span>";
-      const layoutProgressDisplay = layoutProgress !== null
-        ? `<span style="font-variant-numeric:tabular-nums">${formatNumber(Number(row.shares || 0))} / ${formatNumber(Math.round(cumulativeAdded))}</span><br><small class="muted-text">${layoutProgress.toFixed(0)}%</small>`
         : "<span class=\"muted-text\">—</span>";
       const editMode = !!state.detailEditMode[item.market];
       const sharesCell = editMode
@@ -4998,17 +4994,16 @@ function renderCloudSnapshot() {
         : (firstBuyVal ? escapeHtml(firstBuyVal) : '<span class="muted-text">—</span>');
       return `
         <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0"${editMode ? '' : ' style="cursor:pointer"'}>
-          <td>${escapeHtml(row.symbol)}</td>
-          <td>${escapeHtml(row.name)}</td>
-          <td>${sharesCell}</td>
-          <td>${avgCostCell}</td>
-          <td>${priceCell}</td>
-          <td>${rateDisplay}</td>
-          <td>${perfDisplay}</td>
-          <td>${dailyGainDisplay}</td>
-          <td>${layoutProgressDisplay}</td>
-          <td>${escapeHtml(formatMoney(row.cost))}</td>
-          <td class="first-buy-cell">${firstBuyCell}</td>
+          <td data-label="代號">${escapeHtml(row.symbol)}</td>
+          <td data-label="名稱">${escapeHtml(row.name)}</td>
+          <td data-label="股數">${sharesCell}</td>
+          <td data-label="均價">${avgCostCell}</td>
+          <td data-label="現價">${priceCell}</td>
+          <td data-label="損益率">${rateDisplay}</td>
+          <td data-label="表現率">${perfDisplay}</td>
+          <td data-label="日均損益">${dailyGainDisplay}</td>
+          <td data-label="估算成本">${escapeHtml(formatMoney(row.cost))}</td>
+          <td class="first-buy-cell" data-label="布局日">${firstBuyCell}</td>
         </tr>
       `;
     }).join("");
@@ -5033,12 +5028,11 @@ function renderCloudSnapshot() {
                 <th class="sortable-th" data-sort-key="rate">損益率${sortArrow("rate")}</th>
                 <th class="sortable-th" data-sort-key="perf">表現率（%/日）${sortArrow("perf")}</th>
                 <th class="sortable-th" data-sort-key="dailyGain">日均損益（元）${sortArrow("dailyGain")}</th>
-                <th class="sortable-th" data-sort-key="layout" title="目前持股 / 歷史累積加碼股數">累積布局進度${sortArrow("layout")}</th>
                 <th class="sortable-th" data-sort-key="cost">估算成本${sortArrow("cost")}</th>
                 <th class="sortable-th" data-sort-key="firstBuy">首次布局日${sortArrow("firstBuy")} <button class="detail-edit-toggle${state.detailEditMode[item.market] ? ' active' : ''}" data-edit-market="${escapeHtml(item.market)}" title="${state.detailEditMode[item.market] ? '關閉編輯模式' : '開啟編輯（可修改股數、均價、布局日）'}">✎</button></th>
               </tr>
             </thead>
-            <tbody>${rows || "<tr><td colspan=\"11\">沒有庫存</td></tr>"}</tbody>
+            <tbody>${rows || "<tr><td colspan=\"10\">沒有庫存</td></tr>"}</tbody>
           </table>
         </div>
       </section>
@@ -5094,19 +5088,19 @@ function renderCloudSnapshot() {
 
       <section class="dashboard-card">
         <div class="card-heading">
-          <h3>損益趨勢</h3>
-          <span>各市場未實現總損益（以現價估算，TWD / USD）</span>
+          <h3>建議水位趨勢</h3>
+          <span>台股 / 美股歷史建議水位（%）</span>
         </div>
-        <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes)}</div>
+        ${renderTargetLevelChart(state.targetLevelHistory)}
       </section>
     </div>
 
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>建議水位趨勢</h3>
-        <span>台股 / 美股歷史建議水位（%）</span>
+        <h3>損益趨勢</h3>
+        <span>各市場未實現總損益（以現價估算，TWD / USD）</span>
       </div>
-      ${renderTargetLevelChart(state.targetLevelHistory)}
+      <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes)}</div>
     </section>
 
     <section class="dashboard-card">
@@ -5374,6 +5368,12 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-level-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.levelChartRange = btn.dataset.levelRange;
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-level-market]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.levelChartMarket = btn.dataset.levelMarket;
       renderCloudSnapshot();
     });
   });

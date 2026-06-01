@@ -1943,6 +1943,43 @@ textarea {
     width: 100%;
     box-sizing: border-box;
   }
+  /* 明細表格（.compact-table 內）：標籤左、數值右的 flex 排版 */
+  .compact-table .parsed-table tr {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .compact-table .parsed-table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--line, #2a2a2a);
+  }
+  .compact-table .parsed-table td:last-child {
+    border-bottom: none;
+  }
+  .compact-table .parsed-table td:first-child {
+    width: auto;
+    margin-bottom: 0;
+    font-weight: 700;
+    background: var(--surface2, #1e1e1e);
+    border-radius: 4px 4px 0 0;
+    padding: 6px 8px;
+  }
+  .compact-table .parsed-table td::before {
+    content: attr(data-label);
+    font-size: 0.75em;
+    color: var(--muted, #888);
+    display: inline;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 56px;
+  }
+  .compact-table .parsed-table td:first-child::before {
+    display: none;
+  }
   .row-line-stage {
     max-width: 100%;
     overflow: hidden;
