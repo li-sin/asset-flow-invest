@@ -2465,13 +2465,13 @@ function buildArkName(pendingNameLines, beforeHolding, symbol) {
 }
 
 function cleanArkNamePart(value) {
-  let text = String(value || “”)
-    .replace(/現\s*股.*/, “”)
-    .replace(/\b\d{4,6}[A-Z]?\b/g, “”)       // 台股代號
-    .replace(/\b([A-Z]{1,5})\b/g, (m) => SYMBOL_NAMES[m] ? “” : m)  // 美股代號
-    .replace(/[\d,]+(?:\.\d+)?/g, “”)
-    .replace(/[《》\[\]「」”'`~!@#$%^&*_=+|\\/:;，。,.?？、三喧呈””-]/g, “ “)
-    .replace(/\s+/g, “ “)
+  let text = String(value || "")
+    .replace(/現\s*股.*/, "")
+    .replace(/\b\d{4,6}[A-Z]?\b/g, "")
+    .replace(/\b([A-Z]{1,5})\b/g, (m) => SYMBOL_NAMES[m] ? "" : m)  // 美股代號
+    .replace(/[\d,]+(?:\.\d+)?/g, "")
+    .replace(/[《》\[\]「」"'`~!@#$%^&*_=+|\\/:;，。,.?？、三喧呈””-]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   const tokens = text.split(" ").filter(Boolean);
