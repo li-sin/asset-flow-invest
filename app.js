@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.7";
-const APP_VERSION_NOTE = "診斷模式：console.log fetchQuotes 送出/收到 + 無報價 symbol";
+const APP_VERSION = "v0.25.8";
+const APP_VERSION_NOTE = "診斷模式 2：parsePositionRows 過濾 log + fetchQuotes AVGO/PL 確認";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3824,7 +3824,7 @@ function parseSnapshotRows(values) {
 }
 
 function parsePositionRows(values) {
-  return (values || []).map((row) => ({
+  const mapped = (values || []).map((row) => ({
     snapshotId: row[0] || "",
     date: normalizeDateText(row[1] || ""),
     market: String(row[2] || "").trim(),
@@ -3835,7 +3835,11 @@ function parsePositionRows(values) {
     avgCost: Number(row[7] || 0),
     source: String(row[8] || "").trim(),
     createdAt: row[9] || "",
-  })).filter((row) => row.snapshotId && row.symbol);
+  }));
+  const filtered = mapped.filter((row) => row.snapshotId && row.symbol);
+  const dropped = mapped.filter((r) => !r.snapshotId || !r.symbol);
+  if (dropped.length) console.log("[parsePositionRows] 被過濾掉的 rows:", dropped.map((r) => `symbol=${JSON.stringify(r.symbol)} snapshotId=${JSON.stringify(r.snapshotId)}`));
+  return filtered;
 }
 
 function parseLayoutRows(values) {
@@ -3902,7 +3906,8 @@ async function fetchQuotes(symbols, retryCount = 0) {
   if (!symbols?.length || !googleAccessToken) return;
   try {
     const symbolList = symbols.map((s) => { const t = String(s || "").trim(); return /^\d/.test(t) ? `${t}.TW` : t; }).filter(Boolean).join(",");
-    console.log("[fetchQuotes] 送出:", symbolList);
+    console.log("[fetchQuotes] 送出 symbols:", symbolList);
+    console.log("[fetchQuotes] AVGO in list:", symbolList.includes("AVGO"), "PL in list:", symbolList.includes(",PL,") || symbolList.endsWith(",PL") || symbolList.startsWith("PL,"));
     const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
     const data = await res.json();
     if (data?.quotes) {
