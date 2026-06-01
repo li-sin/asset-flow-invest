@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.1";
-const APP_VERSION_NOTE = "修正首頁 positions 只取單一市場快照的 bug，改為台股+美股最新快照合併";
+const APP_VERSION = "v0.25.2";
+const APP_VERSION_NOTE = "修正美股小數股數解析失敗：移除整數限制；豎向裁切改以 rowRects 為基準對齊";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1164,13 +1164,14 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
   }
 
   // ── 豎向欄位裁切：股數欄 + 均價欄，提高數值準確度 ──────────────────────
+  // 以 rowRects 數量為基準（不依賴 rows 是否全部解析成功）
   const columnCrops = [];
-  if (rows.length > 0 && rowRects.length > 0) {
+  if (rowRects.length > 0) {
     const numAttempts = [{ lang: "eng", label: "數值欄" }];
     const colY = Math.max(0, Math.min(...rowRects.map((r) => r.y)) - 0.01);
     const colBottom = Math.min(1, Math.max(...rowRects.map((r) => r.y + r.height)) + 0.01);
     const colH = colBottom - colY;
-    const SHARES_RECT  = { x: 0.535, y: colY, width: 0.165, height: colH };
+    const SHARES_RECT   = { x: 0.535, y: colY, width: 0.165, height: colH };
     const AVG_COST_RECT = { x: 0.700, y: colY, width: 0.210, height: colH };
 
     const [sharesUrl, avgCostUrl] = await Promise.all([
@@ -1189,9 +1190,19 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
 
     const sharesVals  = extractColumnNumbersFlex(sharesOcr.text  || "");
     const avgCostVals = extractColumnNumbersFlex(avgCostOcr.text || "");
+    const expectCount = rowRects.length;
 
-    if (sharesVals.length  === rows.length) rows.forEach((row, i) => { if (sharesVals[i]  != null) row.shares  = sharesVals[i]; });
-    if (avgCostVals.length === rows.length) rows.forEach((row, i) => { if (avgCostVals[i] != null) row.avgCost = avgCostVals[i]; });
+    // 以 rowRects 索引對齊：rows 中的每一筆找到對應的欄位值來覆蓋
+    // rows 的第 n 筆對應 crops 中非 skipped 的第 n 個 rect → 用 crops 順序推
+    if (sharesVals.length === expectCount || avgCostVals.length === expectCount) {
+      let rowIdx = 0;
+      for (let ri = 0; ri < crops.length && rowIdx < rows.length; ri++) {
+        if (crops[ri].status !== "imported") continue;
+        if (sharesVals.length  === expectCount && sharesVals[ri]  != null) rows[rowIdx].shares  = sharesVals[ri];
+        if (avgCostVals.length === expectCount && avgCostVals[ri] != null) rows[rowIdx].avgCost = avgCostVals[ri];
+        rowIdx++;
+      }
+    }
   }
 
   return { rows, crops, skipped, columnCrops };
@@ -2141,7 +2152,8 @@ function parseArkRowCropText(text, cropDataUrl, label) {
   const numbers = extractNumbersAfterHolding(normalized);
   if (numbers.length < 2) return null;
 
-  const shares = numbers.find((value) => Number.isInteger(value) && value > 0) ?? null;
+  // 股數：取第一個正數（美股允許小數股數，不限整數）
+  const shares = numbers.find((value) => value > 0) ?? null;
   const rawAvgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
   const avgCost = normalizeArkAvgCost(rawAvgCost);
   if (shares === null || avgCost === null) return null;
