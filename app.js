@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.6";
-const APP_VERSION_NOTE = "散點圖參考線：點擊可靠；線上綠/線下紅著色";
+const APP_VERSION = "v0.26.7";
+const APP_VERSION_NOTE = "散點圖參考線：修 listener 累積問題，點擊穩定生效";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -5590,61 +5590,61 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  // 散點圖參考線：點擊圓點畫出以該點日均損益為斜率的虛線基準，並按線上/線下著色
-  els.cloudSnapshot.addEventListener("click", (e) => {
-    const grp = e.target.closest("[data-scatter-ref]");
-    if (!grp) return;
-    const refKey = grp.dataset.refKey;
-    const symbol = grp.dataset.refSymbol;
-    const svg = grp.closest("svg");
-    if (!svg) return;
-    const refLayer = svg.querySelector(`.scatter-ref-layer[data-ref-key="${refKey}"]`);
-    if (!refLayer) return;
-    const allGrps = [...svg.querySelectorAll(`[data-scatter-ref][data-ref-key="${refKey}"]`)];
-    if (refLayer.dataset.activeSymbol === symbol) {
-      // 再次點擊同一點 → 清除，還原所有點原始顏色
-      refLayer.innerHTML = "";
-      refLayer.dataset.activeSymbol = "";
+  // 散點圖參考線：綁在各 <g data-scatter-ref> 上（避免 renderCloudSnapshot 重複累積 listener）
+  els.cloudSnapshot.querySelectorAll("[data-scatter-ref]").forEach((grp) => {
+    grp.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const refKey = grp.dataset.refKey;
+      const symbol = grp.dataset.refSymbol;
+      const svg = grp.closest("svg");
+      if (!svg) return;
+      const refLayer = svg.querySelector(`.scatter-ref-layer[data-ref-key="${refKey}"]`);
+      if (!refLayer) return;
+      const allGrps = [...svg.querySelectorAll(`[data-scatter-ref][data-ref-key="${refKey}"]`)];
+      if (refLayer.dataset.activeSymbol === symbol) {
+        // 再次點擊同一點 → 清除，還原所有點原始顏色
+        refLayer.innerHTML = "";
+        refLayer.dataset.activeSymbol = "";
+        allGrps.forEach((g) => {
+          const c = g.querySelector("circle");
+          if (!c) return;
+          c.setAttribute("fill", g.dataset.refOrigColor || "var(--green)");
+          c.removeAttribute("stroke"); c.removeAttribute("stroke-width");
+          c.setAttribute("opacity", "0.85");
+        });
+        return;
+      }
+      const refSlope = parseFloat(grp.dataset.refSlope);
+      // 依基準線斜率為所有點著色
       allGrps.forEach((g) => {
         const c = g.querySelector("circle");
         if (!c) return;
-        c.setAttribute("fill", g.dataset.refOrigColor || "var(--green)");
-        c.removeAttribute("stroke"); c.removeAttribute("stroke-width");
-        c.setAttribute("opacity", "0.85");
+        if (g.dataset.refSymbol === symbol) {
+          c.setAttribute("fill", g.dataset.refOrigColor || "var(--green)");
+          c.setAttribute("stroke", "var(--text)");
+          c.setAttribute("stroke-width", "2");
+          c.setAttribute("opacity", "1");
+        } else {
+          c.removeAttribute("stroke"); c.removeAttribute("stroke-width");
+          const dx = parseFloat(g.dataset.refDotX), dy = parseFloat(g.dataset.refDotY);
+          c.setAttribute("fill", dy >= refSlope * dx ? "var(--green)" : "var(--red)");
+          c.setAttribute("opacity", "0.9");
+        }
       });
-      return;
-    }
-    const refSlope = parseFloat(grp.dataset.refSlope);
-    // 依基準線斜率為所有點著色
-    allGrps.forEach((g) => {
-      const c = g.querySelector("circle");
-      if (!c) return;
-      if (g.dataset.refSymbol === symbol) {
-        // 選取點：高亮，保留原色
-        c.setAttribute("fill", g.dataset.refOrigColor || "var(--green)");
-        c.setAttribute("stroke", "var(--text)");
-        c.setAttribute("stroke-width", "2");
-        c.setAttribute("opacity", "1");
-      } else {
-        c.removeAttribute("stroke"); c.removeAttribute("stroke-width");
-        const dx = parseFloat(g.dataset.refDotX), dy = parseFloat(g.dataset.refDotY);
-        c.setAttribute("fill", dy >= refSlope * dx ? "var(--green)" : "var(--red)");
-        c.setAttribute("opacity", "0.9");
-      }
+      // 畫參考虛線（裁切到圖表區域）並標示代號
+      const x1 = grp.dataset.refX1, y1 = grp.dataset.refY1;
+      const x2 = grp.dataset.refX2, y2 = grp.dataset.refY2;
+      const ptNum = parseFloat(grp.dataset.refPt);
+      const pbNum = parseFloat(grp.dataset.refHpb);
+      const ly = Math.max(ptNum + 10, Math.min(pbNum - 4, parseFloat(y2)));
+      refLayer.dataset.activeSymbol = symbol;
+      refLayer.innerHTML = `
+        <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+              stroke="#999" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.8"
+              clip-path="url(#scatter-ref-clip-${refKey})"/>
+        <text x="${parseFloat(x2) - 4}" y="${ly}" text-anchor="end" font-size="9" font-weight="600"
+              fill="var(--muted)" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(symbol)}</text>`;
     });
-    // 畫參考虛線（裁切到圖表區域）並標示代號
-    const x1 = grp.dataset.refX1, y1 = grp.dataset.refY1;
-    const x2 = grp.dataset.refX2, y2 = grp.dataset.refY2;
-    const ptNum = parseFloat(grp.dataset.refPt);
-    const pbNum = parseFloat(grp.dataset.refHpb);
-    const ly = Math.max(ptNum + 10, Math.min(pbNum - 4, parseFloat(y2)));
-    refLayer.dataset.activeSymbol = symbol;
-    refLayer.innerHTML = `
-      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-            stroke="#999" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.8"
-            clip-path="url(#scatter-ref-clip-${refKey})"/>
-      <text x="${parseFloat(x2) - 4}" y="${ly}" text-anchor="end" font-size="9" font-weight="600"
-            fill="var(--muted)" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(symbol)}</text>`;
   });
   els.cloudSnapshot.querySelectorAll("[data-symbol-row]").forEach((row) => {
     row.addEventListener("click", () => {
