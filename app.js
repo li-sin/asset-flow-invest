@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.6";
-const APP_VERSION_NOTE = "散點圖加持有天數窗口過濾按鈕（≤90/180/365天）";
+const APP_VERSION = "v0.24.7";
+const APP_VERSION_NOTE = "美股 OCR 代號識別：加入16支美股代號對照表、US symbol 解析邏輯";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -35,6 +35,7 @@ const SHEET_HEADERS = {
   firstBuy: ["symbol", "first_buy_date", "market"],
 };
 const SYMBOL_NAMES = {
+  // ── 台股 ──────────────────────────────────────────────────────────────────
   "0050": "元大台灣50",
   "0051": "元大中型100",
   "0052": "富邦科技",
@@ -51,6 +52,23 @@ const SYMBOL_NAMES = {
   "00988A": "主動統一全球創新",
   "2327": "國巨",
   "2330": "台積電",
+  // ── 美股 ──────────────────────────────────────────────────────────────────
+  "AMAT": "應用材料",
+  "AMD": "超微半導體",
+  "AVGO": "博通",
+  "BE": "Bloom Energy",
+  "BKSY": "BlackSky Technology",
+  "CSCO": "思科",
+  "FLY": "Firefly Aerospace",
+  "GEV": "GE Vernova",
+  "INTC": "英特爾",
+  "LRCX": "科林研發",
+  "MU": "美光科技",
+  "NVDA": "輝達",
+  "PL": "Planet Labs",
+  "SATL": "Satellogic",
+  "SNDK": "SanDisk",
+  "TSM": "台積電 ADR",
 };
 
 const state = {
@@ -2303,7 +2321,10 @@ function parseArkPositionRows(lines) {
     const symbolInfo = findNearbySymbol(lines, index, pendingNameLines);
     if (symbolInfo?.index > index) consumed.add(symbolInfo.index);
 
-    const symbol = symbolInfo?.symbol || "";
+    // fallback：若 findNearbySymbol 未找到代號，嘗試從名稱文字（含 beforeHolding）提取已知代號
+    const symbol = symbolInfo?.symbol
+      || findKnownSymbolInText([...pendingNameLines, beforeHolding].join(" "))
+      || "";
     const ocrName = buildArkName(pendingNameLines, beforeHolding, symbol);
     const officialName = lookupSymbolName(symbol);
     const shares = parseNumberToken(holdingMatch[1]);
@@ -2404,6 +2425,11 @@ function isTwSymbol(value) {
   return /^\d{4,6}[A-Z]?$/.test(String(value || "").trim());
 }
 
+function isUsSymbol(value) {
+  const s = String(value || "").trim().toUpperCase();
+  return /^[A-Z]{1,5}$/.test(s) && Boolean(SYMBOL_NAMES[s]);
+}
+
 function findNearbySymbol(lines, index, pendingNameLines) {
   for (let offset = 1; offset <= 4; offset += 1) {
     const candidateLine = lines[index + offset];
@@ -2424,7 +2450,9 @@ function findNearbySymbol(lines, index, pendingNameLines) {
 function exactSymbolFromLine(line) {
   if (/[\u3400-\u9fff]/.test(String(line || ""))) return "";
   const compact = compactText(line).replace(/[^\dA-Za-z]/g, "").toUpperCase();
-  return isTwSymbol(compact) ? compact : "";
+  if (isTwSymbol(compact)) return compact;
+  if (isUsSymbol(compact)) return compact;
+  return "";
 }
 
 function buildArkName(pendingNameLines, beforeHolding, symbol) {
@@ -2437,12 +2465,13 @@ function buildArkName(pendingNameLines, beforeHolding, symbol) {
 }
 
 function cleanArkNamePart(value) {
-  let text = String(value || "")
-    .replace(/現\s*股.*/, "")
-    .replace(/\b\d{4,6}[A-Z]?\b/g, "")
-    .replace(/[\d,]+(?:\.\d+)?/g, "")
-    .replace(/[《》\[\]「」"'`~!@#$%^&*_=+|\\/:;，。,.?？、三喧呈””-]/g, " ")
-    .replace(/\s+/g, " ")
+  let text = String(value || “”)
+    .replace(/現\s*股.*/, “”)
+    .replace(/\b\d{4,6}[A-Z]?\b/g, “”)       // 台股代號
+    .replace(/\b([A-Z]{1,5})\b/g, (m) => SYMBOL_NAMES[m] ? “” : m)  // 美股代號
+    .replace(/[\d,]+(?:\.\d+)?/g, “”)
+    .replace(/[《》\[\]「」”'`~!@#$%^&*_=+|\\/:;，。,.?？、三喧呈””-]/g, “ “)
+    .replace(/\s+/g, “ “)
     .trim();
 
   const tokens = text.split(" ").filter(Boolean);
