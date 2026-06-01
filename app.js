@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.1";
-const APP_VERSION_NOTE = "損益趨勢 Y 軸 nice-step；散點圖 X/Y 換為連續滑軸動態顯示";
+const APP_VERSION = "v0.26.2";
+const APP_VERSION_NOTE = "編輯持股數後自動重算 layout delta；趨勢圖 X 軸右邊標籤不再溢出";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -464,10 +464,61 @@ async function savePositionEdits(market, symbol, shares, avgCost) {
         ? { ...p, shares, avgCost }
         : p
     );
+    await recalcLayoutAfterPositionEdit(market, symbol, latestSnap.snapshotId, shares);
     renderCloudSnapshot();
   } catch (err) {
     console.error(err);
     alert(err.message || "儲存失敗");
+  }
+}
+
+async function recalcLayoutAfterPositionEdit(market, symbol, editedSnapshotId, newShares) {
+  const allPositions = state.cloudHistory.positions || [];
+  const symbolName = allPositions.find((p) => p.snapshotId === editedSnapshotId && p.symbol === symbol)?.name || "";
+  const normalizedMarket = normalizeMarketKey(market);
+  const mktSnaps = (state.cloudHistory.snapshots || [])
+    .filter((s) => normalizeMarketKey(s.market) === normalizedMarket)
+    .sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)));
+  const editedIdx = mktSnaps.findIndex((s) => s.snapshotId === editedSnapshotId);
+  if (editedIdx < 0) return;
+  const editedSnap = mktSnaps[editedIdx];
+  const editedDate = editedSnap.date || editedSnap.createdAt?.slice(0, 10) || "";
+  const prevSnap = editedIdx > 0 ? mktSnaps[editedIdx - 1] : null;
+  const prevPos = prevSnap ? allPositions.find((p) => p.snapshotId === prevSnap.snapshotId && p.symbol === symbol) : null;
+  const prevShares = prevPos ? Number(prevPos.shares ?? 0) : 0;
+  const nextSnap = editedIdx + 1 < mktSnaps.length ? mktSnaps[editedIdx + 1] : null;
+  const nextDate = nextSnap ? (nextSnap.date || nextSnap.createdAt?.slice(0, 10) || "") : null;
+  const nextPos = nextSnap ? allPositions.find((p) => p.snapshotId === nextSnap.snapshotId && p.symbol === symbol) : null;
+
+  const updateMemLayout = (date, shares, pShares) => {
+    const newRow = { date, market: normalizedMarket, symbol, name: symbolName, shares, prevShares: pShares, delta: shares - pShares };
+    const idx = (state.cloudHistory.layout || []).findIndex(
+      (l) => l.date === date && l.symbol === symbol && normalizeMarketKey(l.market) === normalizedMarket
+    );
+    if (!state.cloudHistory.layout) state.cloudHistory.layout = [];
+    if (idx >= 0) state.cloudHistory.layout[idx] = newRow;
+    else state.cloudHistory.layout.push(newRow);
+  };
+
+  updateMemLayout(editedDate, newShares, prevShares);
+  if (nextSnap && nextPos) updateMemLayout(nextDate, Number(nextPos.shares ?? 0), newShares);
+
+  try {
+    const values = await readSheetValues(SHEET_NAMES.layout, "A:G");
+    const datesToUpdate = new Set([editedDate, ...(nextDate ? [nextDate] : [])]);
+    for (const { row, sheetRow } of values.slice(1).map((r, i) => ({ row: r, sheetRow: i + 2 }))) {
+      if (row[2] !== symbol || normalizeMarketKey(row[1]) !== normalizedMarket || !datesToUpdate.has(row[0])) continue;
+      const memRow = (state.cloudHistory.layout || []).find(
+        (l) => l.date === row[0] && l.symbol === symbol && normalizeMarketKey(l.market) === normalizedMarket
+      );
+      if (!memRow) continue;
+      await sheetsFetch(
+        `/values/${sheetRange(SHEET_NAMES.layout, `A${sheetRow}:G${sheetRow}`)}?valueInputOption=RAW`,
+        { method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[memRow.date, memRow.market, memRow.symbol, memRow.name, memRow.shares, memRow.prevShares, memRow.delta]] }) }
+      );
+    }
+  } catch (err) {
+    console.warn("recalcLayoutAfterPositionEdit sheet update failed:", err);
   }
 }
 
@@ -4299,7 +4350,8 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   const labelStep = Math.max(1, Math.floor(dates.length / 5));
   const xLabels = dates.map((d, i) => {
     if (i % labelStep !== 0 && i !== dates.length - 1) return "";
-    return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
+    const anchor = i === dates.length - 1 ? "end" : "middle";
+    return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="${anchor}" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join("");
   const yStep = maxV > 5000 ? 1000 : maxV > 1000 ? 500 : maxV > 200 ? 100 : maxV > 50 ? 20 : 10;
   const yLines = [];
@@ -4411,7 +4463,8 @@ function renderTimedSvg(series, dates, W = 600, H = 140) {
   const labelStep = Math.max(1, Math.floor(dates.length / maxLabels));
   const xLabels = dates.map((d, i) => {
     if (i % labelStep !== 0 && i !== dates.length - 1) return "";
-    return `<text x="${xPos(d)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
+    const anchor = i === dates.length - 1 ? "end" : "middle";
+    return `<text x="${xPos(d)}" y="${H - 4}" text-anchor="${anchor}" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join("");
   // 折線與圓點
   const svgLines = series.map(({ pts, color }) => {
