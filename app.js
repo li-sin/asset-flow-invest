@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.9";
-const APP_VERSION_NOTE = "首頁重排、水位趨勢市場切換、刪累積布局、明細行動版 label:value";
+const APP_VERSION = "v0.25.0";
+const APP_VERSION_NOTE = "全圖表市場切換：台股/美股/全部共享 state，8 張圖表同步過濾";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4112,6 +4112,14 @@ function renderDailyShareMatrix(points) {
   }).join("");
 }
 
+// ── 共用：市場切換按鈕（台股 / 美股 / 全部），控制 state.levelChartMarket ──────
+function renderMarketBtns() {
+  const mkt = state.levelChartMarket || "TW";
+  return [["TW", "台股"], ["US", "美股"], ["ALL", "全部"]].map(([m, label]) =>
+    `<button class="level-range-btn${m === mkt ? " is-active" : ""}" type="button" data-level-market="${m}">${label}</button>`
+  ).join("");
+}
+
 function renderTargetLevelChart(history) {
   const rangeKey = state.levelChartRange || "1M";
   const marketKey = state.levelChartMarket || "TW";
@@ -4169,9 +4177,7 @@ function renderTargetLevelChart(history) {
   const rangeBtns = ["1M", "6M", "1Y"].map((r) =>
     `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-level-range="${r}">${r}</button>`
   ).join("");
-  const marketBtns = [["TW", "台股"], ["US", "美股"], ["ALL", "全部"]].map(([m, label]) =>
-    `<button class="level-range-btn${m === marketKey ? " is-active" : ""}" type="button" data-level-market="${m}">${label}</button>`
-  ).join("");
+  const marketBtns = renderMarketBtns();
   return `
     <div class="level-chart-wrap">
       <div class="level-chart-topbar">
@@ -4287,7 +4293,8 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
-function renderSnapshotTrendChart(cloudHistory, quotes) {
+function renderSnapshotTrendChart(cloudHistory, quotes, marketKey) {
+  marketKey = marketKey || state.levelChartMarket || "TW";
   const rangeKey = state.plTrendRange || "1M";
   const rangeDays = { "1M": 31, "3M": 92, "ALL": 9999 };
   const cutoff = new Date(Date.now() - (rangeDays[rangeKey] || 31) * 86400000).toISOString().slice(0, 10);
@@ -4297,7 +4304,8 @@ function renderSnapshotTrendChart(cloudHistory, quotes) {
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
-  const series = ["TW", "US"].map((market) => {
+  const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
+  const series = activeMarkets.map((market) => {
     const pts = dates.map((d) => {
       // 同日多個快照取最新
       const snapsForDate = snapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
@@ -4321,11 +4329,11 @@ function renderSnapshotTrendChart(cloudHistory, quotes) {
     return { market, pts, color: colors[market] };
   });
   if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算損益。</p>";
-  const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  const legend = activeMarkets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
   const rangeBtns = ["1M", "3M", "ALL"].map((r) =>
     `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-pl-trend-range="${r}">${r}</button>`
   ).join("");
-  return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-chart-legend">${legend}</div><div class="level-range-btns">${rangeBtns}</div></div>${renderTimedSvg(series, dates)}`;
+  return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-range-btns">${renderMarketBtns()}</div><div class="level-chart-legend">${legend}</div><div class="level-range-btns">${rangeBtns}</div></div>${renderTimedSvg(series, dates)}`;
 }
 
 // 時間比例 x 軸 SVG — x 位置依實際日期比例計算，避免多日期等距擠壓
@@ -4375,13 +4383,15 @@ function renderTimedSvg(series, dates, W = 600, H = 140) {
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
-function renderPerfRateTrendChart(cloudHistory, quotes) {
+function renderPerfRateTrendChart(cloudHistory, quotes, marketKey) {
+  marketKey = marketKey || state.levelChartMarket || "TW";
   const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)));
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
   const colors = { TW: "var(--green)", US: "#4f8ef7" };
-  const series = ["TW", "US"].map((market) => {
+  const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
+  const series = activeMarkets.map((market) => {
     const pts = dates.map((d, i) => {
       // 同一天可能有多個快照（舊的錯的 + 新的修正的）→ 取最新那個（sort ascending，所以取最後一個）
       const snapsForDate = snapshots.filter((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
@@ -4405,8 +4415,8 @@ function renderPerfRateTrendChart(cloudHistory, quotes) {
     return { market, pts, color: colors[market] };
   });
   if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算趨勢。</p>";
-  const legend = ["TW", "US"].map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
-  return `<div class="level-chart-legend" style="margin-bottom:6px">${legend}</div>${renderSharesSvg(series, dates, colors)}`;
+  const legend = activeMarkets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
+  return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-range-btns">${renderMarketBtns()}</div><div class="level-chart-legend">${legend}</div><div></div></div>${renderSharesSvg(series, dates, colors)}`;
 }
 
 // ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────
@@ -4528,7 +4538,7 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
       <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>
     </svg></div>`;
   const btnRow = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-    <div class="level-range-btns">${dayCapBtns}</div>
+    <div style="display:flex;gap:6px"><div class="level-range-btns">${renderMarketBtns()}</div>${dayCapBtns ? `<div class="level-range-btns">${dayCapBtns}</div>` : ""}</div>
     <div class="level-range-btns">${capBtns}</div>
   </div>`;
   return `${btnRow}${svg}`;
@@ -5040,7 +5050,9 @@ function renderCloudSnapshot() {
   }).join("");
   const validDashboardTabs = new Set(["home", "holdings", "capture"]);
   if (!validDashboardTabs.has(state.dashboardTab)) state.dashboardTab = "home";
-  const performanceRows = positions
+  const mkt = state.levelChartMarket || "TW";
+  const filteredPositions = mkt === "ALL" ? positions : positions.filter((p) => marketForPosition(p) === mkt);
+  const performanceRows = filteredPositions
     .filter((p) => {
       const q = state.quotes[p.symbol];
       const price = typeof q === 'number' ? q : (q?.price ?? null);
@@ -5098,15 +5110,16 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益趨勢</h3>
-        <span>各市場未實現總損益（以現價估算，TWD / USD）</span>
+        <span>未實現總損益（以現價估算，TWD / USD）</span>
       </div>
-      <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes)}</div>
+      <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes, mkt)}</div>
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益率排名</h3>
         <span>依（現價－均價）/ 均價；有首次布局日者另顯示表現率</span>
+        <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       <div class="perf-rank-grid">
         <div>
@@ -5123,17 +5136,18 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益率趨勢</h3>
-        <span>各市場整體平均損益率（依各快照均價 × 現價估算，單位 %）</span>
+        <span>整體平均損益率（依各快照均價 × 現價估算，單位 %）</span>
       </div>
-      <div class="trend-chart">${renderPerfRateTrendChart(state.cloudHistory, state.quotes)}</div>
+      <div class="trend-chart">${renderPerfRateTrendChart(state.cloudHistory, state.quotes, mkt)}</div>
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>個股損益貢獻</h3>
         <span>各標的未實現損益金額（現價估算）</span>
+        <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
-      ${renderPLContributionChart(positions, state.quotes)}
+      ${renderPLContributionChart(filteredPositions, state.quotes)}
     </section>
 
     <section class="dashboard-card">
@@ -5141,7 +5155,7 @@ function renderCloudSnapshot() {
         <h3>損益率 vs 持有天數</h3>
         <span>X 軸：首次布局至今；Y 軸：損益率（需有首次布局日）</span>
       </div>
-      ${renderScatterChart(positions, state.quotes, state.firstBuyDates)}
+      ${renderScatterChart(filteredPositions, state.quotes, state.firstBuyDates)}
     </section>
 
     <section class="dashboard-card">
@@ -5149,15 +5163,16 @@ function renderCloudSnapshot() {
         <h3>損益金額 vs 持有天數</h3>
         <span>X 軸：首次布局至今；Y 軸：未實現損益金額（需有首次布局日）</span>
       </div>
-      ${renderPLAmountScatterChart(positions, state.quotes, state.firstBuyDates)}
+      ${renderPLAmountScatterChart(filteredPositions, state.quotes, state.firstBuyDates)}
     </section>
 
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益率分布</h3>
         <span>各損益率區間持有幾支</span>
+        <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
-      ${renderRateHistogram(positions, state.quotes)}
+      ${renderRateHistogram(filteredPositions, state.quotes)}
     </section>
 
   `;
