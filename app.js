@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.0";
-const APP_VERSION_NOTE = "全圖表市場切換：台股/美股/全部共享 state，8 張圖表同步過濾";
+const APP_VERSION = "v0.25.1";
+const APP_VERSION_NOTE = "修正首頁 positions 只取單一市場快照的 bug，改為台股+美股最新快照合併";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4775,7 +4775,17 @@ function renderCloudSnapshot() {
     renderSummaryLine();
     return;
   }
-  const positions = cloud.positions || [];
+  // 取各市場最新快照的 positions 合併（台股最新 + 美股最新）
+  // cloud.positions 只有「整體最新一筆」，不一定涵蓋兩個市場
+  const _allSnapshotsSorted = (state.cloudHistory.snapshots || [])
+    .slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const _latestByMarket = {};
+  for (const snap of _allSnapshotsSorted) {
+    const mkt = normalizeMarketKey(snap.market);
+    if (!_latestByMarket[mkt]) _latestByMarket[mkt] = snap;
+  }
+  const _latestSnapIds = new Set(Object.values(_latestByMarket).map((s) => s.snapshotId));
+  const positions = (state.cloudHistory.positions || []).filter((p) => _latestSnapIds.has(p.snapshotId));
   // B tab：歷史快照選擇器所需變數
   const availableSnapshotDates = [...new Set(
     (state.cloudHistory.snapshots || []).map((s) => s.date).filter(Boolean)
