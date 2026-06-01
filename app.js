@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.3";
-const APP_VERSION_NOTE = "美股均價不套用 normalizeArkAvgCost，防止 CSCO/LRCX/SNDK 等被錯誤除以100";
+const APP_VERSION = "v0.25.4";
+const APP_VERSION_NOTE = "欄位 OCR 均價改為 fallback 策略，防止右對齊裁切錯誤覆蓋正確值";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1198,8 +1198,14 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
       let rowIdx = 0;
       for (let ri = 0; ri < crops.length && rowIdx < rows.length; ri++) {
         if (crops[ri].status !== "imported") continue;
-        if (sharesVals.length  === expectCount && sharesVals[ri]  != null) rows[rowIdx].shares  = sharesVals[ri];
-        if (avgCostVals.length === expectCount && avgCostVals[ri] != null) rows[rowIdx].avgCost = avgCostVals[ri];
+        const row = rows[rowIdx];
+        // shares：欄位 OCR 較精準（小數股數），有值就覆蓋
+        if (sharesVals.length === expectCount && sharesVals[ri] != null) row.shares = sharesVals[ri];
+        // avgCost：row crop 已含完整上下文，欄位 OCR 易因右對齊裁切而漏前幾位（119.6→9）
+        // 策略：row crop 有合理值就保留；只有 row crop 失敗（≤0 或 null）才用欄位 OCR 補
+        if (avgCostVals.length === expectCount && avgCostVals[ri] != null && !(row.avgCost > 0)) {
+          row.avgCost = avgCostVals[ri];
+        }
         rowIdx++;
       }
     }
