@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.2";
-const APP_VERSION_NOTE = "修正美股小數股數解析失敗：移除整數限制；豎向裁切改以 rowRects 為基準對齊";
+const APP_VERSION = "v0.25.3";
+const APP_VERSION_NOTE = "美股均價不套用 normalizeArkAvgCost，防止 CSCO/LRCX/SNDK 等被錯誤除以100";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2152,16 +2152,18 @@ function parseArkRowCropText(text, cropDataUrl, label) {
   const numbers = extractNumbersAfterHolding(normalized);
   if (numbers.length < 2) return null;
 
-  // 股數：取第一個正數（美股允許小數股數，不限整數）
-  const shares = numbers.find((value) => value > 0) ?? null;
-  const rawAvgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
-  const avgCost = normalizeArkAvgCost(rawAvgCost);
-  if (shares === null || avgCost === null) return null;
-
+  // 先辨識代號，決定是否為美股（影響均價標準化邏輯）
   const beforeHolding = holdingIndex >= 0 ? normalized.slice(0, holdingIndex) : normalized;
   const ocrName = cleanArkNamePart(beforeHolding);
   const symbol = findKnownSymbolInText(normalized) || findSymbolByOcrName(ocrName || normalized);
   const officialName = lookupSymbolName(symbol);
+
+  // 股數：取第一個正數（美股允許小數股數，不限整數）
+  const shares = numbers.find((value) => value > 0) ?? null;
+  const rawAvgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
+  // 美股均價不套用 normalizeArkAvgCost（美股均價可合法 ≥1000，除以100會出錯）
+  const avgCost = isUsSymbol(symbol) ? rawAvgCost : normalizeArkAvgCost(rawAvgCost);
+  if (shares === null || avgCost === null) return null;
 
   return {
     symbol,
