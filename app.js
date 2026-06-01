@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.5";
-const APP_VERSION_NOTE = "損益金額散點圖：點擊圓點畫日均損益基準虛線；持有天數欄";
+const APP_VERSION = "v0.26.6";
+const APP_VERSION_NOTE = "散點圖參考線：點擊可靠；線上綠/線下紅著色";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4608,20 +4608,20 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
     const lineY1 = item.ly + 2, lineY2 = item.dotY - 5.5;
     const leaderLine = !item.clipped && lineY2 - lineY1 > 4
       ? `<line x1="${item.cx}" y1="${lineY1}" x2="${item.cx}" y2="${lineY2}" stroke="var(--muted)" stroke-width="0.8" opacity="0.5" stroke-dasharray="2,2"/>` : "";
-    const refAttrs = refLineKey && !item.clipped && getX(item) > 0
-      ? (() => {
-          const slope = getY(item) / getX(item);
-          return ` data-scatter-ref data-ref-key="${refLineKey}" data-ref-symbol="${escapeHtml(item.symbol)}"` +
-            ` data-ref-x1="${xP(0).toFixed(1)}" data-ref-y1="${yP(0).toFixed(1)}"` +
-            ` data-ref-x2="${xP(effMaxX).toFixed(1)}" data-ref-y2="${yP(slope * effMaxX).toFixed(1)}"` +
-            ` data-ref-pt="${PT}" data-ref-hpb="${H - PB}" style="cursor:pointer"`;
-        })()
-      : "";
     const shape = item.clipped
       ? `<polygon points="${item.cx},${PT+1} ${item.cx-4.5},${PT+9} ${item.cx+4.5},${PT+9}" fill="${color}" opacity="0.9" data-tooltip="${tip}"><title>${tip}</title></polygon>`
-      : `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"${refAttrs}><title>${tip}</title></circle>`;
-    return `${leaderLine}${shape}
-      <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
+      : `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"><title>${tip}</title></circle>`;
+    const textEl = `<text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
+    if (refLineKey && !item.clipped && getX(item) > 0) {
+      const slope = getY(item) / getX(item);
+      const gAttrs = `data-scatter-ref data-ref-key="${refLineKey}" data-ref-symbol="${escapeHtml(item.symbol)}"` +
+        ` data-ref-x1="${xP(0).toFixed(1)}" data-ref-y1="${yP(0).toFixed(1)}"` +
+        ` data-ref-x2="${xP(effMaxX).toFixed(1)}" data-ref-y2="${yP(slope * effMaxX).toFixed(1)}"` +
+        ` data-ref-slope="${slope.toFixed(6)}" data-ref-dot-x="${getX(item)}" data-ref-dot-y="${getY(item).toFixed(2)}"` +
+        ` data-ref-orig-color="${color}" data-ref-pt="${PT}" data-ref-hpb="${H - PB}" style="cursor:pointer"`;
+      return `<g ${gAttrs}>${leaderLine}${shape}${textEl}</g>`;
+    }
+    return `${leaderLine}${shape}${textEl}`;
   }).join("");
   // Y 軸滑軸（連續，取代離散按鈕）
   const yCapCur = cap !== null ? cap : rawMax;
@@ -5590,35 +5590,53 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  // 散點圖參考線：點擊圓點畫出以該點日均損益為斜率的虛線基準
+  // 散點圖參考線：點擊圓點畫出以該點日均損益為斜率的虛線基準，並按線上/線下著色
   els.cloudSnapshot.addEventListener("click", (e) => {
-    const dot = e.target.closest("[data-scatter-ref]");
-    if (!dot) return;
-    const refKey = dot.dataset.refKey;
-    const symbol = dot.dataset.refSymbol;
-    const svg = dot.closest("svg");
+    const grp = e.target.closest("[data-scatter-ref]");
+    if (!grp) return;
+    const refKey = grp.dataset.refKey;
+    const symbol = grp.dataset.refSymbol;
+    const svg = grp.closest("svg");
     if (!svg) return;
     const refLayer = svg.querySelector(`.scatter-ref-layer[data-ref-key="${refKey}"]`);
     if (!refLayer) return;
-    const allRefDots = [...svg.querySelectorAll(`[data-scatter-ref][data-ref-key="${refKey}"]`)];
+    const allGrps = [...svg.querySelectorAll(`[data-scatter-ref][data-ref-key="${refKey}"]`)];
     if (refLayer.dataset.activeSymbol === symbol) {
-      // 再次點擊同一點 → 清除
+      // 再次點擊同一點 → 清除，還原所有點原始顏色
       refLayer.innerHTML = "";
       refLayer.dataset.activeSymbol = "";
-      allRefDots.forEach((d) => { d.removeAttribute("stroke"); d.removeAttribute("stroke-width"); d.setAttribute("opacity", "0.85"); });
+      allGrps.forEach((g) => {
+        const c = g.querySelector("circle");
+        if (!c) return;
+        c.setAttribute("fill", g.dataset.refOrigColor || "var(--green)");
+        c.removeAttribute("stroke"); c.removeAttribute("stroke-width");
+        c.setAttribute("opacity", "0.85");
+      });
       return;
     }
-    // 重置所有點外觀
-    allRefDots.forEach((d) => { d.removeAttribute("stroke"); d.removeAttribute("stroke-width"); d.setAttribute("opacity", "0.85"); });
-    // 高亮選取點
-    dot.setAttribute("stroke", "var(--text)");
-    dot.setAttribute("stroke-width", "2");
-    dot.setAttribute("opacity", "1");
-    // 畫參考線（裁切到圖表區域）並標示代號
-    const x1 = dot.dataset.refX1, y1 = dot.dataset.refY1;
-    const x2 = dot.dataset.refX2, y2 = dot.dataset.refY2;
-    const ptNum = parseFloat(dot.dataset.refPt);
-    const pbNum = parseFloat(dot.dataset.refHpb);
+    const refSlope = parseFloat(grp.dataset.refSlope);
+    // 依基準線斜率為所有點著色
+    allGrps.forEach((g) => {
+      const c = g.querySelector("circle");
+      if (!c) return;
+      if (g.dataset.refSymbol === symbol) {
+        // 選取點：高亮，保留原色
+        c.setAttribute("fill", g.dataset.refOrigColor || "var(--green)");
+        c.setAttribute("stroke", "var(--text)");
+        c.setAttribute("stroke-width", "2");
+        c.setAttribute("opacity", "1");
+      } else {
+        c.removeAttribute("stroke"); c.removeAttribute("stroke-width");
+        const dx = parseFloat(g.dataset.refDotX), dy = parseFloat(g.dataset.refDotY);
+        c.setAttribute("fill", dy >= refSlope * dx ? "var(--green)" : "var(--red)");
+        c.setAttribute("opacity", "0.9");
+      }
+    });
+    // 畫參考虛線（裁切到圖表區域）並標示代號
+    const x1 = grp.dataset.refX1, y1 = grp.dataset.refY1;
+    const x2 = grp.dataset.refX2, y2 = grp.dataset.refY2;
+    const ptNum = parseFloat(grp.dataset.refPt);
+    const pbNum = parseFloat(grp.dataset.refHpb);
     const ly = Math.max(ptNum + 10, Math.min(pbNum - 4, parseFloat(y2)));
     refLayer.dataset.activeSymbol = symbol;
     refLayer.innerHTML = `
