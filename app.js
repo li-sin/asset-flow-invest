@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.7";
-const APP_VERSION_NOTE = "散點圖參考線：修 listener 累積問題，點擊穩定生效";
+const APP_VERSION = "v0.26.8";
+const APP_VERSION_NOTE = "appendSheetValues 改 RAW，修台股代號 0050 被存成 50";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3154,7 +3154,7 @@ async function updateSheetValues(sheetName, range, values) {
 }
 
 async function appendSheetValues(sheetName, range, values) {
-  return sheetsFetch(`/values/${sheetRange(sheetName, range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+  return sheetsFetch(`/values/${sheetRange(sheetName, range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
     method: "POST",
     body: JSON.stringify({ majorDimension: "ROWS", values }),
   });
