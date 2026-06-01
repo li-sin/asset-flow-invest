@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.24.7";
-const APP_VERSION_NOTE = "美股 OCR 代號識別：加入16支美股代號對照表、US symbol 解析邏輯";
+const APP_VERSION = "v0.24.8";
+const APP_VERSION_NOTE = "豎向欄位裁切：股數欄 + 均價欄獨立 OCR 提高數值精確度";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -1053,6 +1053,7 @@ async function recognizeImage(image, onProgress, options = {}) {
       elapsedMs: Math.round(performance.now() - startedAt),
       rowOcrMs: Math.round(performance.now() - rowStartedAt),
       rowCrops: rowResult.crops || [],
+      columnCrops: rowResult.columnCrops || [],
       skippedRowCrops: rowResult.skipped || [],
       fallbackRows: fullRows,
       expectedTotalCount,
@@ -1161,7 +1162,38 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
     crops.push(cropRecord);
   }
 
-  return { rows, crops, skipped };
+  // ── 豎向欄位裁切：股數欄 + 均價欄，提高數值準確度 ──────────────────────
+  const columnCrops = [];
+  if (rows.length > 0 && rowRects.length > 0) {
+    const numAttempts = [{ lang: "eng", label: "數值欄" }];
+    const colY = Math.max(0, Math.min(...rowRects.map((r) => r.y)) - 0.01);
+    const colBottom = Math.min(1, Math.max(...rowRects.map((r) => r.y + r.height)) + 0.01);
+    const colH = colBottom - colY;
+    const SHARES_RECT  = { x: 0.535, y: colY, width: 0.165, height: colH };
+    const AVG_COST_RECT = { x: 0.700, y: colY, width: 0.210, height: colH };
+
+    const [sharesUrl, avgCostUrl] = await Promise.all([
+      cropImageDataUrl(dataUrl, SHARES_RECT),
+      cropImageDataUrl(dataUrl, AVG_COST_RECT),
+    ]);
+    const [sharesOcr, avgCostOcr] = await Promise.all([
+      recognizeDataUrl(sharesUrl, numAttempts, (p) => onProgress?.(p, "股數欄 OCR")),
+      recognizeDataUrl(avgCostUrl, numAttempts, (p) => onProgress?.(p, "均價欄 OCR")),
+    ]);
+
+    columnCrops.push(
+      { key: "col_shares",  label: "股數欄",  dataUrl: sharesUrl,  text: sharesOcr.text  || "" },
+      { key: "col_avgCost", label: "均價欄", dataUrl: avgCostUrl, text: avgCostOcr.text || "" },
+    );
+
+    const sharesVals  = extractColumnNumbersFlex(sharesOcr.text  || "");
+    const avgCostVals = extractColumnNumbersFlex(avgCostOcr.text || "");
+
+    if (sharesVals.length  === rows.length) rows.forEach((row, i) => { if (sharesVals[i]  != null) row.shares  = sharesVals[i]; });
+    if (avgCostVals.length === rows.length) rows.forEach((row, i) => { if (avgCostVals[i] != null) row.avgCost = avgCostVals[i]; });
+  }
+
+  return { rows, crops, skipped, columnCrops };
 }
 
 async function detectRowLineReview(dataUrl, markers) {
@@ -1588,8 +1620,8 @@ async function applyManualRowFix(entryId, rowIndex, values) {
   if (!entry?.parsedRows?.[rowIndex]) return;
 
   const symbol = normalizeSymbolInput(values.symbol);
-  if (!isTwSymbol(symbol)) {
-    alert("請輸入有效代號，例如 0050、2330、00988A");
+  if (!isTwSymbol(symbol) && !isUsSymbol(symbol)) {
+    alert("請輸入有效代號，例如 0050、2330、NVDA、TSM");
     return;
   }
 
@@ -2296,6 +2328,20 @@ function extractColumnNumbers(text, type) {
       if (type === "shares" && !Number.isInteger(value)) continue;
       values.push(value);
     }
+  }
+  return values;
+}
+
+// 豎向欄位裁切專用：允許小數（美股小數股數），每行取最大正數
+function extractColumnNumbersFlex(text) {
+  const values = [];
+  const lines = normalizeOcrText(text).split(/\r?\n/);
+  for (const line of lines) {
+    const matches = line.match(/[\d,]+(?:\.\d+)?/g) || [];
+    const lineVals = matches
+      .map(parseNumberToken)
+      .filter((v) => v !== null && v > 0);
+    if (lineVals.length > 0) values.push(Math.max(...lineVals));
   }
   return values;
 }
