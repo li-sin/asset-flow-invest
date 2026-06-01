@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.2";
-const APP_VERSION_NOTE = "編輯持股數後自動重算 layout delta；趨勢圖 X 軸右邊標籤不再溢出";
+const APP_VERSION = "v0.26.3";
+const APP_VERSION_NOTE = "個股走勢從 positions 動態算 delta，編輯後立即反映；X 軸標籤不再溢出";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4805,28 +4805,32 @@ function renderLayoutSharesChart(cloudHistory) {
 }
 
 function renderSymbolSharesChart(symbol, cloudHistory) {
-  const layout = cloudHistory?.layout || [];
-  const layoutRows = layout.filter((r) => r.symbol === symbol);
-  if (layoutRows.length > 0) {
-    const dates = [...new Set(layoutRows.map((r) => r.date))].sort();
-    const pts = dates.map((d, i) => {
-      const row = layoutRows.find((r) => r.date === d);
-      return row ? { i, v: row.delta } : null;
-    }).filter(Boolean);
-    if (pts.length > 0) pts[0] = { ...pts[0], v: 0 }; // 第一筆為 basis，不顯示原始庫存值
-    if (pts.length) return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
-  }
-  const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  // 直接從 positions 動態算 delta，避免 layout cache 不同步問題
   const positions = cloudHistory?.positions || [];
-  const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
-  const pts = dates.map((d, i) => {
-    const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d);
-    if (!snap) return null;
-    const pos = positions.find((r) => r.snapshotId === snap.snapshotId && r.symbol === symbol);
-    return pos ? { i, v: Number(pos.shares || 0) } : null;
-  }).filter(Boolean);
-  if (!pts.length) return "";
-  return renderSharesSvg([{ pts, color: "#4f8ef7" }], dates, {});
+  const byMarket = {};
+  for (const s of (cloudHistory?.snapshots || [])) {
+    const mk = normalizeMarketKey(s.market);
+    if (!byMarket[mk]) byMarket[mk] = [];
+    byMarket[mk].push(s);
+  }
+  const deltaByDate = {};
+  for (const mktSnaps of Object.values(byMarket)) {
+    mktSnaps.sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)));
+    for (let i = 0; i < mktSnaps.length; i++) {
+      const snap = mktSnaps[i];
+      const date = snap.date || snap.createdAt?.slice(0, 10) || "";
+      if (!date) continue;
+      const curPos = positions.find((p) => p.snapshotId === snap.snapshotId && p.symbol === symbol);
+      if (!curPos) continue;
+      const prevPos = i > 0 ? positions.find((p) => p.snapshotId === mktSnaps[i - 1].snapshotId && p.symbol === symbol) : null;
+      deltaByDate[date] = Number(curPos.shares ?? 0) - (prevPos ? Number(prevPos.shares ?? 0) : 0);
+    }
+  }
+  const dates = Object.keys(deltaByDate).sort();
+  if (!dates.length) return "";
+  const pts = dates.map((d, i) => ({ i, v: deltaByDate[d] }));
+  pts[0] = { ...pts[0], v: 0 }; // 第一筆為 basis
+  return renderSharesSvg([{ pts, color: "var(--green)" }], dates, {});
 }
 
 function renderAllSymbolsChart(cloudHistory) {
