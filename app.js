@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.5";
-const APP_VERSION_NOTE = "批次設定首次布局日：明細表格一次填入多支股票的布局日";
+const APP_VERSION = "v0.25.6";
+const APP_VERSION_NOTE = "修正 AVGO/PL 無現價：Sheet symbol 欄位空白導致 quote lookup 鍵值不符";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3827,13 +3827,13 @@ function parsePositionRows(values) {
   return (values || []).map((row) => ({
     snapshotId: row[0] || "",
     date: normalizeDateText(row[1] || ""),
-    market: row[2] || "",
-    symbol: row[3] || "",
-    name: row[4] || "",
-    kind: row[5] || "",
+    market: String(row[2] || "").trim(),
+    symbol: String(row[3] || "").trim(),
+    name: String(row[4] || "").trim(),
+    kind: String(row[5] || "").trim(),
     shares: Number(row[6] || 0),
     avgCost: Number(row[7] || 0),
-    source: row[8] || "",
+    source: String(row[8] || "").trim(),
     createdAt: row[9] || "",
   })).filter((row) => row.snapshotId && row.symbol);
 }
@@ -3901,7 +3901,7 @@ function stripHeaderRow(values, headers) {
 async function fetchQuotes(symbols, retryCount = 0) {
   if (!symbols?.length || !googleAccessToken) return;
   try {
-    const symbolList = symbols.map((s) => /^\d/.test(s) ? `${s}.TW` : s).join(",");
+    const symbolList = symbols.map((s) => { const t = String(s || "").trim(); return /^\d/.test(t) ? `${t}.TW` : t; }).filter(Boolean).join(",");
     const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
     const data = await res.json();
     if (data?.quotes) {
