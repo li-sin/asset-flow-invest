@@ -473,6 +473,65 @@ textarea {
   display: block;
 }
 
+/* 散點圖控制列（市場按鈕 + 滑軸）*/
+.scatter-controls {
+  margin-bottom: 6px;
+}
+.scatter-controls-top {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+}
+.scatter-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.scatter-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scatter-slider-label {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 88px;
+}
+.scatter-slider-label strong {
+  color: var(--text);
+  font-weight: 600;
+}
+/* Range slider 樣式 */
+.level-chart-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line, #333);
+  outline: none;
+  cursor: pointer;
+}
+.level-chart-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--green, #27ae60);
+  cursor: pointer;
+  border: 2px solid var(--bg, #111);
+}
+.level-chart-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--green, #27ae60);
+  cursor: pointer;
+  border: 2px solid var(--bg, #111);
+}
+
 .allocation-chart {
   display: grid;
   gap: 10px;

@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.0";
-const APP_VERSION_NOTE = "美股損益折算台幣：自動抓 USD/TWD 匯率，圖表與明細均顯示台幣";
+const APP_VERSION = "v0.26.1";
+const APP_VERSION_NOTE = "損益趨勢 Y 軸 nice-step；散點圖 X/Y 換為連續滑軸動態顯示";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4389,8 +4389,12 @@ function renderTimedSvg(series, dates, W = 600, H = 140) {
   const minV = rawMin >= 0 ? Math.max(0, rawMin - vRange * 0.2) : rawMin - vRange * 0.1;
   const maxV = rawMax + vRange * 0.1;
   const yPos = (v) => PT + (1 - (v - minV) / (maxV - minV || 1)) * cH;
-  // Y 軸格線
-  const yStep = Math.abs(maxV) > 500000 ? 100000 : Math.abs(maxV) > 50000 ? 10000 : Math.abs(maxV) > 5000 ? 1000 : Math.abs(maxV) > 500 ? 100 : 50;
+  // Y 軸格線：nice-step，目標 5 條
+  const _yRange = (maxV - minV) || 1;
+  const _rawYStep = _yRange / 5;
+  const _yMag = Math.pow(10, Math.floor(Math.log10(Math.abs(_rawYStep) || 1)));
+  const _yNorm = _rawYStep / _yMag;
+  const yStep = (_yNorm < 1.5 ? 1 : _yNorm < 3.5 ? 2 : _yNorm < 7.5 ? 5 : 10) * _yMag;
   const yLines = [];
   for (let v = Math.floor(minV / yStep) * yStep; v <= maxV + yStep; v += yStep) {
     const y = yPos(v); if (y < PT - 2 || y > H - PB + 2) continue;
@@ -4557,29 +4561,36 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
     return `${leaderLine}${shape}
       <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
   }).join("");
-  // Y 軸上限切換按鈕
-  const capBtns = capOptions.map(({ label, value }) => {
-    const active = state[capKey] === value;
-    return `<button class="level-range-btn${active ? " is-active" : ""}" type="button" data-scatter-cap-key="${capKey}" data-scatter-cap-val="${value === null ? "null" : value}">${label}</button>`;
-  }).join("");
-  // X 軸天數窗口按鈕
-  const dayCapBtns = (dayCapKey && dayCapOptions.length > 0)
-    ? dayCapOptions.map(({ label, value }) => {
-        const active = state[dayCapKey] === value;
-        return `<button class="level-range-btn${active ? " is-active" : ""}" type="button" data-scatter-days-key="${dayCapKey}" data-scatter-days-val="${value === null ? "null" : value}">${label}</button>`;
-      }).join("")
-    : "";
+  // Y 軸滑軸（連續，取代離散按鈕）
+  const yCapCur = cap !== null ? cap : rawMax;
+  const yCapMax = Math.max(1, Math.ceil(rawMax));
+  const yCapStep = yCapMax > 10000 ? Math.max(100, Math.round(yCapMax / 100)) : yCapMax > 100 ? 1 : 0.5;
+  const yCapLbl = yCapCur >= yCapMax ? "全部" : (Math.abs(yCapCur) >= 10000 ? `${(yCapCur/1000).toFixed(0)}k` : `${Number(yCapCur.toFixed(1))}${unitLabel}`);
+  const ySlider = `<label class="scatter-slider-row">
+    <span class="scatter-slider-label">Y ≤ <strong class="scatter-y-lbl" data-cap-key="${capKey}" data-cap-max="${yCapMax}" data-cap-unit="${unitLabel}">${yCapLbl}</strong></span>
+    <input type="range" class="scatter-y-slider level-chart-slider"
+           min="0" max="${yCapMax}" step="${yCapStep}" value="${yCapCur}"
+           data-scatter-cap-key="${capKey}" data-cap-max="${yCapMax}" data-cap-unit="${unitLabel}">
+  </label>`;
+  // X 軸天數滑軸（連續，取代離散按鈕）
+  const xCapCur = dayCap !== null ? dayCap : maxX;
+  const xSlider = dayCapKey ? `<label class="scatter-slider-row">
+    <span class="scatter-slider-label">天 ≤ <strong class="scatter-x-lbl" data-days-key="${dayCapKey}">${xCapCur}</strong>天</span>
+    <input type="range" class="scatter-x-slider level-chart-slider"
+           min="1" max="${maxX}" step="1" value="${xCapCur}"
+           data-scatter-days-key="${dayCapKey}" data-days-max="${maxX}">
+  </label>` : "";
   const svg = `<div class="shares-chart-container" style="position:relative">
     <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
       ${yLines.join("")}${zeroLine}${clipLine}${xLabels}${dots}
       <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">Y ▲</text>
       <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>
     </svg></div>`;
-  const btnRow = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-    <div style="display:flex;gap:6px"><div class="level-range-btns">${renderMarketBtns()}</div>${dayCapBtns ? `<div class="level-range-btns">${dayCapBtns}</div>` : ""}</div>
-    <div class="level-range-btns">${capBtns}</div>
+  const controls = `<div class="scatter-controls">
+    <div class="scatter-controls-top"><div class="level-range-btns">${renderMarketBtns()}</div></div>
+    <div class="scatter-sliders">${xSlider}${ySlider}</div>
   </div>`;
-  return `${btnRow}${svg}`;
+  return `${controls}${svg}`;
 }
 
 // ── 損益率 vs 持有天數 散點圖 ────────────────────────────────────────────────
@@ -5478,19 +5489,34 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  els.cloudSnapshot.querySelectorAll("[data-scatter-cap-key]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.scatterCapKey;
-      const raw = btn.dataset.scatterCapVal;
-      state[key] = raw === "null" ? null : Number(raw);
+  // Y 軸滑軸：input 即時更新標籤，change 重繪圖表
+  els.cloudSnapshot.querySelectorAll(".scatter-y-slider").forEach((slider) => {
+    slider.addEventListener("input", () => {
+      const val = Number(slider.value);
+      const max = Number(slider.dataset.capMax);
+      const unit = slider.dataset.capUnit || "";
+      const lbl = val >= max ? "全部" : (Math.abs(val) >= 10000 ? `${(val/1000).toFixed(0)}k` : `${Number(val.toFixed(1))}${unit}`);
+      const labelEl = slider.closest(".scatter-slider-row")?.querySelector(".scatter-y-lbl");
+      if (labelEl) labelEl.textContent = lbl;
+    });
+    slider.addEventListener("change", () => {
+      const val = Number(slider.value);
+      const max = Number(slider.dataset.capMax);
+      state[slider.dataset.scatterCapKey] = val >= max ? null : val;
       renderCloudSnapshot();
     });
   });
-  els.cloudSnapshot.querySelectorAll("[data-scatter-days-key]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.scatterDaysKey;
-      const raw = btn.dataset.scatterDaysVal;
-      state[key] = raw === "null" ? null : Number(raw);
+  // X 軸天數滑軸：input 即時更新標籤，change 重繪圖表
+  els.cloudSnapshot.querySelectorAll(".scatter-x-slider").forEach((slider) => {
+    slider.addEventListener("input", () => {
+      const val = Number(slider.value);
+      const max = Number(slider.dataset.daysMax);
+      const labelEl = slider.closest(".scatter-slider-row")?.querySelector(".scatter-x-lbl");
+      if (labelEl) labelEl.textContent = val >= max ? "全部" : val;
+    });
+    slider.addEventListener("change", () => {
+      const val = Number(slider.value);
+      state[slider.dataset.scatterDaysKey] = val >= Number(slider.dataset.daysMax) ? null : val;
       renderCloudSnapshot();
     });
   });
