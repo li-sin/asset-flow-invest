@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.9";
-const APP_VERSION_NOTE = "fetchQuotes 分批送出（每批≤25）：修正 proxy 超出約30筆上限靜默丟棄的問題";
+const APP_VERSION = "v0.26.0";
+const APP_VERSION_NOTE = "美股損益折算台幣：自動抓 USD/TWD 匯率，圖表與明細均顯示台幣";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3881,7 +3881,7 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     renderSummaryLine();
     if (showAlert) alert(`已讀取雲端庫存：${latestPositions.length} 筆`);
     // 所有歷史快照的代號都要抓報價（趨勢圖需要用今日報價算各期損益率）
-    const allSymbols = [...new Set(positions.map((p) => p.symbol).filter(Boolean))];
+    const allSymbols = [...new Set([...positions.map((p) => p.symbol).filter(Boolean), "USDTWD=X"])];
     fetchQuotes(allSymbols);
   } catch (error) {
     console.error(error);
@@ -3896,6 +3896,13 @@ function stripHeaderRow(values, headers) {
   const first = values[0].map((value) => String(value || "").trim());
   const sameHeader = headers.every((header, index) => first[index] === header);
   return sameHeader ? values.slice(1) : values;
+}
+
+// 取當前 USD/TWD 匯率（從 state.quotes 已抓的報價取得）
+function getUsdTwdRate() {
+  const q = state.quotes["USDTWD=X"];
+  const rate = typeof q === "number" ? q : (q?.price ?? null);
+  return (rate && rate > 0) ? rate : 31.5; // fallback 31.5
 }
 
 async function fetchQuotes(symbols, retryCount = 0) {
@@ -4353,6 +4360,7 @@ function renderSnapshotTrendChart(cloudHistory, quotes, marketKey) {
         totalPL += (price - avgCost) * shares;
         hasQuote = true;
       }
+      if (market === "US") totalPL *= getUsdTwdRate(); // USD → TWD
       return hasQuote ? { d, v: Math.round(totalPL) } : null;
     }).filter(Boolean);
     return { market, pts, color: colors[market] };
@@ -4454,7 +4462,8 @@ function renderPLContributionChart(positions, quotes) {
     const q = quotes[p.symbol];
     const price = typeof q === "number" ? q : (q?.price ?? null);
     if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
-    const pl = (price - p.avgCost) * Number(p.shares || 0);
+    const plUsd = (price - p.avgCost) * Number(p.shares || 0);
+    const pl = marketForPosition(p) === "US" ? plUsd * getUsdTwdRate() : plUsd;
     return { symbol: p.symbol, name: p.name || p.symbol, pl };
   }).filter(Boolean).sort((a, b) => b.pl - a.pl);
   if (!items.length) return "<p class=\"muted-text\">尚無報價資料。</p>";
@@ -4620,7 +4629,8 @@ function renderPLAmountScatterChart(positions, quotes, firstBuyDates) {
     const price = typeof q === "number" ? q : (q?.price ?? null);
     if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
     const days = Math.max(0, Math.floor((today - new Date(firstBuy)) / 86400000));
-    const pl = (price - p.avgCost) * Number(p.shares || 0);
+    const plRaw = (price - p.avgCost) * Number(p.shares || 0);
+    const pl = marketForPosition(p) === "US" ? plRaw * getUsdTwdRate() : plRaw;
     return { symbol: p.symbol, days, pl };
   }).filter(Boolean);
   if (items.length < 2) return "<p class=\"muted-text\">需要至少 2 支有首次布局日的標的才能顯示。</p>";
@@ -4997,7 +5007,8 @@ function renderCloudSnapshot() {
       const days = holdingDays(item.market, row.symbol);
       const perfRate = (returnRate !== null && days) ? returnRate / days : null;
       const shares = Number(row.shares || 0);
-      const unrealizedPnl = (price !== null && avgCost > 0) ? ((price - avgCost) * shares) : null;
+      const fxRate = item.market === "US" ? getUsdTwdRate() : 1;
+      const unrealizedPnl = (price !== null && avgCost > 0) ? ((price - avgCost) * shares * fxRate) : null;
       const dailyGain = (unrealizedPnl !== null && days) ? unrealizedPnl / days : null;
       const firstBuyVal = state.firstBuyDates[`${item.market}_${row.symbol}`] || '';
       const prevPos = prevPositions.find((p) => p.symbol === row.symbol);
@@ -5179,7 +5190,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益趨勢</h3>
-        <span>未實現總損益（以現價估算，TWD / USD）</span>
+        <span>未實現總損益（台幣；美股依 USD/TWD ${getUsdTwdRate().toFixed(2)} 折算）</span>
       </div>
       <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes, mkt)}</div>
     </section>
@@ -5213,7 +5224,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>個股損益貢獻</h3>
-        <span>各標的未實現損益金額（現價估算）</span>
+        <span>各標的未實現損益金額（台幣）</span>
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderPLContributionChart(filteredPositions, state.quotes)}
@@ -5230,7 +5241,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益金額 vs 持有天數</h3>
-        <span>X 軸：首次布局至今；Y 軸：未實現損益金額（需有首次布局日）</span>
+        <span>X 軸：首次布局至今；Y 軸：未實現損益金額（台幣，需有首次布局日）</span>
       </div>
       ${renderPLAmountScatterChart(filteredPositions, state.quotes, state.firstBuyDates)}
     </section>
