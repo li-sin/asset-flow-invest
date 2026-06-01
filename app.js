@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.4";
-const APP_VERSION_NOTE = "首次布局日欄改顯示持有天數；點修改/設定才展開日期輸入";
+const APP_VERSION = "v0.26.5";
+const APP_VERSION_NOTE = "損益金額散點圖：點擊圓點畫日均損益基準虛線；持有天數欄";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -4545,7 +4545,7 @@ function renderPLContributionChart(positions, quotes) {
 }
 
 // ── 共用：散點圖 SVG 渲染（支援 Y 軸上限裁切 + X 軸天數窗口）──────────────
-function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, dayCapKey = null, dayCapOptions = [], W = 600, H = 200, PL = 44, PR = 20, PT = 16, PB = 30 }) {
+function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, dayCapKey = null, dayCapOptions = [], refLineKey = null, W = 600, H = 200, PL = 44, PR = 20, PT = 16, PB = 30 }) {
   const cW = W - PL - PR, cH = H - PT - PB;
   const dayCap = dayCapKey ? state[dayCapKey] : null;
   const visItems = dayCap !== null ? items.filter(i => getX(i) <= dayCap) : items;
@@ -4608,9 +4608,18 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
     const lineY1 = item.ly + 2, lineY2 = item.dotY - 5.5;
     const leaderLine = !item.clipped && lineY2 - lineY1 > 4
       ? `<line x1="${item.cx}" y1="${lineY1}" x2="${item.cx}" y2="${lineY2}" stroke="var(--muted)" stroke-width="0.8" opacity="0.5" stroke-dasharray="2,2"/>` : "";
+    const refAttrs = refLineKey && !item.clipped && getX(item) > 0
+      ? (() => {
+          const slope = getY(item) / getX(item);
+          return ` data-scatter-ref data-ref-key="${refLineKey}" data-ref-symbol="${escapeHtml(item.symbol)}"` +
+            ` data-ref-x1="${xP(0).toFixed(1)}" data-ref-y1="${yP(0).toFixed(1)}"` +
+            ` data-ref-x2="${xP(effMaxX).toFixed(1)}" data-ref-y2="${yP(slope * effMaxX).toFixed(1)}"` +
+            ` data-ref-pt="${PT}" data-ref-hpb="${H - PB}" style="cursor:pointer"`;
+        })()
+      : "";
     const shape = item.clipped
       ? `<polygon points="${item.cx},${PT+1} ${item.cx-4.5},${PT+9} ${item.cx+4.5},${PT+9}" fill="${color}" opacity="0.9" data-tooltip="${tip}"><title>${tip}</title></polygon>`
-      : `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"><title>${tip}</title></circle>`;
+      : `<circle cx="${item.cx}" cy="${item.dotY}" r="4.5" fill="${color}" opacity="0.85" data-tooltip="${tip}"${refAttrs}><title>${tip}</title></circle>`;
     return `${leaderLine}${shape}
       <text x="${item.cx}" y="${item.ly}" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="600" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(item.symbol)}</text>`;
   }).join("");
@@ -4633,9 +4642,15 @@ function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptio
            min="1" max="${maxX}" step="1" value="${xCapCur}"
            data-scatter-days-key="${dayCapKey}" data-days-max="${maxX}">
   </label>` : "";
+  const defsHtml = refLineKey
+    ? `<defs><clipPath id="scatter-ref-clip-${refLineKey}"><rect x="${PL}" y="${PT}" width="${cW}" height="${cH}"/></clipPath></defs>`
+    : "";
+  const refLayerHtml = refLineKey
+    ? `<g class="scatter-ref-layer" data-ref-key="${refLineKey}" data-active-symbol=""></g>`
+    : "";
   const svg = `<div class="shares-chart-container" style="position:relative">
     <svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">
-      ${yLines.join("")}${zeroLine}${clipLine}${xLabels}${dots}
+      ${defsHtml}${yLines.join("")}${zeroLine}${clipLine}${xLabels}${dots}${refLayerHtml}
       <text x="${PL}" y="${PT-2}" font-size="8" fill="var(--muted)" opacity="0.6">Y ▲</text>
       <text x="${W-PR}" y="${H-PB+20}" text-anchor="end" font-size="8" fill="var(--muted)" opacity="0.6">持有天數 ▶</text>
     </svg></div>`;
@@ -4711,7 +4726,7 @@ function renderPLAmountScatterChart(positions, quotes, firstBuyDates) {
   ];
   return buildScatterSvg({
     items, maxX: maxDays, capKey: "scatterAmountCap", capOptions, unitLabel: "",
-    dayCapKey: "scatterAmountDaysCap", dayCapOptions,
+    dayCapKey: "scatterAmountDaysCap", dayCapOptions, refLineKey: "scatterAmountRef",
     getX: (i) => i.days, getY: (i) => i.pl,
     getColor: (i) => i.pl >= 0 ? "var(--green)" : "var(--red)",
     getTip: (i) => `${i.symbol} ${i.days}天 ${i.pl>=0?'+':''}${Math.round(i.pl).toLocaleString()}`,
@@ -5574,6 +5589,44 @@ function renderCloudSnapshot() {
       state[slider.dataset.scatterDaysKey] = val >= Number(slider.dataset.daysMax) ? null : val;
       renderCloudSnapshot();
     });
+  });
+  // 散點圖參考線：點擊圓點畫出以該點日均損益為斜率的虛線基準
+  els.cloudSnapshot.addEventListener("click", (e) => {
+    const dot = e.target.closest("[data-scatter-ref]");
+    if (!dot) return;
+    const refKey = dot.dataset.refKey;
+    const symbol = dot.dataset.refSymbol;
+    const svg = dot.closest("svg");
+    if (!svg) return;
+    const refLayer = svg.querySelector(`.scatter-ref-layer[data-ref-key="${refKey}"]`);
+    if (!refLayer) return;
+    const allRefDots = [...svg.querySelectorAll(`[data-scatter-ref][data-ref-key="${refKey}"]`)];
+    if (refLayer.dataset.activeSymbol === symbol) {
+      // 再次點擊同一點 → 清除
+      refLayer.innerHTML = "";
+      refLayer.dataset.activeSymbol = "";
+      allRefDots.forEach((d) => { d.removeAttribute("stroke"); d.removeAttribute("stroke-width"); d.setAttribute("opacity", "0.85"); });
+      return;
+    }
+    // 重置所有點外觀
+    allRefDots.forEach((d) => { d.removeAttribute("stroke"); d.removeAttribute("stroke-width"); d.setAttribute("opacity", "0.85"); });
+    // 高亮選取點
+    dot.setAttribute("stroke", "var(--text)");
+    dot.setAttribute("stroke-width", "2");
+    dot.setAttribute("opacity", "1");
+    // 畫參考線（裁切到圖表區域）並標示代號
+    const x1 = dot.dataset.refX1, y1 = dot.dataset.refY1;
+    const x2 = dot.dataset.refX2, y2 = dot.dataset.refY2;
+    const ptNum = parseFloat(dot.dataset.refPt);
+    const pbNum = parseFloat(dot.dataset.refHpb);
+    const ly = Math.max(ptNum + 10, Math.min(pbNum - 4, parseFloat(y2)));
+    refLayer.dataset.activeSymbol = symbol;
+    refLayer.innerHTML = `
+      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+            stroke="#999" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.8"
+            clip-path="url(#scatter-ref-clip-${refKey})"/>
+      <text x="${parseFloat(x2) - 4}" y="${ly}" text-anchor="end" font-size="9" font-weight="600"
+            fill="var(--muted)" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(symbol)}</text>`;
   });
   els.cloudSnapshot.querySelectorAll("[data-symbol-row]").forEach((row) => {
     row.addEventListener("click", () => {
