@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.8";
-const APP_VERSION_NOTE = "診斷模式 2：parsePositionRows 過濾 log + fetchQuotes AVGO/PL 確認";
+const APP_VERSION = "v0.25.9";
+const APP_VERSION_NOTE = "fetchQuotes 分批送出（每批≤25）：修正 proxy 超出約30筆上限靜默丟棄的問題";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -3824,7 +3824,7 @@ function parseSnapshotRows(values) {
 }
 
 function parsePositionRows(values) {
-  const mapped = (values || []).map((row) => ({
+  return (values || []).map((row) => ({
     snapshotId: row[0] || "",
     date: normalizeDateText(row[1] || ""),
     market: String(row[2] || "").trim(),
@@ -3835,11 +3835,7 @@ function parsePositionRows(values) {
     avgCost: Number(row[7] || 0),
     source: String(row[8] || "").trim(),
     createdAt: row[9] || "",
-  }));
-  const filtered = mapped.filter((row) => row.snapshotId && row.symbol);
-  const dropped = mapped.filter((r) => !r.snapshotId || !r.symbol);
-  if (dropped.length) console.log("[parsePositionRows] 被過濾掉的 rows:", dropped.map((r) => `symbol=${JSON.stringify(r.symbol)} snapshotId=${JSON.stringify(r.snapshotId)}`));
-  return filtered;
+  })).filter((row) => row.snapshotId && row.symbol);
 }
 
 function parseLayoutRows(values) {
@@ -3904,22 +3900,26 @@ function stripHeaderRow(values, headers) {
 
 async function fetchQuotes(symbols, retryCount = 0) {
   if (!symbols?.length || !googleAccessToken) return;
+  // Proxy (Yahoo Finance batch) 有約 30 支上限，超過靜默丟棄 → 分批 25 支
+  const BATCH_SIZE = 25;
+  const formatted = symbols.map((s) => { const t = String(s || "").trim(); return /^\d/.test(t) ? `${t}.TW` : t; }).filter(Boolean);
+  const batches = [];
+  for (let i = 0; i < formatted.length; i += BATCH_SIZE) batches.push(formatted.slice(i, i + BATCH_SIZE));
   try {
-    const symbolList = symbols.map((s) => { const t = String(s || "").trim(); return /^\d/.test(t) ? `${t}.TW` : t; }).filter(Boolean).join(",");
-    console.log("[fetchQuotes] 送出 symbols:", symbolList);
-    console.log("[fetchQuotes] AVGO in list:", symbolList.includes("AVGO"), "PL in list:", symbolList.includes(",PL,") || symbolList.endsWith(",PL") || symbolList.startsWith("PL,"));
-    const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
-    const data = await res.json();
-    if (data?.quotes) {
-      for (const [k, v] of Object.entries(data.quotes)) {
-        state.quotes[k.replace(/\.TW$/i, "")] = v;
+    let anySuccess = false;
+    for (const batch of batches) {
+      const symbolList = batch.join(",");
+      const res = await fetch(`${QUOTE_PROXY_URL}?symbols=${encodeURIComponent(symbolList)}`);
+      const data = await res.json();
+      if (data?.quotes) {
+        for (const [k, v] of Object.entries(data.quotes)) {
+          state.quotes[k.replace(/\.TW$/i, "")] = v;
+        }
+        anySuccess = true;
       }
-      console.log("[fetchQuotes] 收到:", Object.keys(data.quotes).join(","));
-      console.log("[fetchQuotes] AVGO:", state.quotes["AVGO"], "PL:", state.quotes["PL"]);
-      renderCloudSnapshot();
-    } else if (retryCount < 2) {
-      setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
     }
+    if (anySuccess) renderCloudSnapshot();
+    else if (retryCount < 2) setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
   } catch (err) {
     console.warn("fetchQuotes", err);
     if (retryCount < 2) setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
@@ -4991,7 +4991,6 @@ function renderCloudSnapshot() {
     // 1. 計算每列數值
     const augmented = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
-      if (!quote) console.log(`[detail][${item.market}] ${JSON.stringify(row.symbol)} 無報價, state.quotes keys:`, Object.keys(state.quotes).filter(k => /^[A-Z]/.test(k)).join(","));
       const price = typeof quote === 'number' ? quote : (quote?.price ?? null);
       const avgCost = Number(row.avgCost || 0);
       const returnRate = (price !== null && avgCost > 0) ? ((price - avgCost) / avgCost * 100) : null;
