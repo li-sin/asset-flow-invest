@@ -1050,6 +1050,38 @@ textarea {
   overscroll-behavior-x: contain;
 }
 
+/* 批次設定首次布局日 */
+.batch-firstbuy-panel {
+  background: var(--surface2, #1a1a1a);
+  border: 1px solid var(--line, #2a2a2a);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.batch-firstbuy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.batch-firstbuy-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 140px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line, #2a2a2a);
+}
+.batch-firstbuy-row:last-child { border-bottom: none; }
+.batch-firstbuy-symbol { font-weight: 700; font-size: 13px; }
+.batch-firstbuy-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-firstbuy-input { font-size: 12px; padding: 3px 6px; }
+@media (max-width: 480px) {
+  .batch-firstbuy-row { grid-template-columns: 64px 1fr; }
+  .batch-firstbuy-input { grid-column: 1 / -1; }
+}
+
 .column-crops {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));

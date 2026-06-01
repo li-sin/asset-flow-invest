@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.25.4";
-const APP_VERSION_NOTE = "欄位 OCR 均價改為 fallback 策略，防止右對齊裁切錯誤覆蓋正確值";
+const APP_VERSION = "v0.25.5";
+const APP_VERSION_NOTE = "批次設定首次布局日：明細表格一次填入多支股票的布局日";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -95,6 +95,7 @@ const state = {
   targetLevelHistory: [],
   firstBuyDates: loadFirstBuyDates(),
   detailSort: { key: "symbol", dir: "asc" },
+  batchFirstBuyMode: {},
   detailEditMode: {},
   selectedSnapshotDate: null,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
@@ -4777,6 +4778,29 @@ function targetGapClass(gap, hasTarget) {
   return "balanced";
 }
 
+// ── 批次設定首次布局日面板 ───────────────────────────────────────────────────
+function renderBatchFirstBuyPanel(market, rows) {
+  const missing = rows.filter((row) => !state.firstBuyDates[`${market}_${row.symbol}`]);
+  if (!missing.length) {
+    return `<div class="batch-firstbuy-panel"><p class="muted-text">所有標的均已設定首次布局日。</p></div>`;
+  }
+  const inputRows = missing.map((row) => `
+    <div class="batch-firstbuy-row">
+      <span class="batch-firstbuy-symbol">${escapeHtml(row.symbol)}</span>
+      <span class="batch-firstbuy-name muted-text">${escapeHtml(row.name || "")}</span>
+      <input type="date" class="batch-firstbuy-input cell-input"
+             data-market="${escapeHtml(market)}" data-symbol="${escapeHtml(row.symbol)}">
+    </div>
+  `).join("");
+  return `
+    <div class="batch-firstbuy-panel">
+      <p class="muted-text" style="margin-bottom:8px">尚未設定（${missing.length} 支）：填入日期後點「全部儲存」，留空的跳過。</p>
+      <div class="batch-firstbuy-list">${inputRows}</div>
+      <button class="button primary batch-firstbuy-save-btn" data-market="${escapeHtml(market)}" style="margin-top:10px">全部儲存</button>
+    </div>
+  `;
+}
+
 function renderCloudSnapshot() {
   if (!els.cloudSnapshot) return;
   const cloud = state.cloudSnapshot;
@@ -5053,8 +5077,15 @@ function renderCloudSnapshot() {
       <section class="market-detail-section">
         <div class="card-heading">
           <h3>${marketLabel(item.market)}明細</h3>
-          <span>建議水位 ${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</span>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span>建議水位 ${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</span>
+            <button class="button compact secondary batch-firstbuy-toggle-btn"
+                    data-market="${escapeHtml(item.market)}">
+              ${state.batchFirstBuyMode[item.market] ? "關閉" : "批次設定布局日"}
+            </button>
+          </div>
         </div>
+        ${state.batchFirstBuyMode[item.market] ? renderBatchFirstBuyPanel(item.market, item.rows) : ""}
         ${quoteLoading}
         <div class="table-scroll compact-table">
           <table class="parsed-table">
@@ -5456,6 +5487,29 @@ function renderCloudSnapshot() {
         ? `<div class="symbol-chart-heading"><strong>${escapeHtml(symbol)}</strong> ${escapeHtml(name)} 走勢</div>${chartHtml}`
         : `<p class="muted-text">${escapeHtml(symbol)} 尚無歷史資料。</p>`;
       display.style.display = "block";
+    });
+  });
+  els.cloudSnapshot.querySelectorAll(".batch-firstbuy-toggle-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const market = btn.dataset.market;
+      state.batchFirstBuyMode = { ...state.batchFirstBuyMode, [market]: !state.batchFirstBuyMode[market] };
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll(".batch-firstbuy-save-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const market = btn.dataset.market;
+      const panel = btn.closest(".batch-firstbuy-panel");
+      const inputs = panel.querySelectorAll(".batch-firstbuy-input");
+      const toSave = [...inputs].filter((i) => i.value);
+      if (!toSave.length) { alert("請至少填入一個日期"); return; }
+      btn.disabled = true;
+      btn.textContent = "儲存中…";
+      for (const input of toSave) {
+        await saveFirstBuyDate(input.dataset.market, input.dataset.symbol, input.value);
+      }
+      state.batchFirstBuyMode = { ...state.batchFirstBuyMode, [market]: false };
+      renderCloudSnapshot();
     });
   });
   els.cloudSnapshot.querySelectorAll(".first-buy-set-btn").forEach((btn) => {
