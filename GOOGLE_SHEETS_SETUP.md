@@ -26,6 +26,15 @@ AssetFlow Invest v0.13.10 起改為登入後自動載入雲端庫存儀表板，
 2. 取消「知道連結的人可檢視」的公開分享。
 3. 只把 Sheet 分享給自己的 Google 帳號。
 
+## 報價 Proxy
+
+1. 到 Google Apps Script 開啟 `AssetFlow Quote Proxy`。
+2. 將程式內容更新為 repo 內的 `QUOTE_PROXY_APPS_SCRIPT.gs`。
+3. 重新部署 Web App，URL 保持可被前端的 `QUOTE_PROXY_URL` 呼叫。
+4. 確認即時報價與歷史收盤價都可回傳：
+   - 即時：`?symbols=2330.TW,AAPL,USDTWD=X`
+   - 歷史：`?mode=history&symbols=2330.TW,AAPL,USDTWD=X&start=2026-06-01&end=2026-06-04`
+
 ## App 登入
 
 1. 打開 AssetFlow Invest。

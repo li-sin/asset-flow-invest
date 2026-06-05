@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.14";
-const APP_VERSION_NOTE = "修正底部 tab safe area 並移除 OAuth 設定";
+const APP_VERSION = "v0.26.15";
+const APP_VERSION_NOTE = "歷史損益改依快照日期收盤價計算";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -96,6 +96,8 @@ const state = {
   selectedSnapshotDate: null,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
   quotes: {},
+  historicalCloses: {},
+  historicalCloseLoading: false,
   auth: {
     signedIn: false,
     authorized: false,
@@ -3890,9 +3892,10 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     renderCloudSnapshot();
     renderSummaryLine();
     if (showAlert) alert(`已讀取雲端庫存：${latestPositions.length} 筆`);
-    // 所有歷史快照的代號都要抓報價（趨勢圖需要用今日報價算各期損益率）
+    // 目前庫存與排名用現價；歷史趨勢另外依快照日期抓收盤價。
     const allSymbols = [...new Set([...positions.map((p) => p.symbol).filter(Boolean), "USDTWD=X"])];
     fetchQuotes(allSymbols);
+    fetchHistoricalCloses(snapshots, positions);
   } catch (error) {
     console.error(error);
     state.cloudLoading = false;
@@ -3941,6 +3944,104 @@ async function fetchQuotes(symbols, retryCount = 0) {
     console.warn("fetchQuotes", err);
     if (retryCount < 2) setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
   }
+}
+
+function formatYahooSymbol(symbol) {
+  const t = String(symbol || "").trim();
+  if (!t) return "";
+  return /^\d/.test(t) ? `${t}.TW` : t;
+}
+
+function normalizeQuoteSymbol(symbol) {
+  return String(symbol || "").trim().replace(/\.TW$/i, "").toUpperCase();
+}
+
+function normalizeHistoricalClosePayload(payload) {
+  const source = payload?.history || payload?.closes || payload?.historical || {};
+  const result = {};
+  for (const [rawSymbol, rows] of Object.entries(source)) {
+    const symbol = normalizeQuoteSymbol(rawSymbol);
+    result[symbol] = result[symbol] || {};
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const date = String(row?.date || row?.d || "").slice(0, 10);
+        const close = Number(row?.close ?? row?.c ?? row?.price);
+        if (date && Number.isFinite(close) && close > 0) result[symbol][date] = close;
+      }
+    } else if (rows && typeof rows === "object") {
+      for (const [dateKey, value] of Object.entries(rows)) {
+        const date = String(dateKey || "").slice(0, 10);
+        const close = Number(typeof value === "number" ? value : (value?.close ?? value?.c ?? value?.price));
+        if (date && Number.isFinite(close) && close > 0) result[symbol][date] = close;
+      }
+    }
+  }
+  return result;
+}
+
+function mergeHistoricalCloses(history) {
+  for (const [symbol, byDate] of Object.entries(history || {})) {
+    state.historicalCloses[symbol] = {
+      ...(state.historicalCloses[symbol] || {}),
+      ...byDate,
+    };
+  }
+}
+
+async function fetchHistoricalCloses(snapshots, positions, retryCount = 0) {
+  if (!snapshots?.length || !positions?.length || !googleAccessToken) return;
+  const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || "").filter(Boolean))].sort();
+  if (!dates.length) return;
+  const symbols = [...new Set([...positions.map((p) => p.symbol).filter(Boolean), "USDTWD=X"])];
+  if (!symbols.length) return;
+  state.historicalCloseLoading = true;
+  renderCloudSnapshot();
+  const BATCH_SIZE = 20;
+  const formatted = symbols.map(formatYahooSymbol).filter(Boolean);
+  const batches = [];
+  for (let i = 0; i < formatted.length; i += BATCH_SIZE) batches.push(formatted.slice(i, i + BATCH_SIZE));
+  try {
+    let anySuccess = false;
+    for (const batch of batches) {
+      const params = new URLSearchParams({
+        mode: "history",
+        symbols: batch.join(","),
+        start: dates[0],
+        end: dates[dates.length - 1],
+        interval: "1d",
+      });
+      const res = await fetch(`${QUOTE_PROXY_URL}?${params.toString()}`);
+      const data = await res.json();
+      const history = normalizeHistoricalClosePayload(data);
+      if (Object.keys(history).length) {
+        mergeHistoricalCloses(history);
+        anySuccess = true;
+      }
+    }
+    state.historicalCloseLoading = false;
+    if (anySuccess) renderCloudSnapshot();
+    else if (retryCount < 1) setTimeout(() => fetchHistoricalCloses(snapshots, positions, retryCount + 1), 3000);
+    else renderCloudSnapshot();
+  } catch (err) {
+    console.warn("fetchHistoricalCloses", err);
+    state.historicalCloseLoading = false;
+    if (retryCount < 1) setTimeout(() => fetchHistoricalCloses(snapshots, positions, retryCount + 1), 3000);
+    else renderCloudSnapshot();
+  }
+}
+
+function historicalClose(symbol, date) {
+  const key = normalizeQuoteSymbol(symbol);
+  const byDate = state.historicalCloses[key] || {};
+  if (byDate[date] != null) return Number(byDate[date]);
+  const available = Object.keys(byDate).filter((d) => d <= date).sort();
+  if (!available.length) return null;
+  return Number(byDate[available[available.length - 1]]);
+}
+
+function historicalUsdTwdRate(date) {
+  const rate = historicalClose("USDTWD=X", date);
+  return rate && rate > 0 ? rate : getUsdTwdRate();
 }
 
 function estimatedCost(row) {
@@ -4340,7 +4441,7 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
-function renderSnapshotTrendChart(cloudHistory, quotes, marketKey) {
+function renderSnapshotTrendChart(cloudHistory, _quotes, marketKey) {
   marketKey = marketKey || state.levelChartMarket || "TW";
   const rangeKey = state.plTrendRange || "1M";
   const rangeDays = { "1M": 31, "3M": 92, "ALL": 9999 };
@@ -4362,8 +4463,7 @@ function renderSnapshotTrendChart(cloudHistory, quotes, marketKey) {
       if (!mktPos.length) return null;
       let totalPL = 0; let hasQuote = false;
       for (const p of mktPos) {
-        const q = quotes?.[p.symbol];
-        const price = typeof q === "number" ? q : (q?.price ?? null);
+        const price = historicalClose(p.symbol, d);
         if (price === null || price <= 0) continue;
         const shares = Number(p.shares || 0);
         const avgCost = Number(p.avgCost || 0);
@@ -4371,12 +4471,16 @@ function renderSnapshotTrendChart(cloudHistory, quotes, marketKey) {
         totalPL += (price - avgCost) * shares;
         hasQuote = true;
       }
-      if (market === "US") totalPL *= getUsdTwdRate(); // USD → TWD
+      if (market === "US") totalPL *= historicalUsdTwdRate(d); // USD → TWD
       return hasQuote ? { d, v: Math.round(totalPL) } : null;
     }).filter(Boolean);
     return { market, pts, color: colors[market] };
   });
-  if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算損益。</p>";
+  if (!series.some((s) => s.pts.length > 0)) {
+    return state.historicalCloseLoading
+      ? "<p class=\"muted-text\">正在載入歷史收盤價…</p>"
+      : "<p class=\"muted-text\">尚無歷史收盤價資料可計算損益。</p>";
+  }
   const legend = activeMarkets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
   const rangeBtns = ["1M", "3M", "ALL"].map((r) =>
     `<button class="level-range-btn${r === rangeKey ? " is-active" : ""}" type="button" data-pl-trend-range="${r}">${r}</button>`
@@ -4436,7 +4540,7 @@ function renderTimedSvg(series, dates, W = 600, H = 140) {
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
 }
 
-function renderPerfRateTrendChart(cloudHistory, quotes, marketKey) {
+function renderPerfRateTrendChart(cloudHistory, _quotes, marketKey) {
   marketKey = marketKey || state.levelChartMarket || "TW";
   const snapshots = (cloudHistory?.snapshots || []).slice().sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)));
   const positions = cloudHistory?.positions || [];
@@ -4453,8 +4557,7 @@ function renderPerfRateTrendChart(cloudHistory, quotes, marketKey) {
       const mktPos = positions.filter((p) => p.snapshotId === snap.snapshotId && Number(p.avgCost) > 0);
       if (!mktPos.length) return null;
       const rates = mktPos.map((p) => {
-        const q = quotes[p.symbol];
-        const price = typeof q === "number" ? q : (q?.price ?? null);
+        const price = historicalClose(p.symbol, d);
         if (price === null || price <= 0) return null;
         const rate = (price - Number(p.avgCost)) / Number(p.avgCost) * 100;
         // 異常值過濾：均價錯誤（如 OCR 誤讀）會產生數千%，排除
@@ -4467,7 +4570,11 @@ function renderPerfRateTrendChart(cloudHistory, quotes, marketKey) {
     }).filter(Boolean);
     return { market, pts, color: colors[market] };
   });
-  if (!series.some((s) => s.pts.length > 0)) return "<p class=\"muted-text\">尚無報價資料可計算趨勢。</p>";
+  if (!series.some((s) => s.pts.length > 0)) {
+    return state.historicalCloseLoading
+      ? "<p class=\"muted-text\">正在載入歷史收盤價…</p>"
+      : "<p class=\"muted-text\">尚無歷史收盤價資料可計算趨勢。</p>";
+  }
   const legend = activeMarkets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
   return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-range-btns">${renderMarketBtns()}</div><div class="level-chart-legend">${legend}</div><div></div></div>${renderSharesSvg(series, dates, colors)}`;
 }
@@ -5230,7 +5337,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益趨勢</h3>
-        <span>未實現總損益（台幣；美股依 USD/TWD ${getUsdTwdRate().toFixed(2)} 折算）</span>
+        <span>依各快照日期收盤價計算（台幣；美股依當日 USD/TWD 折算）</span>
       </div>
       <div class="trend-chart">${renderSnapshotTrendChart(state.cloudHistory, state.quotes, mkt)}</div>
     </section>
@@ -5256,7 +5363,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益率趨勢</h3>
-        <span>整體平均損益率（依各快照均價 × 現價估算，單位 %）</span>
+        <span>整體平均損益率（依各快照日期收盤價計算，單位 %）</span>
       </div>
       <div class="trend-chart">${renderPerfRateTrendChart(state.cloudHistory, state.quotes, mkt)}</div>
     </section>
