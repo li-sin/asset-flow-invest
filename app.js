@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.21";
+const APP_VERSION = "v0.26.22";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -95,6 +95,8 @@ const state = {
   detailEditMode: {},
   selectedSnapshotDate: null,
   editingDateSnapshotId: null,
+  quotesLoading: false,
+  quotesFailed: false,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
   quotes: {},
   historicalCloses: {},
@@ -4002,6 +4004,7 @@ function getUsdTwdRate() {
 
 async function fetchQuotes(symbols, retryCount = 0) {
   if (!symbols?.length || !googleAccessToken) return;
+  state.quotesLoading = true;
   // Proxy (Yahoo Finance batch) 有約 30 支上限，超過靜默丟棄 → 分批 25 支
   const BATCH_SIZE = 25;
   const formatted = symbols.map((s) => { const t = String(s || "").trim(); return /^\d/.test(t) ? `${t}.TW` : t; }).filter(Boolean);
@@ -4015,16 +4018,32 @@ async function fetchQuotes(symbols, retryCount = 0) {
       const data = await res.json();
       if (data?.quotes) {
         for (const [k, v] of Object.entries(data.quotes)) {
-          state.quotes[k.replace(/\.TW$/i, "")] = v;
+          state.quotes[k.replace(/\.(TWO?)$/i, "")] = v;
         }
         anySuccess = true;
+      } else {
+        console.warn("fetchQuotes: unexpected response", data);
       }
     }
-    if (anySuccess) renderCloudSnapshot();
-    else if (retryCount < 2) setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
+    state.quotesLoading = false;
+    if (anySuccess) {
+      state.quotesFailed = false;
+      renderCloudSnapshot();
+    } else if (retryCount < 2) {
+      setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
+    } else {
+      state.quotesFailed = true;
+      renderCloudSnapshot();
+    }
   } catch (err) {
     console.warn("fetchQuotes", err);
-    if (retryCount < 2) setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
+    state.quotesLoading = false;
+    if (retryCount < 2) {
+      setTimeout(() => fetchQuotes(symbols, retryCount + 1), 3000);
+    } else {
+      state.quotesFailed = true;
+      renderCloudSnapshot();
+    }
   }
 }
 
@@ -4035,7 +4054,7 @@ function formatYahooSymbol(symbol) {
 }
 
 function normalizeQuoteSymbol(symbol) {
-  return String(symbol || "").trim().replace(/\.TW$/i, "").toUpperCase();
+  return String(symbol || "").trim().replace(/\.(TWO?)$/i, "").toUpperCase();
 }
 
 function normalizeHistoricalClosePayload(payload) {
@@ -5531,11 +5550,19 @@ function renderCloudSnapshot() {
       <p id="home-delete-snapshot-preview" class="snapshot-delete-preview">${escapeHtml(snapshotDeletePreviewText(state.homeCalendar.selectedDate, "all"))}</p>
     </section>
   `;
+  const quotesStatusBadge = state.quotesLoading
+    ? `<span class="quotes-status loading">報價載入中…</span>`
+    : state.quotesFailed
+      ? `<span class="quotes-status failed">報價載入失敗 <button class="button compact ghost" id="retry-quotes-btn" type="button">重試</button></span>`
+      : Object.keys(state.quotes).length === 0
+        ? `<span class="quotes-status loading">等待報價…</span>`
+        : "";
   const holdingsContent = `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>庫存明細</h3>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${quotesStatusBadge}
           <select id="holdings-date-select" class="cell-input" style="width:auto">
             ${availableSnapshotDates.map((d) =>
               `<option value="${escapeHtml(d)}"${d === selectedDate ? " selected" : ""}>${escapeHtml(d)}</option>`
@@ -5560,13 +5587,6 @@ function renderCloudSnapshot() {
         <div id="symbol-chart-content"></div>
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
-    </section>
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>快照資料庫</h3>
-        <span>${(state.cloudHistory.snapshots || []).length} 筆</span>
-      </div>
-      ${renderCloudSnapshotSwipeList()}
     </section>
     ${snapshotDeleteContent}
   `;
@@ -5602,6 +5622,13 @@ function renderCloudSnapshot() {
         ? `<button id="bulk-clear-old" class="button ghost danger" type="button" style="margin-top:10px;font-size:12px;">清除壞標題舊截圖（已匯入）</button>`
         : ""}
     </section>
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>雲端快照資料庫</h3>
+        <span>${(state.cloudHistory.snapshots || []).length} 筆 · 左滑刪除 · ✎ 改日期</span>
+      </div>
+      ${renderCloudSnapshotSwipeList()}
+    </section>
   `;
   const tabContent = {
     home: homeContent,
@@ -5630,6 +5657,13 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => {
     swRegistration?.update?.().catch(() => {});
     loadLatestCloudSnapshot(true);
+  });
+  els.cloudSnapshot.querySelector("#retry-quotes-btn")?.addEventListener("click", () => {
+    state.quotesFailed = false;
+    state.quotesLoading = true;
+    const syms = [...new Set([...(state.cloudHistory.positions || []).map((p) => p.symbol).filter(Boolean), "USDTWD=X"])];
+    fetchQuotes(syms);
+    renderCloudSnapshot();
   });
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
   els.cloudSnapshot.querySelector("#dashboard-open-capture")?.addEventListener("click", openCapturePanel);

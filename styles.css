@@ -1034,6 +1034,24 @@ textarea {
   padding: 10px 12px;
 }
 
+.quotes-status {
+  font-size: 12px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.quotes-status.loading {
+  background: rgba(0,0,0,0.06);
+  color: var(--muted);
+}
+.quotes-status.failed {
+  background: #fff0f0;
+  color: var(--red);
+  border: 1px solid #ffd4d4;
+}
+
 .snapshot-actions {
   display: flex;
   justify-content: flex-end;
