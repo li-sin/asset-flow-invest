@@ -373,7 +373,7 @@ textarea {
 .dashboard-tab-content {
   display: grid;
   gap: 12px;
-  padding-bottom: 80px;
+  padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
 }
 
 .dashboard-tabs {
@@ -389,7 +389,7 @@ textarea {
   border-radius: 0;
   background: rgba(255, 254, 250, 0.97);
   box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
-  padding: 6px 6px env(safe-area-inset-bottom, 6px);
+  padding: 8px 8px calc(12px + env(safe-area-inset-bottom, 0px));
 }
 
 .dashboard-tab {
@@ -1976,7 +1976,7 @@ textarea {
   }
 
   .dashboard-tabs {
-    padding-bottom: env(safe-area-inset-bottom, 6px);
+    padding: 8px 8px calc(14px + env(safe-area-inset-bottom, 0px));
   }
 
   .capture-panel,

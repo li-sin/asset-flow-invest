@@ -5,7 +5,7 @@ AssetFlow Invest v0.13.10 起改為登入後自動載入雲端庫存儀表板，
 ## 需要準備
 
 - Spreadsheet ID：`1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI`
-- Google OAuth Client ID：App 已內建預設值 320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com，需要更換時可在 App 內設定。
+- Google OAuth Client ID：App 固定使用內建值 320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com。
 - 允許登入的 Google Email：固定為 lovelisa00000@gmail.com，不由前端輸入。
 
 ## 建立 OAuth Client ID
@@ -18,7 +18,7 @@ AssetFlow Invest v0.13.10 起改為登入後自動載入雲端庫存儀表板，
 6. Authorized JavaScript origins 加入：
    - `https://li-sin.github.io`
    - 本機測試時可另外加入 `http://127.0.0.1:8765`
-7. 複製產生的 Client ID。
+7. 若更換 Google Cloud project，需由開發者更新程式內的 `DEFAULT_GOOGLE_CLIENT_ID` 並重新部署。
 
 ## Google Sheet 權限
 
@@ -26,14 +26,11 @@ AssetFlow Invest v0.13.10 起改為登入後自動載入雲端庫存儀表板，
 2. 取消「知道連結的人可檢視」的公開分享。
 3. 只把 Sheet 分享給自己的 Google 帳號。
 
-## App 內設定
+## App 登入
 
 1. 打開 AssetFlow Invest。
-2. 按 `設定 OAuth`。
-3. Sheet ID 可使用預設值。
-4. OAuth Client ID 已有預設值，除非要更換 Google Cloud project，否則直接保留即可。
-5. 允許登入帳號固定在程式內，不會在前端要求輸入。
-6. 按 `使用 Google 登入`，並選擇固定允許帳號。
+2. 按 `使用 Google 登入`，並選擇固定允許帳號。
+3. Sheet ID、OAuth Client ID 與允許登入帳號都固定在程式內，不會在前端要求輸入。
 
 登入成功後，App 會使用 Google Sheets API 讀取與寫入：
 

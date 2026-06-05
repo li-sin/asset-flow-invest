@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.13";
-const APP_VERSION_NOTE = "修正截圖內容手機版表格左右滑動";
+const APP_VERSION = "v0.26.14";
+const APP_VERSION_NOTE = "修正底部 tab safe area 並移除 OAuth 設定";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -17,10 +17,6 @@ const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com";
 const DEFAULT_AUTHORIZED_EMAIL = "lovelisa00000@gmail.com";
 const QUOTE_PROXY_URL = "https://script.google.com/macros/s/AKfycbznKVxtS6OhxfKO6E1PB21U-X__bSHHdlhUGt8Fj5vv7PRf3Pi_xzsByAHvu0sE8G4/exec";
-const LEGACY_GOOGLE_CLIENT_IDS = new Set([
-  "320535010458-cccl087b251bejs1coa2oln1n6uddr35.apps.googleusercontent.com",
-]);
-const SHEET_SYNC_CONFIG_KEY = "assetflow_invest_sheet_sync";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
   positions: "AssetFlowPositions",
@@ -116,7 +112,6 @@ const els = {
   authStatus: $("#auth-status"),
   authEmail: $("#auth-email"),
   authSignIn: $("#auth-sign-in"),
-  authSettings: $("#auth-settings"),
   fileInput: $("#file-input"),
   backupInput: $("#backup-input"),
   openCapture: $("#open-capture"),
@@ -2898,29 +2893,12 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function normalizeClientId(value) {
-  const clientId = String(value || "").trim();
-  return clientId && !LEGACY_GOOGLE_CLIENT_IDS.has(clientId) ? clientId : DEFAULT_GOOGLE_CLIENT_ID;
-}
-
 function getSheetSyncConfig() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SHEET_SYNC_CONFIG_KEY) || "{}");
-    return {
-      spreadsheetId: parsed.spreadsheetId || DEFAULT_SPREADSHEET_ID,
-      clientId: normalizeClientId(parsed.clientId),
-      authorizedEmail: DEFAULT_AUTHORIZED_EMAIL,
-    };
-  } catch {
-    return { spreadsheetId: DEFAULT_SPREADSHEET_ID, clientId: DEFAULT_GOOGLE_CLIENT_ID, authorizedEmail: DEFAULT_AUTHORIZED_EMAIL };
-  }
-}
-
-function saveSheetSyncConfig(config) {
-  localStorage.setItem(SHEET_SYNC_CONFIG_KEY, JSON.stringify({
-    spreadsheetId: config.spreadsheetId || DEFAULT_SPREADSHEET_ID,
-    clientId: normalizeClientId(config.clientId),
-  }));
+  return {
+    spreadsheetId: DEFAULT_SPREADSHEET_ID,
+    clientId: DEFAULT_GOOGLE_CLIENT_ID,
+    authorizedEmail: DEFAULT_AUTHORIZED_EMAIL,
+  };
 }
 
 function resetGoogleSession(message = "請使用授權的 Google 帳號登入。") {
@@ -2935,24 +2913,6 @@ function resetGoogleSession(message = "請使用授權的 Google 帳號登入。
   };
   setAppLocked(true);
   renderAuthGate();
-}
-
-function configureSheetSync() {
-  const current = getSheetSyncConfig();
-  const spreadsheetId = prompt("Google Sheet ID", current.spreadsheetId || DEFAULT_SPREADSHEET_ID);
-  if (spreadsheetId === null) return null;
-  const clientId = prompt("Google OAuth Client ID（Web application）", normalizeClientId(current.clientId));
-  if (clientId === null) return null;
-  const config = {
-    spreadsheetId: spreadsheetId.trim() || DEFAULT_SPREADSHEET_ID,
-    clientId: normalizeClientId(clientId),
-    authorizedEmail: DEFAULT_AUTHORIZED_EMAIL,
-  };
-  saveSheetSyncConfig(config);
-  resetGoogleSession(config.clientId
-    ? "設定已儲存，請使用授權帳號登入。"
-    : "請補齊 OAuth Client ID。");
-  return config;
 }
 
 function setAppLocked(locked) {
@@ -2975,11 +2935,7 @@ function renderAuthGate(message = "") {
 function ensureAuthConfig() {
   const config = getSheetSyncConfig();
   if (config.clientId) return config;
-  const updated = configureSheetSync();
-  if (!updated?.clientId) {
-    throw new Error("請先設定 OAuth Client ID");
-  }
-  return updated;
+  throw new Error("OAuth Client ID 未設定");
 }
 
 async function fetchGoogleProfile(token) {
@@ -6244,10 +6200,6 @@ function bindEvents() {
   els.syncLatest.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.saveMergedSnapshot?.addEventListener("click", saveMergedSnapshotToGoogleSheet);
   els.authSignIn?.addEventListener("click", signInAndLoadApp);
-  els.authSettings?.addEventListener("click", () => {
-    configureSheetSync();
-    renderAuthGate();
-  });
   els.closeDetail.addEventListener("click", closeDetail);
   document.querySelectorAll(".segment").forEach((button) => {
     button.addEventListener("click", () => {
