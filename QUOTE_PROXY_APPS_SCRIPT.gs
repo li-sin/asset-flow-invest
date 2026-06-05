@@ -1,4 +1,5 @@
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
+const YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote";
 
 function doGet(e) {
   const params = e && e.parameter ? e.parameter : {};
@@ -22,35 +23,35 @@ function doGet(e) {
   });
 }
 
+// 使用 Yahoo Finance v7 batch quote API，一次請求取所有代號現價
 function fetchCurrentQuotes_(symbols) {
+  const BATCH_SIZE = 20;
   const quotes = {};
 
-  symbols.forEach((symbol) => {
-    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
+  for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+    const batch = symbols.slice(i, i + BATCH_SIZE);
+    const symbolList = batch.join(",");
+    const url = `${YAHOO_QUOTE_URL}?symbols=${encodeURIComponent(symbolList)}&fields=regularMarketPrice,regularMarketPreviousClose,currency`;
     try {
       const payload = fetchJson_(url);
-      const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
-      const meta = result && result.meta ? result.meta : {};
-      const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
-      const closes = quote && quote.close ? quote.close.filter((value) => value !== null && value !== undefined) : [];
-      const latestClose = closes.length ? closes[closes.length - 1] : null;
-      const previousClose = closes.length > 1 ? closes[closes.length - 2] : meta.chartPreviousClose;
-      const price = numberOrNull_(meta.regularMarketPrice) || numberOrNull_(latestClose);
-      quotes[symbol] = {
-        price,
-        prevClose: numberOrNull_(previousClose),
-        currency: meta.currency || "",
-        yahooSymbol: meta.symbol || symbol,
-      };
+      const results = (payload && payload.quoteResponse && payload.quoteResponse.result) || [];
+      results.forEach((item) => {
+        const sym = item.symbol || "";
+        if (!sym) return;
+        quotes[sym] = {
+          price: numberOrNull_(item.regularMarketPrice),
+          prevClose: numberOrNull_(item.regularMarketPreviousClose),
+          currency: item.currency || "",
+          yahooSymbol: sym,
+        };
+      });
     } catch (err) {
-      quotes[symbol] = {
-        price: null,
-        prevClose: null,
-        currency: "",
-        yahooSymbol: symbol,
-      };
+      // batch failed — 每支 fallback 為 null
+      batch.forEach((sym) => {
+        if (!quotes[sym]) quotes[sym] = { price: null, prevClose: null, currency: "", yahooSymbol: sym };
+      });
     }
-  });
+  }
 
   return quotes;
 }
@@ -91,7 +92,10 @@ function fetchJson_(url) {
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     headers: {
-      "User-Agent": "Mozilla/5.0 AssetFlowInvest/1.0",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Referer": "https://finance.yahoo.com/",
     },
   });
   const code = response.getResponseCode();
