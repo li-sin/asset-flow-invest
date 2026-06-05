@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.18";
+const APP_VERSION = "v0.26.19";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5424,19 +5424,15 @@ function renderCloudSnapshot() {
     </section>
 
   `;
-  const _twSnapsForCal = (state.cloudHistory.snapshots || []).filter((s) => normalizeMarketKey(s.market) === "TW");
-  const _calPositions = state.cloudHistory.positions || [];
-  const _dateSymbolsMap = {};
-  for (const snap of _twSnapsForCal) {
+  const _dateMarketsMap = {};
+  for (const snap of (state.cloudHistory.snapshots || [])) {
     const date = snap.date || "";
     if (!date) continue;
-    const syms = _calPositions.filter((p) => p.snapshotId === snap.snapshotId).map((p) => p.symbol);
-    if (!_dateSymbolsMap[date]) _dateSymbolsMap[date] = [];
-    for (const s of syms) if (!_dateSymbolsMap[date].includes(s)) _dateSymbolsMap[date].push(s);
+    const mkt = normalizeMarketKey(snap.market);
+    if (!_dateMarketsMap[date]) _dateMarketsMap[date] = [];
+    if (!_dateMarketsMap[date].includes(mkt)) _dateMarketsMap[date].push(mkt);
   }
-  const _calPalette = ["#2f7d5b", "#4f8ef7", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
-  const _calSymbols = [...new Set(Object.values(_dateSymbolsMap).flat())].sort();
-  const _symbolColors = Object.fromEntries(_calSymbols.map((s, i) => [s, _calPalette[i % _calPalette.length]]));
+  const _marketColors = { TW: "var(--green)", US: "#4f8ef7" };
   const snapshotDeleteContent = `
     <section class="dashboard-card">
       <div class="card-heading">
@@ -5448,8 +5444,8 @@ function renderCloudSnapshot() {
         state.homeCalendar.month,
         state.homeCalendar.selectedDate,
         new Set((state.cloudHistory.snapshots || []).map((s) => s.date || "").filter(Boolean)),
-        _dateSymbolsMap,
-        _symbolColors
+        _dateMarketsMap,
+        _marketColors
       )}
       <input type="hidden" id="home-delete-snapshot-date" value="${escapeHtml(state.homeCalendar.selectedDate)}">
       <div class="snapshot-delete-row" style="margin-top:10px">
