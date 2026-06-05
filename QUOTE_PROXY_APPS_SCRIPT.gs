@@ -1,4 +1,3 @@
-const YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote";
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
 
 function doGet(e) {
@@ -24,22 +23,35 @@ function doGet(e) {
 }
 
 function fetchCurrentQuotes_(symbols) {
-  const url = `${YAHOO_QUOTE_URL}?symbols=${encodeURIComponent(symbols.join(","))}`;
-  const payload = fetchJson_(url);
-  const rows = payload && payload.quoteResponse && payload.quoteResponse.result
-    ? payload.quoteResponse.result
-    : [];
   const quotes = {};
-  rows.forEach((row) => {
-    const symbol = row.symbol;
-    if (!symbol) return;
-    quotes[symbol] = {
-      price: numberOrNull_(row.regularMarketPrice),
-      prevClose: numberOrNull_(row.regularMarketPreviousClose),
-      currency: row.currency || "",
-      yahooSymbol: symbol,
-    };
+
+  symbols.forEach((symbol) => {
+    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
+    try {
+      const payload = fetchJson_(url);
+      const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+      const meta = result && result.meta ? result.meta : {};
+      const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
+      const closes = quote && quote.close ? quote.close.filter((value) => value !== null && value !== undefined) : [];
+      const latestClose = closes.length ? closes[closes.length - 1] : null;
+      const previousClose = closes.length > 1 ? closes[closes.length - 2] : meta.chartPreviousClose;
+      const price = numberOrNull_(meta.regularMarketPrice) || numberOrNull_(latestClose);
+      quotes[symbol] = {
+        price,
+        prevClose: numberOrNull_(previousClose),
+        currency: meta.currency || "",
+        yahooSymbol: meta.symbol || symbol,
+      };
+    } catch (err) {
+      quotes[symbol] = {
+        price: null,
+        prevClose: null,
+        currency: "",
+        yahooSymbol: symbol,
+      };
+    }
   });
+
   return quotes;
 }
 
