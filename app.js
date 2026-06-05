@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.23";
+const APP_VERSION = "v0.26.24";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5530,7 +5530,7 @@ function renderCloudSnapshot() {
     if (!_dateMarketsMap[date]) _dateMarketsMap[date] = [];
     if (!_dateMarketsMap[date].includes(mkt)) _dateMarketsMap[date].push(mkt);
   }
-  const _marketColors = { TW: "var(--green)", US: "#4f8ef7" };
+  const _marketColors = { TW: "#22c55e", US: "#3b82f6" };
   const snapshotDeleteContent = `
     <section class="dashboard-card">
       <div class="card-heading">
@@ -5690,7 +5690,13 @@ function renderCloudSnapshot() {
     button.addEventListener("click", () => deleteCloudSnapshotById(button.dataset.deleteSnapshotId, button));
   });
   els.cloudSnapshot.querySelectorAll(".snap-date-edit-btn").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingDateSnapshotId = btn.dataset.snapId; renderCloudSnapshot(); });
+    btn.addEventListener("click", () => {
+      const snapId = btn.dataset.snapId;
+      state.editingDateSnapshotId = snapId;
+      renderCloudSnapshot();
+      const input = els.cloudSnapshot.querySelector(`.snap-date-edit-input[data-snap-id="${CSS.escape(snapId)}"]`);
+      if (input) { input.focus(); try { input.showPicker(); } catch (_) {} }
+    });
   });
   els.cloudSnapshot.querySelectorAll(".snap-date-cancel").forEach((btn) => {
     btn.addEventListener("click", () => { state.editingDateSnapshotId = null; renderCloudSnapshot(); });
