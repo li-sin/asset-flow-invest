@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.17";
+const APP_VERSION = "v0.26.18";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4420,6 +4420,8 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   const labelStep = Math.max(1, Math.floor(dates.length / 5));
   const xLabels = dates.map((d, i) => {
     if (i % labelStep !== 0 && i !== dates.length - 1) return "";
+    const dow = new Date(d).getDay();
+    if (dow === 0 || dow === 6) return "";
     const anchor = i === dates.length - 1 ? "end" : "middle";
     return `<text x="${xPos(i)}" y="${H - 4}" text-anchor="${anchor}" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join("");
@@ -4853,7 +4855,7 @@ function renderRateHistogram(positions, quotes) {
     </svg></div>`;
 }
 
-function renderSnapCalendar(year, month, selectedDate, snapshotDates) {
+function renderSnapCalendar(year, month, selectedDate, snapshotDates, dateSymbolsMap = {}, symbolColors = {}) {
   const monthLabel = `${year}年${month + 1}月`;
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -4863,8 +4865,17 @@ function renderSnapCalendar(year, month, selectedDate, snapshotDates) {
   for (let i = 0; i < firstDay; i++) cells.push('<span class="snap-cal-empty"></span>');
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const cls = ["snap-cal-day", snapshotDates.has(dateStr) ? "has-snap" : "", selectedDate === dateStr ? "selected" : ""].filter(Boolean).join(" ");
-    cells.push(`<button class="${cls}" type="button" data-cal-date="${dateStr}">${d}</button>`);
+    const hasSnap = snapshotDates.has(dateStr);
+    const cls = ["snap-cal-day", hasSnap ? "has-snap" : "", selectedDate === dateStr ? "selected" : ""].filter(Boolean).join(" ");
+    const symbols = dateSymbolsMap[dateStr] || [];
+    const dotsHtml = hasSnap
+      ? `<span class="snap-cal-dots">${
+          symbols.length
+            ? symbols.map((s) => `<span class="snap-cal-dot" style="background:${symbolColors[s] || "var(--green)"}"></span>`).join("")
+            : `<span class="snap-cal-dot" style="background:var(--green)"></span>`
+        }</span>`
+      : "";
+    cells.push(`<button class="${cls}" type="button" data-cal-date="${dateStr}">${d}${dotsHtml}</button>`);
   }
   return `
     <div class="snap-calendar">
@@ -5413,6 +5424,19 @@ function renderCloudSnapshot() {
     </section>
 
   `;
+  const _twSnapsForCal = (state.cloudHistory.snapshots || []).filter((s) => normalizeMarketKey(s.market) === "TW");
+  const _calPositions = state.cloudHistory.positions || [];
+  const _dateSymbolsMap = {};
+  for (const snap of _twSnapsForCal) {
+    const date = snap.date || "";
+    if (!date) continue;
+    const syms = _calPositions.filter((p) => p.snapshotId === snap.snapshotId).map((p) => p.symbol);
+    if (!_dateSymbolsMap[date]) _dateSymbolsMap[date] = [];
+    for (const s of syms) if (!_dateSymbolsMap[date].includes(s)) _dateSymbolsMap[date].push(s);
+  }
+  const _calPalette = ["#2f7d5b", "#4f8ef7", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
+  const _calSymbols = [...new Set(Object.values(_dateSymbolsMap).flat())].sort();
+  const _symbolColors = Object.fromEntries(_calSymbols.map((s, i) => [s, _calPalette[i % _calPalette.length]]));
   const snapshotDeleteContent = `
     <section class="dashboard-card">
       <div class="card-heading">
@@ -5423,7 +5447,9 @@ function renderCloudSnapshot() {
         state.homeCalendar.year,
         state.homeCalendar.month,
         state.homeCalendar.selectedDate,
-        new Set((state.cloudHistory.snapshots || []).map((s) => s.date || "").filter(Boolean))
+        new Set((state.cloudHistory.snapshots || []).map((s) => s.date || "").filter(Boolean)),
+        _dateSymbolsMap,
+        _symbolColors
       )}
       <input type="hidden" id="home-delete-snapshot-date" value="${escapeHtml(state.homeCalendar.selectedDate)}">
       <div class="snapshot-delete-row" style="margin-top:10px">

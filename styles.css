@@ -2320,25 +2320,34 @@ textarea {
   background: none;
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 5px 2px;
+  padding: 5px 2px 3px;
   font-size: 13px;
   cursor: pointer;
   text-align: center;
   color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .snap-cal-day:hover {
   background: rgba(0, 0, 0, 0.05);
 }
 
-.snap-cal-day.has-snap::after {
-  content: '';
-  display: block;
+.snap-cal-dots {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 2px;
+  min-height: 7px;
+}
+
+.snap-cal-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--green);
-  margin: 2px auto 0;
+  flex-shrink: 0;
 }
 
 .snap-cal-day.selected {
@@ -2347,8 +2356,8 @@ textarea {
   border-color: var(--green);
 }
 
-.snap-cal-day.selected::after {
-  background: #fff;
+.snap-cal-day.selected .snap-cal-dot {
+  background: #fff !important;
 }
 
 .chart-tooltip {
