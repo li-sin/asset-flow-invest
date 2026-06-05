@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.19";
+const APP_VERSION = "v0.26.20";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -94,6 +94,7 @@ const state = {
   batchFirstBuyMode: {},
   detailEditMode: {},
   selectedSnapshotDate: null,
+  editingDateSnapshotId: null,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
   quotes: {},
   historicalCloses: {},
@@ -467,6 +468,65 @@ async function savePositionEdits(market, symbol, shares, avgCost) {
   } catch (err) {
     console.error(err);
     alert(err.message || "儲存失敗");
+  }
+}
+
+async function editSnapshotDate(snapshotId, newDate) {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) { alert("日期格式錯誤（YYYY-MM-DD）"); return; }
+  const snap = (state.cloudHistory.snapshots || []).find((s) => s.snapshotId === snapshotId);
+  if (!snap) { alert("找不到快照"); return; }
+  const oldDate = snap.date || "";
+  const market = normalizeMarketKey(snap.market);
+  if (oldDate === newDate) { state.editingDateSnapshotId = null; renderCloudSnapshot(); return; }
+  try {
+    // 1. 更新 snapshots tab（C 欄 = date）
+    const snapValues = await readSheetValues(SHEET_NAMES.snapshots, "A:C");
+    for (let i = 1; i < snapValues.length; i++) {
+      if (snapValues[i][0] === snapshotId) {
+        await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.snapshots, `C${i + 1}`)}?valueInputOption=RAW`, {
+          method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[newDate]] }),
+        });
+        break;
+      }
+    }
+    // 2. 更新 positions tab（B 欄 = date）
+    const posValues = await readSheetValues(SHEET_NAMES.positions, "A:B");
+    for (let i = 1; i < posValues.length; i++) {
+      if (posValues[i][0] === snapshotId) {
+        await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.positions, `B${i + 1}`)}?valueInputOption=RAW`, {
+          method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[newDate]] }),
+        });
+      }
+    }
+    // 3. 更新 layout tab（A 欄 = date，同市場）
+    if (oldDate) {
+      const layoutValues = await readSheetValues(SHEET_NAMES.layout, "A:B");
+      for (let i = 1; i < layoutValues.length; i++) {
+        if (layoutValues[i][0] === oldDate && normalizeMarketKey(layoutValues[i][1]) === market) {
+          await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.layout, `A${i + 1}`)}?valueInputOption=RAW`, {
+            method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[newDate]] }),
+          });
+        }
+      }
+    }
+    // 4. 更新記憶體
+    state.cloudHistory.snapshots = state.cloudHistory.snapshots.map((s) =>
+      s.snapshotId === snapshotId ? { ...s, date: newDate } : s
+    );
+    state.cloudHistory.positions = (state.cloudHistory.positions || []).map((p) =>
+      p.snapshotId === snapshotId ? { ...p, date: newDate } : p
+    );
+    if (oldDate) {
+      state.cloudHistory.layout = (state.cloudHistory.layout || []).map((l) =>
+        l.date === oldDate && normalizeMarketKey(l.market) === market ? { ...l, date: newDate } : l
+      );
+    }
+    state.editingDateSnapshotId = null;
+    renderCloudSnapshot();
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "更新失敗");
   }
 }
 
@@ -3602,20 +3662,31 @@ function renderCloudSnapshotSwipeList() {
     .sort((a, b) => snapshotSortValue(b).localeCompare(snapshotSortValue(a)))
     .map(snapshotMetrics);
   if (!rows.length) return "<p class=\"muted-text\">目前沒有雲端快照。</p>";
+  const editingId = state.editingDateSnapshotId;
   return `
     <div class="snapshot-swipe-list">
-      ${rows.map((snapshot) => `
+      ${rows.map((snapshot) => {
+        const isEditing = editingId === snapshot.snapshotId;
+        const mainContent = isEditing
+          ? `<div class="snap-date-edit-row">
+               <input type="date" class="snap-date-edit-input cell-input" value="${escapeHtml(snapshot.date || "")}" data-snap-id="${escapeHtml(snapshot.snapshotId)}">
+               <button class="button compact primary snap-date-confirm" type="button" data-snap-id="${escapeHtml(snapshot.snapshotId)}">確認</button>
+               <button class="button compact secondary snap-date-cancel" type="button">取消</button>
+             </div>`
+          : `<strong>${escapeHtml(snapshot.date || "")}</strong>
+             <span>${marketLabel(snapshot.market)} · ${formatNumber(snapshot.stockCount)} 檔 · ${formatMoney(snapshot.totalCost)}</span>`;
+        return `
         <div class="swipe-row" data-snapshot-id="${escapeHtml(snapshot.snapshotId)}">
           <button class="swipe-delete-action" type="button" data-delete-snapshot-id="${escapeHtml(snapshot.snapshotId)}">刪除</button>
           <div class="swipe-row-content">
-            <div>
-              <strong>${escapeHtml(snapshot.date || "")}</strong>
-              <span>${marketLabel(snapshot.market)} · ${formatNumber(snapshot.stockCount)} 檔 · ${formatMoney(snapshot.totalCost)}</span>
+            <div>${mainContent}</div>
+            <div class="snap-row-actions">
+              <small>${escapeHtml(snapshot.createdAt || "")}</small>
+              ${!isEditing ? `<button class="button compact ghost snap-date-edit-btn" type="button" data-snap-id="${escapeHtml(snapshot.snapshotId)}" title="改日期">✎</button>` : ""}
             </div>
-            <small>${escapeHtml(snapshot.createdAt || "")}</small>
           </div>
-        </div>
-      `).join("")}
+        </div>`;
+      }).join("")}
     </div>
   `;
 }
@@ -5489,6 +5560,13 @@ function renderCloudSnapshot() {
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>快照資料庫</h3>
+        <span>${(state.cloudHistory.snapshots || []).length} 筆</span>
+      </div>
+      ${renderCloudSnapshotSwipeList()}
+    </section>
     ${snapshotDeleteContent}
   `;
   const captureEntriesHtml = state.entries.length > 0
@@ -5568,6 +5646,19 @@ function renderCloudSnapshot() {
   });
   els.cloudSnapshot.querySelectorAll("[data-delete-snapshot-id]").forEach((button) => {
     button.addEventListener("click", () => deleteCloudSnapshotById(button.dataset.deleteSnapshotId, button));
+  });
+  els.cloudSnapshot.querySelectorAll(".snap-date-edit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingDateSnapshotId = btn.dataset.snapId; renderCloudSnapshot(); });
+  });
+  els.cloudSnapshot.querySelectorAll(".snap-date-cancel").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingDateSnapshotId = null; renderCloudSnapshot(); });
+  });
+  els.cloudSnapshot.querySelectorAll(".snap-date-confirm").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const snapId = btn.dataset.snapId;
+      const input = els.cloudSnapshot.querySelector(`.snap-date-edit-input[data-snap-id="${CSS.escape(snapId)}"]`);
+      if (input) editSnapshotDate(snapId, input.value);
+    });
   });
   bindSwipeDeleteRows(els.cloudSnapshot);
   const deleteDate = els.cloudSnapshot.querySelector("#delete-snapshot-date");

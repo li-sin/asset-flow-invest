@@ -1088,6 +1088,25 @@ textarea {
   font-size: 12px;
 }
 
+.snap-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.snap-date-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.snap-date-edit-input {
+  width: 130px;
+  font-size: 13px;
+}
+
 .swipe-delete-action {
   position: absolute;
   inset: 0 0 0 auto;
