@@ -1,5 +1,4 @@
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
-const TWSE_QUOTE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp";
 
 function doGet(e) {
   const params = e && e.parameter ? e.parameter : {};
@@ -23,61 +22,33 @@ function doGet(e) {
   });
 }
 
-// 台股用 TWSE API，美股用 Yahoo Finance
+// 改用 period1/period2 格式（與 historicalCloses 同路徑，已確認 GAS 可通）
+// 取最近 10 天的 chart 資料，抓最後一筆收盤作為現價
 function fetchCurrentQuotes_(symbols) {
   const quotes = {};
-  const twSymbols = [];
-  const usSymbols = [];
+  const today = new Date();
+  const tenDaysAgo = new Date(today.getTime() - 10 * 86400000);
+  const period1 = Math.floor(tenDaysAgo.getTime() / 1000);
+  const period2 = Math.floor(today.getTime() / 1000) + 86400;
 
-  symbols.forEach((sym) => {
-    // .TW 或 .TWO 結尾，或純數字開頭 → 台股
-    if (/\.(TW[O]?)$/i.test(sym) || /^\d/.test(sym)) {
-      twSymbols.push(sym);
-    } else {
-      usSymbols.push(sym);
-    }
-  });
-
-  // 台股：TWSE API（不受 Yahoo 封鎖）
-  if (twSymbols.length) {
-    const exCh = twSymbols.map((s) => {
-      const code = s.replace(/\.(TW[O]?)$/i, "");
-      return `tse_${code}.tw`;
-    }).join("|");
-    try {
-      const url = `${TWSE_QUOTE_URL}?ex_ch=${encodeURIComponent(exCh)}&json=1&delay=0`;
-      const payload = fetchJson_(url);
-      const msgArray = (payload && payload.msgArray) ? payload.msgArray : [];
-      msgArray.forEach((item) => {
-        const code = item.c || "";
-        const price = numberOrNull_(item.z !== "-" ? item.z : item.y); // z=現價, y=昨收
-        const prevClose = numberOrNull_(item.y);
-        if (code) {
-          quotes[`${code}.TW`] = { price, prevClose, currency: "TWD", yahooSymbol: `${code}.TW` };
-        }
-      });
-    } catch (err) {
-      twSymbols.forEach((sym) => {
-        if (!quotes[sym]) quotes[sym] = { price: null, prevClose: null, currency: "TWD", yahooSymbol: sym };
-      });
-    }
-  }
-
-  // 美股：Yahoo Finance（每支一次，數量少影響小）
-  usSymbols.forEach((symbol) => {
-    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
+  symbols.forEach((symbol) => {
+    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
     try {
       const payload = fetchJson_(url);
       const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
       const meta = result && result.meta ? result.meta : {};
       const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
-      const closes = quote && quote.close ? quote.close.filter((v) => v !== null && v !== undefined) : [];
-      const latestClose = closes.length ? closes[closes.length - 1] : null;
-      const previousClose = closes.length > 1 ? closes[closes.length - 2] : meta.chartPreviousClose;
-      const price = numberOrNull_(meta.regularMarketPrice) || numberOrNull_(latestClose);
+      const closes = quote && quote.close
+        ? quote.close.filter((v) => v !== null && v !== undefined)
+        : [];
+      const price = numberOrNull_(meta.regularMarketPrice)
+        || (closes.length ? numberOrNull_(closes[closes.length - 1]) : null);
+      const prevClose = closes.length > 1
+        ? numberOrNull_(closes[closes.length - 2])
+        : numberOrNull_(meta.chartPreviousClose);
       quotes[symbol] = {
         price,
-        prevClose: numberOrNull_(previousClose),
+        prevClose,
         currency: meta.currency || "",
         yahooSymbol: meta.symbol || symbol,
       };
