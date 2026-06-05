@@ -2167,6 +2167,21 @@ textarea {
     width: 100%;
     box-sizing: border-box;
   }
+
+  .draft-parsed-table th:nth-child(n),
+  .draft-parsed-table td:nth-child(n) {
+    width: 100%;
+  }
+
+  .draft-parsed-table .cell-input {
+    min-height: 44px;
+    padding: 9px 10px;
+  }
+
+  .draft-parsed-table .row-crop {
+    width: 100%;
+  }
+
   /* 明細表格（.compact-table 內）：標籤左、數值右的 flex 排版 */
   .compact-table .parsed-table tr {
     display: flex;
