@@ -1,4 +1,5 @@
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
+const PROXY_VERSION = "3";
 
 function doGet(e) {
   const params = e && e.parameter ? e.parameter : {};
@@ -8,16 +9,18 @@ function doGet(e) {
     .filter(Boolean);
 
   if (!symbols.length) {
-    return jsonResponse({ quotes: {}, history: {} });
+    return jsonResponse({ version: PROXY_VERSION, quotes: {}, history: {} });
   }
 
   if (String(params.mode || "").toLowerCase() === "history") {
     return jsonResponse({
+      version: PROXY_VERSION,
       history: fetchHistoricalCloses_(symbols, params.start, params.end),
     });
   }
 
   return jsonResponse({
+    version: PROXY_VERSION,
     quotes: fetchCurrentQuotes_(symbols),
   });
 }
