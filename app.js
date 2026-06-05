@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.8";
-const APP_VERSION_NOTE = "appendSheetValues 改 RAW，修台股代號 0050 被存成 50";
+const APP_VERSION = "v0.26.11";
+const APP_VERSION_NOTE = "新增截圖窄畫面補資料欄位不超出右側";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2696,11 +2696,14 @@ function renderParsedRows(rows, context, entryId = "", columnCrops = [], rowCrop
       <td class="raw-cell">${escapeHtml(row.rawLine || "")}</td>
     </tr>
   `).join("");
+  const containerClass = context === "detail"
+    ? "detail-field"
+    : `parsed-card ${context === "draft" ? "draft-parsed-card" : ""}`;
   return `
-    <div class="${context === "detail" ? "detail-field" : "parsed-card"}">
+    <div class="${containerClass}">
       <span>解析庫存</span>
-      <div class="table-scroll">
-        <table class="parsed-table">
+      <div class="table-scroll ${context === "draft" ? "draft-table-scroll" : ""}">
+        <table class="parsed-table ${context === "draft" ? "draft-parsed-table" : ""}">
           <thead>
             <tr>
               <th>截圖</th>

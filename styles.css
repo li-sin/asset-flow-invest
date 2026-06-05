@@ -1102,11 +1102,29 @@ textarea {
   gap: 12px;
 }
 
+.parse-preview input,
+.parse-preview select,
+.parse-preview textarea {
+  font-size: 16px;
+}
+
+.parse-preview,
+.draft-parsed-card,
+.ocr-missing-confirm,
+.skipped-rows-section {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .table-scroll {
   width: 100%;
   overflow: auto;
   margin-top: 8px;
   overscroll-behavior-x: contain;
+}
+
+.draft-table-scroll {
+  overflow-x: hidden;
 }
 
 /* 批次設定首次布局日 */
@@ -1177,6 +1195,49 @@ textarea {
   min-width: 1040px;
   font-size: 13px;
 }
+
+.draft-parsed-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.draft-parsed-table th,
+.draft-parsed-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.draft-parsed-table .cell-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.draft-parsed-table .raw-cell {
+  max-width: none;
+}
+
+.draft-parsed-table .row-crop {
+  width: 100%;
+  min-width: 0;
+}
+
+.draft-parsed-table th:nth-child(1),
+.draft-parsed-table td:nth-child(1) { width: 22%; }
+.draft-parsed-table th:nth-child(2),
+.draft-parsed-table td:nth-child(2) { width: 11%; }
+.draft-parsed-table th:nth-child(3),
+.draft-parsed-table td:nth-child(3) { width: 16%; }
+.draft-parsed-table th:nth-child(4),
+.draft-parsed-table td:nth-child(4) { width: 10%; }
+.draft-parsed-table th:nth-child(5),
+.draft-parsed-table td:nth-child(5) { width: 10%; }
+.draft-parsed-table th:nth-child(6),
+.draft-parsed-table td:nth-child(6) { width: 12%; }
+.draft-parsed-table th:nth-child(7),
+.draft-parsed-table td:nth-child(7) { width: 9%; }
+.draft-parsed-table th:nth-child(8),
+.draft-parsed-table td:nth-child(8) { width: 10%; }
 
 .parsed-table th,
 .parsed-table td {
@@ -1339,6 +1400,36 @@ textarea {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+.ocr-missing-confirm {
+  display: grid;
+  gap: 8px;
+}
+
+.missing-symbol-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, 120px) minmax(92px, 120px) auto auto;
+  gap: 8px;
+  align-items: end;
+  max-width: 100%;
+}
+
+.missing-symbol-row label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.missing-symbol-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.missing-symbol-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .skipped-row-inputs .cell-input[type="text"] {
@@ -1990,6 +2081,48 @@ textarea {
   }
   .parsed-card {
     overflow-x: auto;
+  }
+
+  .draft-parsed-card {
+    overflow-x: hidden;
+  }
+
+  .missing-symbol-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .missing-symbol-label {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+
+  .missing-symbol-row .button {
+    width: 100%;
+  }
+
+  .skipped-row-inputs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .skipped-row-inputs .cell-input[type="text"],
+  .skipped-row-inputs .cell-input[type="number"],
+  .skipped-row-inputs .button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .missing-symbol-row,
+  .skipped-row-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .draft-parsed-table {
+    min-width: 0;
   }
 }
 
