@@ -1148,6 +1148,90 @@ textarea {
   gap: 12px;
 }
 
+.capture-mode-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.capture-mode-btn {
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.capture-mode-btn.is-active {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+
+.paste-table-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+  font-family: monospace;
+  background: var(--card-bg, #fff);
+  color: inherit;
+}
+
+.paste-preview {
+  margin-top: 4px;
+}
+
+.paste-preview-scroll {
+  overflow-x: auto;
+  margin-bottom: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.paste-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.paste-preview-table th,
+.paste-preview-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.paste-preview-table th {
+  background: var(--surface, #f5f5f5);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.paste-meta-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.paste-meta-row label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--muted);
+  gap: 4px;
+}
+
 .parse-preview input,
 .parse-preview select,
 .parse-preview textarea {

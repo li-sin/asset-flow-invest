@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.24";
+const APP_VERSION = "v0.26.25";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -95,6 +95,9 @@ const state = {
   detailEditMode: {},
   selectedSnapshotDate: null,
   editingDateSnapshotId: null,
+  captureMode: "ocr",
+  pasteParsed: null,
+  pasteMeta: { date: "", market: "TW" },
   quotesLoading: false,
   quotesFailed: false,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
@@ -3584,6 +3587,43 @@ async function saveLayoutDeltaToSheet(newPayloads) {
   }
 }
 
+function parsePasteTable(text) {
+  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return null;
+  const headers = lines[0].split("\t").map((h) => h.trim());
+  const findCol = (re) => headers.findIndex((h) => re.test(h));
+  const colMap = {
+    symbol: findCol(/代號|symbol|ticker|股票代號/i),
+    name: findCol(/名稱|name|公司名/i),
+    shares: findCol(/股數|shares|數量|持股|張數/i),
+    avgCost: findCol(/均成本|均價|成本|avg.?cost|cost/i),
+  };
+  const rows = lines.slice(1).map((line) => {
+    const cells = line.split("\t");
+    const get = (i) => (i >= 0 ? (cells[i] || "").trim() : "");
+    const num = (i) => parseFloat(get(i).replace(/,/g, "")) || 0;
+    return { symbol: get(colMap.symbol).toUpperCase(), name: get(colMap.name), shares: num(colMap.shares), avgCost: num(colMap.avgCost) };
+  }).filter((r) => r.symbol);
+  return rows.length ? { headers, rows, colMap } : null;
+}
+
+async function savePasteSnapshot() {
+  const parsed = state.pasteParsed;
+  const { date, market } = state.pasteMeta;
+  if (!parsed?.rows?.length) { alert("尚無解析資料"); return; }
+  if (!date) { alert("請選擇日期"); return; }
+  const rows = parsed.rows.map((r) => ({ ...r, kind: "", source: "paste" }));
+  const payloads = buildMarketSnapshotPayloadsFromRows({ createdAt: new Date().toISOString(), date, market, sourceEntryId: "", sourceTitle: "貼上表格", rows });
+  const result = await writeMarketSnapshotPayloads(payloads);
+  if (result.cancelled) return;
+  const written = result.written?.length ?? 0;
+  const skipped = result.skipped?.length ?? 0;
+  alert(`已儲存 ${written} 筆快照${skipped ? `，跳過 ${skipped} 筆（重複）` : ""}。`);
+  state.pasteParsed = null;
+  state.captureMode = "ocr";
+  await loadLatestCloudSnapshot(true);
+}
+
 function findDuplicateSnapshotGroups(snapshots, positions) {
   const groups = new Map();
   for (const snapshot of snapshots || []) {
@@ -5610,14 +5650,53 @@ function renderCloudSnapshot() {
         }).join('')}
       </div>`
     : '<p class="muted-text">尚無已儲存截圖。</p>';
+  const pastePreviewHtml = (() => {
+    const p = state.pasteParsed;
+    if (!p) return "";
+    const meta = state.pasteMeta;
+    const rows = p.rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td>${r.shares}</td><td>${r.avgCost}</td></tr>`).join("");
+    return `
+      <div class="paste-preview">
+        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆，確認後儲存：</p>
+        <div class="paste-preview-scroll">
+          <table class="paste-preview-table">
+            <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均成本</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="paste-meta-row">
+          <label>市場
+            <select id="paste-market-select" class="cell-input">
+              <option value="TW"${meta.market === "TW" ? " selected" : ""}>台股</option>
+              <option value="US"${meta.market === "US" ? " selected" : ""}>美股</option>
+            </select>
+          </label>
+          <label>日期
+            <input type="date" id="paste-date-input" class="cell-input" value="${escapeHtml(meta.date)}">
+          </label>
+        </div>
+        <button id="paste-save-btn" class="button primary" type="button">儲存為快照</button>
+        <button id="paste-clear-btn" class="button secondary" type="button" style="margin-left:8px">清除</button>
+      </div>`;
+  })();
   const captureContent = `
     <section class="dashboard-card capture-tab-card">
       <div class="card-heading">
-        <h3>新增庫存截圖</h3>
-        <span>打開截圖入口後可貼上、拖放或選檔</span>
+        <h3>新增庫存</h3>
+        <div class="capture-mode-toggle">
+          <button class="capture-mode-btn${state.captureMode === "ocr" ? " is-active" : ""}" data-capture-mode="ocr" type="button">截圖 OCR</button>
+          <button class="capture-mode-btn${state.captureMode === "paste" ? " is-active" : ""}" data-capture-mode="paste" type="button">貼上表格</button>
+        </div>
       </div>
-      <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
-      <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
+      ${state.captureMode === "ocr" ? `
+        <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
+        <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
+      ` : `
+        <p class="muted-text">從 Google Sheets 選取表格後複製（Ctrl+C），再貼入下方。</p>
+        <textarea id="paste-table-input" class="paste-table-textarea" placeholder="在此貼上試算表資料…" rows="6"></textarea>
+        <button id="parse-paste-btn" class="button primary" type="button" style="margin-top:8px">解析</button>
+        ${pastePreviewHtml}
+      `}
     </section>
     <section class="dashboard-card">
       <div class="card-heading">
@@ -5674,6 +5753,28 @@ function renderCloudSnapshot() {
   });
   els.cloudSnapshot.querySelector("#cleanup-duplicates")?.addEventListener("click", cleanupDuplicateCloudSnapshots);
   els.cloudSnapshot.querySelector("#dashboard-open-capture")?.addEventListener("click", openCapturePanel);
+  els.cloudSnapshot.querySelectorAll("[data-capture-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.captureMode = btn.dataset.captureMode;
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelector("#parse-paste-btn")?.addEventListener("click", () => {
+    const text = els.cloudSnapshot.querySelector("#paste-table-input")?.value || "";
+    const result = parsePasteTable(text);
+    if (!result) { alert("無法解析：請確認已貼上含表頭的試算表資料（Tab 分隔）"); return; }
+    state.pasteParsed = result;
+    if (!state.pasteMeta.date) state.pasteMeta.date = today();
+    renderCloudSnapshot();
+    setTimeout(() => {
+      const dateInput = els.cloudSnapshot.querySelector("#paste-date-input");
+      if (dateInput) { dateInput.focus(); try { dateInput.showPicker(); } catch (_) {} }
+    }, 50);
+  });
+  els.cloudSnapshot.querySelector("#paste-market-select")?.addEventListener("change", (e) => { state.pasteMeta.market = e.target.value; });
+  els.cloudSnapshot.querySelector("#paste-date-input")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; });
+  els.cloudSnapshot.querySelector("#paste-save-btn")?.addEventListener("click", savePasteSnapshot);
+  els.cloudSnapshot.querySelector("#paste-clear-btn")?.addEventListener("click", () => { state.pasteParsed = null; renderCloudSnapshot(); });
   els.cloudSnapshot.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextTab = button.dataset.dashboardTab || "home";
