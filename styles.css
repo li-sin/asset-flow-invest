@@ -2129,6 +2129,9 @@ textarea {
 @media (max-width: 640px) {
   .parsed-table {
     display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
   .parsed-table thead {
     display: none;
@@ -2138,6 +2141,8 @@ textarea {
   }
   .parsed-table tr {
     display: block;
+    width: 100%;
+    max-width: 100%;
     border: 1px solid var(--border, #333);
     border-radius: 8px;
     padding: 8px;
@@ -2148,6 +2153,9 @@ textarea {
   }
   .parsed-table td {
     display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: 2px 4px;
   }
   .parsed-table td:first-child {
@@ -2180,6 +2188,26 @@ textarea {
 
   .draft-parsed-table .row-crop {
     width: 100%;
+  }
+
+  .detail-panel .table-scroll,
+  .detail-panel .parsed-table,
+  .detail-panel .parsed-table tbody,
+  .detail-panel .parsed-table tr,
+  .detail-panel .parsed-table td,
+  .detail-panel .parsed-table td:nth-child(7),
+  .detail-panel .parsed-table td:nth-child(8) {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .detail-panel .table-scroll {
+    overflow-x: hidden;
+  }
+
+  .detail-panel .raw-cell {
+    overflow-wrap: anywhere;
   }
 
   /* 明細表格（.compact-table 內）：標籤左、數值右的 flex 排版 */
