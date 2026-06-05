@@ -244,6 +244,8 @@ textarea {
   border-radius: 8px;
   background: #fff;
   padding: 10px;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .cloud-snapshot:empty {
@@ -1118,6 +1120,7 @@ textarea {
 
 .table-scroll {
   width: 100%;
+  max-width: 100%;
   overflow: auto;
   margin-top: 8px;
   overscroll-behavior-x: contain;
@@ -1824,6 +1827,7 @@ textarea {
   position: fixed;
   inset: 12px;
   width: auto;
+  max-width: calc(100vw - 24px);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1833,7 +1837,10 @@ textarea {
   pointer-events: none;
   transform: translateY(10px);
   transition: opacity 160ms ease, transform 160ms ease;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
 }
 
 .detail-panel.is-open {
@@ -2030,8 +2037,11 @@ textarea {
   .capture-panel,
   .detail-panel {
     inset: 4px;
+    width: calc(100vw - 8px);
+    max-width: calc(100vw - 8px);
     padding-left: 12px;
     padding-right: 12px;
+    overflow-x: hidden;
   }
 
   .capture-panel .section-heading {
@@ -2191,6 +2201,7 @@ textarea {
   }
 
   .detail-panel .table-scroll,
+  .detail-panel .parsed-card,
   .detail-panel .parsed-table,
   .detail-panel .parsed-table tbody,
   .detail-panel .parsed-table tr,
@@ -2204,10 +2215,22 @@ textarea {
 
   .detail-panel .table-scroll {
     overflow-x: hidden;
+    overscroll-behavior-x: none;
   }
 
   .detail-panel .raw-cell {
     overflow-wrap: anywhere;
+  }
+
+  .detail-panel .row-fix {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .detail-panel .row-fix .button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   /* 明細表格（.compact-table 內）：標籤左、數值右的 flex 排版 */
