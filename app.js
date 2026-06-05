@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.20";
+const APP_VERSION = "v0.26.21";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -480,37 +480,38 @@ async function editSnapshotDate(snapshotId, newDate) {
   const market = normalizeMarketKey(snap.market);
   if (oldDate === newDate) { state.editingDateSnapshotId = null; renderCloudSnapshot(); return; }
   try {
-    // 1. 更新 snapshots tab（C 欄 = date）
-    const snapValues = await readSheetValues(SHEET_NAMES.snapshots, "A:C");
+    // 三個 tab 一次讀取
+    const [snapValues, posValues, layoutValues] = await Promise.all([
+      readSheetValues(SHEET_NAMES.snapshots, "A:C"),
+      readSheetValues(SHEET_NAMES.positions, "A:B"),
+      oldDate ? readSheetValues(SHEET_NAMES.layout, "A:B") : Promise.resolve([]),
+    ]);
+    // 收集所有需要更新的 range
+    const batchData = [];
     for (let i = 1; i < snapValues.length; i++) {
       if (snapValues[i][0] === snapshotId) {
-        await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.snapshots, `C${i + 1}`)}?valueInputOption=RAW`, {
-          method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[newDate]] }),
-        });
+        batchData.push({ range: `${SHEET_NAMES.snapshots}!C${i + 1}`, values: [[newDate]] });
         break;
       }
     }
-    // 2. 更新 positions tab（B 欄 = date）
-    const posValues = await readSheetValues(SHEET_NAMES.positions, "A:B");
     for (let i = 1; i < posValues.length; i++) {
       if (posValues[i][0] === snapshotId) {
-        await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.positions, `B${i + 1}`)}?valueInputOption=RAW`, {
-          method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[newDate]] }),
-        });
+        batchData.push({ range: `${SHEET_NAMES.positions}!B${i + 1}`, values: [[newDate]] });
       }
     }
-    // 3. 更新 layout tab（A 欄 = date，同市場）
-    if (oldDate) {
-      const layoutValues = await readSheetValues(SHEET_NAMES.layout, "A:B");
-      for (let i = 1; i < layoutValues.length; i++) {
-        if (layoutValues[i][0] === oldDate && normalizeMarketKey(layoutValues[i][1]) === market) {
-          await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.layout, `A${i + 1}`)}?valueInputOption=RAW`, {
-            method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[newDate]] }),
-          });
-        }
+    for (let i = 1; i < layoutValues.length; i++) {
+      if (layoutValues[i][0] === oldDate && normalizeMarketKey(layoutValues[i][1]) === market) {
+        batchData.push({ range: `${SHEET_NAMES.layout}!A${i + 1}`, values: [[newDate]] });
       }
     }
-    // 4. 更新記憶體
+    // 一次寫入（1 個 API 請求）
+    if (batchData.length) {
+      await sheetsFetch("/values:batchUpdate", {
+        method: "POST",
+        body: JSON.stringify({ valueInputOption: "RAW", data: batchData }),
+      });
+    }
+    // 更新記憶體
     state.cloudHistory.snapshots = state.cloudHistory.snapshots.map((s) =>
       s.snapshotId === snapshotId ? { ...s, date: newDate } : s
     );
