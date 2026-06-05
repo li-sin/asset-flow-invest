@@ -1,5 +1,5 @@
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
-const YAHOO_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote";
+const TWSE_QUOTE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp";
 
 function doGet(e) {
   const params = e && e.parameter ? e.parameter : {};
@@ -23,35 +23,68 @@ function doGet(e) {
   });
 }
 
-// 使用 Yahoo Finance v7 batch quote API，一次請求取所有代號現價
+// 台股用 TWSE API，美股用 Yahoo Finance
 function fetchCurrentQuotes_(symbols) {
-  const BATCH_SIZE = 20;
   const quotes = {};
+  const twSymbols = [];
+  const usSymbols = [];
 
-  for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-    const batch = symbols.slice(i, i + BATCH_SIZE);
-    const symbolList = batch.join(",");
-    const url = `${YAHOO_QUOTE_URL}?symbols=${encodeURIComponent(symbolList)}&fields=regularMarketPrice,regularMarketPreviousClose,currency`;
+  symbols.forEach((sym) => {
+    // .TW 或 .TWO 結尾，或純數字開頭 → 台股
+    if (/\.(TW[O]?)$/i.test(sym) || /^\d/.test(sym)) {
+      twSymbols.push(sym);
+    } else {
+      usSymbols.push(sym);
+    }
+  });
+
+  // 台股：TWSE API（不受 Yahoo 封鎖）
+  if (twSymbols.length) {
+    const exCh = twSymbols.map((s) => {
+      const code = s.replace(/\.(TW[O]?)$/i, "");
+      return `tse_${code}.tw`;
+    }).join("|");
     try {
+      const url = `${TWSE_QUOTE_URL}?ex_ch=${encodeURIComponent(exCh)}&json=1&delay=0`;
       const payload = fetchJson_(url);
-      const results = (payload && payload.quoteResponse && payload.quoteResponse.result) || [];
-      results.forEach((item) => {
-        const sym = item.symbol || "";
-        if (!sym) return;
-        quotes[sym] = {
-          price: numberOrNull_(item.regularMarketPrice),
-          prevClose: numberOrNull_(item.regularMarketPreviousClose),
-          currency: item.currency || "",
-          yahooSymbol: sym,
-        };
+      const msgArray = (payload && payload.msgArray) ? payload.msgArray : [];
+      msgArray.forEach((item) => {
+        const code = item.c || "";
+        const price = numberOrNull_(item.z !== "-" ? item.z : item.y); // z=現價, y=昨收
+        const prevClose = numberOrNull_(item.y);
+        if (code) {
+          quotes[`${code}.TW`] = { price, prevClose, currency: "TWD", yahooSymbol: `${code}.TW` };
+        }
       });
     } catch (err) {
-      // batch failed — 每支 fallback 為 null
-      batch.forEach((sym) => {
-        if (!quotes[sym]) quotes[sym] = { price: null, prevClose: null, currency: "", yahooSymbol: sym };
+      twSymbols.forEach((sym) => {
+        if (!quotes[sym]) quotes[sym] = { price: null, prevClose: null, currency: "TWD", yahooSymbol: sym };
       });
     }
   }
+
+  // 美股：Yahoo Finance（每支一次，數量少影響小）
+  usSymbols.forEach((symbol) => {
+    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
+    try {
+      const payload = fetchJson_(url);
+      const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+      const meta = result && result.meta ? result.meta : {};
+      const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
+      const closes = quote && quote.close ? quote.close.filter((v) => v !== null && v !== undefined) : [];
+      const latestClose = closes.length ? closes[closes.length - 1] : null;
+      const previousClose = closes.length > 1 ? closes[closes.length - 2] : meta.chartPreviousClose;
+      const price = numberOrNull_(meta.regularMarketPrice) || numberOrNull_(latestClose);
+      quotes[symbol] = {
+        price,
+        prevClose: numberOrNull_(previousClose),
+        currency: meta.currency || "",
+        yahooSymbol: meta.symbol || symbol,
+      };
+    } catch (err) {
+      quotes[symbol] = { price: null, prevClose: null, currency: "", yahooSymbol: symbol };
+    }
+  });
 
   return quotes;
 }
@@ -100,7 +133,7 @@ function fetchJson_(url) {
   });
   const code = response.getResponseCode();
   if (code < 200 || code >= 300) {
-    throw new Error(`Yahoo request failed: ${code}`);
+    throw new Error(`Request failed: ${code}`);
   }
   return JSON.parse(response.getContentText());
 }

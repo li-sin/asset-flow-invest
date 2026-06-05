@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.22";
+const APP_VERSION = "v0.26.23";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5262,7 +5262,12 @@ function renderCloudSnapshot() {
     // 1. 計算每列數值
     const augmented = item.rows.map((row) => {
       const quote = state.quotes[row.symbol];
-      const price = typeof quote === 'number' ? quote : (quote?.price ?? null);
+      let price = typeof quote === 'number' ? quote : (quote?.price ?? null);
+      let priceIsHistorical = false;
+      if (price === null) {
+        const fallback = historicalClose(row.symbol, today());
+        if (fallback && fallback > 0) { price = fallback; priceIsHistorical = true; }
+      }
       const avgCost = Number(row.avgCost || 0);
       const returnRate = (price !== null && avgCost > 0) ? ((price - avgCost) / avgCost * 100) : null;
       const days = holdingDays(item.market, row.symbol);
@@ -5279,7 +5284,7 @@ function renderCloudSnapshot() {
         ? ((price - prevAvgCost) / prevAvgCost * 100)
         : null;
       const rateDelta = (returnRate !== null && prevRate !== null) ? returnRate - prevRate : null;
-      return { row, price, avgCost, returnRate, perfRate, dailyGain, firstBuyVal, holdDays, rateDelta };
+      return { row, price, priceIsHistorical, avgCost, returnRate, perfRate, dailyGain, firstBuyVal, holdDays, rateDelta };
     });
     // 2. 排序
     const { key: sKey, dir: sDir } = state.detailSort;
@@ -5305,8 +5310,10 @@ function renderCloudSnapshot() {
     });
     // 3. Render
     const sortArrow = (key) => state.detailSort.key === key ? (state.detailSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-    const rows = augmented.map(({ row, price, returnRate, perfRate, dailyGain, firstBuyVal, holdDays, rateDelta }) => {
-      const priceCell = price !== null ? escapeHtml(formatNumber(price, 2)) : "<span class=\"muted-text\">—</span>";
+    const rows = augmented.map(({ row, price, priceIsHistorical, returnRate, perfRate, dailyGain, firstBuyVal, holdDays, rateDelta }) => {
+      const priceCell = price !== null
+        ? `${escapeHtml(formatNumber(price, 2))}${priceIsHistorical ? '<small class="historical-price-tag">昨</small>' : ''}`
+        : "<span class=\"muted-text\">—</span>";
       const deltaSpan = rateDelta !== null
         ? `<small style="color:${rateDelta >= 0 ? 'var(--green)' : 'var(--red)'};display:block">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
         : '';

@@ -1034,6 +1034,13 @@ textarea {
   padding: 10px 12px;
 }
 
+.historical-price-tag {
+  font-size: 9px;
+  color: var(--muted);
+  margin-left: 2px;
+  vertical-align: super;
+}
+
 .quotes-status {
   font-size: 12px;
   padding: 2px 7px;
