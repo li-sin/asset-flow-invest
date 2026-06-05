@@ -1,8 +1,8 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.16";
-const APP_VERSION_NOTE = "鎖定手機截圖內容面板水平滑動";
+const APP_VERSION = "v0.26.17";
+const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -155,6 +155,7 @@ let googleTokenClient = null;
 let googleAccessToken = "";
 let googleAccessTokenExpiresAt = 0;
 let sheetTablesReady = false;
+let silentCloudReloadPromise = null;
 
 function emptyParseResult() {
   return {
@@ -3904,6 +3905,15 @@ async function loadLatestCloudSnapshot(showAlert = true) {
   }
 }
 
+function reloadCloudSnapshotSilently() {
+  if (!state.auth.authorized || silentCloudReloadPromise) return;
+  silentCloudReloadPromise = loadLatestCloudSnapshot(false)
+    .catch((error) => console.warn("silent cloud reload", error))
+    .finally(() => {
+      silentCloudReloadPromise = null;
+    });
+}
+
 function stripHeaderRow(values, headers) {
   if (!values?.length) return [];
   const first = values[0].map((value) => String(value || "").trim());
@@ -5524,8 +5534,14 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelector("#dashboard-open-capture")?.addEventListener("click", openCapturePanel);
   els.cloudSnapshot.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.dashboardTab = button.dataset.dashboardTab || "home";
+      const nextTab = button.dataset.dashboardTab || "home";
+      if (state.dashboardTab === nextTab) {
+        reloadCloudSnapshotSilently();
+        return;
+      }
+      state.dashboardTab = nextTab;
       renderCloudSnapshot();
+      reloadCloudSnapshotSilently();
     });
   });
   els.cloudSnapshot.querySelectorAll("[data-delete-snapshot-id]").forEach((button) => {
