@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.26";
+const APP_VERSION = "v0.26.27";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3588,23 +3588,34 @@ async function saveLayoutDeltaToSheet(newPayloads) {
 }
 
 function parsePasteTable(text) {
-  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) return null;
-  const headers = lines[0].split("\t").map((h) => h.trim());
-  const findCol = (re) => headers.findIndex((h) => re.test(h));
-  const colMap = {
-    symbol: findCol(/代號|symbol|ticker|股票代號/i),
-    name: findCol(/名稱|name|公司名/i),
-    shares: findCol(/股數|shares|數量|持股|張數/i),
-    avgCost: findCol(/均成本|均價|成本|avg.?cost|cost/i),
-  };
-  const rows = lines.slice(1).map((line) => {
-    const cells = line.split("\t");
-    const get = (i) => (i >= 0 ? (cells[i] || "").trim() : "");
-    const num = (i) => parseFloat(get(i).replace(/,/g, "")) || 0;
-    return { symbol: get(colMap.symbol).toUpperCase(), name: get(colMap.name), shares: num(colMap.shares), avgCost: num(colMap.avgCost) };
-  }).filter((r) => r.symbol);
-  return rows.length ? { headers, rows, colMap } : null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // 試算表格式（含 Tab）
+  if (trimmed.includes("\t")) {
+    const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return null;
+    const headers = lines[0].split("\t").map((h) => h.trim());
+    const findCol = (re) => headers.findIndex((h) => re.test(h));
+    const colMap = {
+      symbol: findCol(/代號|symbol|ticker|股票代號/i),
+      name: findCol(/名稱|name|公司名/i),
+      shares: findCol(/股數|shares|數量|持股|張數/i),
+      avgCost: findCol(/均成本|均價|成本|avg.?cost|cost/i),
+    };
+    const rows = lines.slice(1).map((line) => {
+      const cells = line.split("\t");
+      const get = (i) => (i >= 0 ? (cells[i] || "").trim() : "");
+      const num = (i) => parseFloat(get(i).replace(/,/g, "")) || 0;
+      return { symbol: get(colMap.symbol).toUpperCase(), name: get(colMap.name), shares: num(colMap.shares), avgCost: num(colMap.avgCost) };
+    }).filter((r) => r.symbol);
+    return rows.length ? { headers, rows, colMap, source: "spreadsheet" } : null;
+  }
+
+  // 方舟文字格式（Apple Live Text 從截圖複製）
+  const arkRaw = parseHoldings(trimmed);
+  const arkRows = validSnapshotRows(arkRaw);
+  return arkRows.length ? { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: arkRows, colMap: null, source: "ark" } : null;
 }
 
 async function savePasteSnapshot() {
@@ -3615,8 +3626,8 @@ async function savePasteSnapshot() {
   const rows = parsed.rows.map((r) => ({
     ...r,
     name: r.name || SYMBOL_NAMES[r.symbol] || "",
-    kind: "",
-    source: "paste",
+    kind: parsed.source === "ark" ? (r.kind || "") : "",
+    source: parsed.source === "ark" ? (r.source || "ark") : "paste",
   }));
   const payloads = buildMarketSnapshotPayloadsFromRows({ createdAt: new Date().toISOString(), date, market, sourceEntryId: "", sourceTitle: "貼上表格", rows });
   const result = await writeMarketSnapshotPayloads(payloads);
@@ -5662,7 +5673,7 @@ function renderCloudSnapshot() {
     const rows = p.rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td>${r.shares}</td><td>${r.avgCost}</td></tr>`).join("");
     return `
       <div class="paste-preview">
-        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆，確認後儲存：</p>
+        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆（${p.source === "ark" ? "方舟文字格式" : "試算表格式"}），確認後儲存：</p>
         <div class="paste-preview-scroll">
           <table class="paste-preview-table">
             <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均成本</th></tr></thead>
@@ -5697,8 +5708,8 @@ function renderCloudSnapshot() {
         <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
         <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
       ` : `
-        <p class="muted-text">從 Google Sheets 選取表格後複製（Ctrl+C），再貼入下方。</p>
-        <textarea id="paste-table-input" class="paste-table-textarea" placeholder="在此貼上試算表資料…" rows="6"></textarea>
+        <p class="muted-text">支援兩種格式：① Apple Live Text 從方舟截圖複製的文字 ② 從 Google Sheets 複製的 Tab 分隔表格</p>
+        <textarea id="paste-table-input" class="paste-table-textarea" placeholder="貼上方舟截圖文字（Apple Live Text），或試算表資料（Tab 分隔）…" rows="6"></textarea>
         <button id="parse-paste-btn" class="button primary" type="button" style="margin-top:8px">解析</button>
         ${pastePreviewHtml}
       `}
