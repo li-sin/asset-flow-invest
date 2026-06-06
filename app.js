@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.27";
+const APP_VERSION = "v0.26.28";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3587,6 +3587,64 @@ async function saveLayoutDeltaToSheet(newPayloads) {
   }
 }
 
+// Apple Live Text 從方舟截圖複製的文字（每欄位各一行）
+// 格式：名稱(1-3行) → 代號 → 現股 → 股數 → 均價（噪音字元）
+function parseLiveTextArk(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const isCode = (s) => /^[0-9]{4,6}[A-Za-z]*$/.test(s.replace(/[*＊]/g, "").trim());
+  const isKind = (s) => /^(現股|融資|融券|借券)/.test(s.trim());
+  const parseNum = (s) => {
+    const n = parseFloat(s.replace(/,/g, "").replace(/[^\d.]/g, ""));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  const stocks = [];
+  const usedIdx = new Set();
+
+  for (let i = 0; i < lines.length; i++) {
+    if (usedIdx.has(i)) continue;
+    const rawCode = lines[i].replace(/[*＊]/g, "").trim();
+    if (!isCode(rawCode)) continue;
+
+    // 在接下來 3 行內找 現股/融資
+    let kindIdx = -1;
+    for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
+      if (isKind(lines[j])) { kindIdx = j; break; }
+    }
+    if (kindIdx < 0) continue;
+
+    // 往前收集名稱（遇到數字開頭行或雜訊行停止）
+    const nameParts = [];
+    for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
+      if (usedIdx.has(j)) break;
+      const l = lines[j];
+      if (isCode(l.replace(/[*＊]/g, "").trim())) break;
+      if (isKind(l) || isNoiseLine(l)) break;
+      if (/^\d/.test(l)) break; // 數字開頭 = 上一筆的股數或均價
+      nameParts.unshift(l);
+    }
+
+    // 在 現股 後面找股數（第一個數字）和均價（第二個數字）
+    let shares = null, cost = null;
+    for (let j = kindIdx + 1; j <= Math.min(kindIdx + 6, lines.length - 1); j++) {
+      if (usedIdx.has(j)) continue;
+      const n = parseNum(lines[j]);
+      if (n === null) continue;
+      if (shares === null) { shares = n; usedIdx.add(j); }
+      else if (cost === null) { cost = n; usedIdx.add(j); break; }
+    }
+    if (shares === null || cost === null) continue;
+
+    usedIdx.add(i);
+    usedIdx.add(kindIdx);
+    const symbol = normalizeTWSymbol(rawCode.toUpperCase());
+    const name = lookupSymbolName(symbol) || SYMBOL_NAMES[symbol] || nameParts.join("") || "";
+    stocks.push({ symbol, name, kind: lines[kindIdx].trim(), shares, avgCost: cost, source: "live_text" });
+  }
+
+  return stocks;
+}
+
 function parsePasteTable(text) {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -3612,7 +3670,12 @@ function parsePasteTable(text) {
     return rows.length ? { headers, rows, colMap, source: "spreadsheet" } : null;
   }
 
-  // 方舟文字格式（Apple Live Text 從截圖複製）
+  // 方舟 Apple Live Text 格式（每欄位各一行）
+  const liveRows = parseLiveTextArk(trimmed);
+  const validLive = validSnapshotRows(liveRows);
+  if (validLive.length) return { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: validLive, colMap: null, source: "ark" };
+
+  // 最後嘗試 parseHoldings（OCR 同行格式）
   const arkRaw = parseHoldings(trimmed);
   const arkRows = validSnapshotRows(arkRaw);
   return arkRows.length ? { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: arkRows, colMap: null, source: "ark" } : null;
@@ -5778,7 +5841,7 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelector("#parse-paste-btn")?.addEventListener("click", () => {
     const text = els.cloudSnapshot.querySelector("#paste-table-input")?.value || "";
     const result = parsePasteTable(text);
-    if (!result) { alert("無法解析：請確認已貼上含表頭的試算表資料（Tab 分隔）"); return; }
+    if (!result) { alert("無法解析。\n\n支援格式：\n① Apple Live Text 從方舟截圖複製的文字\n② Google Sheets 複製的 Tab 分隔表格（含表頭）"); return; }
     state.pasteParsed = result;
     if (!state.pasteMeta.date) state.pasteMeta.date = today();
     renderCloudSnapshot();
