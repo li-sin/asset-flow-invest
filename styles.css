@@ -1985,6 +1985,14 @@ textarea {
   text-align: center;
 }
 
+.dashboard-version-footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 0 2px;
+  opacity: 0.7;
+}
+
 .icon-button {
   position: sticky;
   top: 12px;
