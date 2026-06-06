@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.28";
+const APP_VERSION = "v0.26.29";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3645,6 +3645,41 @@ function parseLiveTextArk(text) {
   return stocks;
 }
 
+// 多欄格式（截圖1：總覽頁上半段，欄位讀序）
+// 利用均價行末尾「三/二/一/=」標記與股數行無標記來分類
+function parseColumnArk(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const isCode = (s) => /^[0-9]{4,6}[A-Za-z]*$/.test(s.replace(/[*＊]/g, "").trim());
+  const hasCostMarker = (l) => /[三二一=＝]+\s*$/.test(l.trim());
+
+  const numStart = lines.findIndex((l) => /^總股數/.test(l));
+  if (numStart < 0) return [];
+
+  const codes = [];
+  for (let i = 0; i < numStart; i++) {
+    const l = lines[i].replace(/[*＊]/g, "").trim();
+    if (isCode(l)) codes.push(l);
+  }
+  if (!codes.length) return [];
+
+  const shares = [], costs = [];
+  for (let i = numStart + 1; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (/^(成交均價|（台幣|新增持股|總共|持有股票)/.test(l)) continue;
+    const n = parseFloat(l.replace(/,/g, "").replace(/[^\d.]/g, ""));
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (hasCostMarker(l)) costs.push(n);
+    else shares.push(n);
+  }
+
+  const count = Math.min(codes.length, shares.length, costs.length);
+  if (!count) return [];
+  return codes.slice(0, count).map((code, i) => {
+    const sym = normalizeTWSymbol(code.toUpperCase());
+    return { symbol: sym, name: lookupSymbolName(sym) || "", kind: "現股", shares: shares[i], avgCost: costs[i], source: "live_text" };
+  });
+}
+
 function parsePasteTable(text) {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -3670,12 +3705,16 @@ function parsePasteTable(text) {
     return rows.length ? { headers, rows, colMap, source: "spreadsheet" } : null;
   }
 
-  // 方舟 Apple Live Text 格式（每欄位各一行）
+  // 方舟 Apple Live Text 格式：組合兩個 parser
+  // parseLiveTextArk：每股逐行格式（截圖2 / 下半段）
+  // parseColumnArk：多欄格式（截圖1 / 上半段，末尾「三/=」標記區分均價）
+  // 同代號時 parseColumnArk 覆蓋 parseLiveTextArk（欄序精確值較可靠）
   const liveRows = parseLiveTextArk(trimmed);
-  const validLive = validSnapshotRows(liveRows);
-  if (validLive.length) return { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: validLive, colMap: null, source: "ark" };
+  const colRows = parseColumnArk(trimmed);
+  const combined = validSnapshotRows([...liveRows, ...colRows]);
+  if (combined.length) return { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: combined, colMap: null, source: "ark" };
 
-  // 最後嘗試 parseHoldings（OCR 同行格式）
+  // fallback：parseHoldings（OCR 同行格式）
   const arkRaw = parseHoldings(trimmed);
   const arkRows = validSnapshotRows(arkRaw);
   return arkRows.length ? { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: arkRows, colMap: null, source: "ark" } : null;
