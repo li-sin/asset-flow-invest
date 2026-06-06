@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.32";
+const APP_VERSION = "v0.26.33";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -1636,7 +1636,9 @@ function extractNumbersAfterHolding(text) {
   const normalized = normalizeOcrText(text);
   const index = normalized.search(/現\s*股/);
   if (index < 0) return [];
-  return (normalized.slice(index).match(/[\d,]+(?:\.\d+)?/g) || [])
+  // 合併 OCR 誤加空格的小數點，如「47 . 11」→「47.11」
+  const joined = normalized.slice(index).replace(/(\d)\s*\.\s*(\d)/g, "$1.$2");
+  return (joined.match(/[\d,]+(?:\.\d+)?/g) || [])
     .map(parseNumberToken)
     .filter((value) => value !== null);
 }
@@ -2278,7 +2280,9 @@ function parseArkRowCropText(text, cropDataUrl, label) {
   // 先辨識代號，決定是否為美股（影響均價標準化邏輯）
   const beforeHolding = holdingIndex >= 0 ? normalized.slice(0, holdingIndex) : normalized;
   const ocrName = cleanArkNamePart(beforeHolding);
-  const symbol = findKnownSymbolInText(normalized) || findSymbolByOcrName(ocrName || normalized);
+  // 優先用中文名稱辨識（較可靠，不受 OCR 誤把數字代號認成英文字母的影響）
+  const symbolByName = findSymbolByOcrName(ocrName);
+  const symbol = symbolByName || findKnownSymbolInText(normalized) || findSymbolByOcrName(normalized);
   const officialName = lookupSymbolName(symbol);
 
   // 股數：取第一個正數（美股允許小數股數，不限整數）
@@ -2321,8 +2325,10 @@ function normalizeArkAvgCost(value) {
 
 function findKnownSymbolInText(text) {
   const compact = compactText(text).replace(/[^\dA-Za-z]/g, "").toUpperCase();
-  const symbols = Object.keys(SYMBOL_NAMES).sort((a, b) => b.length - a.length);
-  return symbols.find((symbol) => compact.includes(symbol)) || "";
+  // 數字代號（台股）優先；英文代號（美股）其次，避免 OCR 誤讀數字為英文
+  const numeric = Object.keys(SYMBOL_NAMES).filter((s) => /^\d/.test(s)).sort((a, b) => b.length - a.length);
+  const alpha = Object.keys(SYMBOL_NAMES).filter((s) => /^[A-Z]/.test(s)).sort((a, b) => b.length - a.length);
+  return numeric.find((s) => compact.includes(s)) || alpha.find((s) => compact.includes(s)) || "";
 }
 
 function findSymbolByOcrName(text) {
