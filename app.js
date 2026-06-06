@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.39";
+const APP_VERSION = "v0.26.40";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
@@ -1649,9 +1649,12 @@ async function detectCompleteCircleMarkers(dataUrl) {
 
 function extractNumbersAfterHolding(text) {
   const normalized = normalizeOcrText(text);
-  const index = normalized.search(/現\s*股/);
-  if (index < 0) return [];
-  const after = normalized.slice(index)
+  // 用最後一個「現股」作為起點：避免 OCR 誤讀在名稱中插入假「現股」（如「現限」→「現股」）
+  // 導致代號數字（如 2330）被當作股數
+  const allMatches = [...normalized.matchAll(/現\s*股/g)];
+  if (!allMatches.length) return [];
+  const lastMatch = allMatches[allMatches.length - 1];
+  const after = normalized.slice(lastMatch.index)
     // 全形小數點／中點等轉成 ASCII 句點
     .replace(/[．｡·・]/g, ".")
     // 合併 OCR 誤加空格的小數點，如「47 . 11」「26 . 09」→「47.11」「26.09」
@@ -2296,7 +2299,10 @@ function normalizeOcrText(text) {
     .replace(/[－]/g, "-")
     .replace(/[|｜]/g, " ")
     .replace(/[：]/g, ":")
-    .replace(/[．｡·・﹒]/g, ".");  // 全形/小型小數點 / 中點 → ASCII 句點（含 U+FE52）
+    .replace(/[．｡·・﹒]/g, ".")   // 全形/小型小數點 / 中點 → ASCII 句點（含 U+FE52）
+    .replace(/(\d)\/(\d)/g, (_, a, b) => `${a}7${b}`)  // 數字間的 / 為 OCR 誤讀 7（如 5/6 → 576）
+    .replace(/現\s*限/g, "現股")    // OCR 誤讀：限 ≈ 股（字形相近）
+    .replace(/見\s*股/g, "現股");   // OCR 誤讀：見 ≈ 現（見 是 現 的部首）
 }
 
 function parseNumberToken(token) {
@@ -2568,7 +2574,9 @@ function parseArkPositionRows(lines) {
     const ocrName = buildArkName(pendingNameLines, beforeHolding, symbol);
     const officialName = lookupSymbolName(symbol);
     const shares = parseNumberToken(holdingMatch[1]);
-    const avgCost = parseNumberToken(holdingMatch[2]);
+    const rawAvgCost = parseNumberToken(holdingMatch[2]);
+    // 台股均價若為整數且 ≥1000 → 可能是 OCR 遺漏小數點（如 192486 → 1924.86）
+    const avgCost = isUsSymbol(symbol) ? rawAvgCost : normalizeArkAvgCost(rawAvgCost);
 
     rows.push({
       symbol,
