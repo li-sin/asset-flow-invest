@@ -1131,6 +1131,16 @@ textarea {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* display: block 讓 text-overflow: ellipsis 生效（inline 元素無效） */
+.snap-row-actions small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .snap-date-edit-row {
@@ -1142,7 +1152,7 @@ textarea {
 
 .snap-date-edit-input {
   width: 130px;
-  font-size: 13px;
+  font-size: 16px; /* ≥16px 防止 iOS Safari 點選自動放大 */
 }
 
 .swipe-delete-action {
@@ -1802,10 +1812,12 @@ textarea {
   padding: 10px 11px;
 }
 
-input[type="date"] {
+input[type="date"],
+select {
   max-width: 100%;
   min-width: 0;
   width: 100%;
+  font-size: 16px; /* 防止 iOS Safari 點選自動放大（< 16px 會觸發 zoom） */
 }
 
 textarea {

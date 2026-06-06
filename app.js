@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.40";
+const APP_VERSION = "v0.26.41";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
@@ -3914,7 +3914,7 @@ function renderCloudSnapshotSwipeList() {
           <div class="swipe-row-content">
             <div>${mainContent}</div>
             <div class="snap-row-actions">
-              <small>${escapeHtml(snapshot.createdAt || "")}</small>
+              <small>${escapeHtml((snapshot.createdAt || "").slice(0, 10))}</small>
               ${!isEditing ? `<button class="button compact ghost snap-date-edit-btn" type="button" data-snap-id="${escapeHtml(snapshot.snapshotId)}" title="改日期">✎</button>` : ""}
             </div>
           </div>
