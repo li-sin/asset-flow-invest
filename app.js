@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.29";
+const APP_VERSION = "v0.26.30";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3712,7 +3712,13 @@ function parsePasteTable(text) {
   const liveRows = parseLiveTextArk(trimmed);
   const colRows = parseColumnArk(trimmed);
   const combined = validSnapshotRows([...liveRows, ...colRows]);
-  if (combined.length) return { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: combined, colMap: null, source: "ark" };
+  if (combined.length) return {
+    headers: ["代號", "名稱", "種類", "股數", "均成本"],
+    rows: combined,
+    colMap: null,
+    source: "ark",
+    _debug: `逐行 ${liveRows.length} 筆 + 欄序 ${colRows.length} 筆 → 合併 ${combined.length} 筆`,
+  };
 
   // fallback：parseHoldings（OCR 同行格式）
   const arkRaw = parseHoldings(trimmed);
@@ -5775,7 +5781,7 @@ function renderCloudSnapshot() {
     const rows = p.rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td>${r.shares}</td><td>${r.avgCost}</td></tr>`).join("");
     return `
       <div class="paste-preview">
-        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆（${p.source === "ark" ? "方舟文字格式" : "試算表格式"}），確認後儲存：</p>
+        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆（${p.source === "ark" ? "方舟文字格式" : "試算表格式"}），確認後儲存：${p._debug ? `<br><small style="color:#888">${escapeHtml(p._debug)}</small>` : ""}</p>
         <div class="paste-preview-scroll">
           <table class="paste-preview-table">
             <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均成本</th></tr></thead>
