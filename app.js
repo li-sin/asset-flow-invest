@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.31";
+const APP_VERSION = "v0.26.32";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6762,6 +6762,12 @@ async function init() {
   if (IS_LOCAL_DEV) {
     // 本機開發模式：跳過 Google OAuth，直接進入 App
     state.auth = { signedIn: true, authorized: true, email: "dev@localhost", message: "" };
+    // 設定最小假快照讓 dashboard tabs 可以渲染
+    state.cloudSnapshot = {
+      snapshot: { snapshotId: "dev", date: today(), market: "TW", createdAt: new Date().toISOString(), stockCount: 0, totalCost: 0 },
+      positions: [],
+    };
+    state.dashboardTab = "capture";
     setAppLocked(false);
     render();
     renderCloudSnapshot();
