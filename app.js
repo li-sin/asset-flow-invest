@@ -1,7 +1,8 @@
-﻿const DB_NAME = "assetflow_invest_screenshots";
+﻿const IS_LOCAL_DEV = ["127.0.0.1", "localhost"].includes(window.location.hostname);
+const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.30";
+const APP_VERSION = "v0.26.31";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3060,6 +3061,7 @@ async function ensureGoogleIdentity() {
 }
 
 async function getGoogleAccessToken() {
+  if (IS_LOCAL_DEV) throw new Error("本機開發模式：Google Sheets API 不可用，儲存功能需在正式環境使用");
   const config = ensureAuthConfig();
   if (googleAccessToken && Date.now() < googleAccessTokenExpiresAt && state.auth.authorized) return googleAccessToken;
 
@@ -6756,6 +6758,21 @@ async function init() {
   els.date.value = today();
   bindEvents();
   registerServiceWorker();
+
+  if (IS_LOCAL_DEV) {
+    // 本機開發模式：跳過 Google OAuth，直接進入 App
+    state.auth = { signedIn: true, authorized: true, email: "dev@localhost", message: "" };
+    setAppLocked(false);
+    render();
+    renderCloudSnapshot();
+    // 顯示 dev banner
+    const banner = document.createElement("div");
+    banner.style.cssText = "position:fixed;bottom:60px;left:0;right:0;background:#f59e0b;color:#fff;text-align:center;font-size:12px;padding:4px;z-index:9999;";
+    banner.textContent = "🛠 本機開發模式 — Google Sheets API 不可用，解析與預覽功能正常";
+    document.body.appendChild(banner);
+    return;
+  }
+
   setAppLocked(true);
   renderAuthGate();
 }
