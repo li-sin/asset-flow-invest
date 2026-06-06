@@ -1,7 +1,7 @@
 ﻿const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.25";
+const APP_VERSION = "v0.26.26";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3612,7 +3612,12 @@ async function savePasteSnapshot() {
   const { date, market } = state.pasteMeta;
   if (!parsed?.rows?.length) { alert("尚無解析資料"); return; }
   if (!date) { alert("請選擇日期"); return; }
-  const rows = parsed.rows.map((r) => ({ ...r, kind: "", source: "paste" }));
+  const rows = parsed.rows.map((r) => ({
+    ...r,
+    name: r.name || SYMBOL_NAMES[r.symbol] || "",
+    kind: "",
+    source: "paste",
+  }));
   const payloads = buildMarketSnapshotPayloadsFromRows({ createdAt: new Date().toISOString(), date, market, sourceEntryId: "", sourceTitle: "貼上表格", rows });
   const result = await writeMarketSnapshotPayloads(payloads);
   if (result.cancelled) return;
