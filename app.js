@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.35";
+const APP_VERSION = "v0.26.36";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5869,14 +5869,12 @@ function renderCloudSnapshot() {
       </div>
     </header>
 
-    <div class="dashboard-tab-content">
-      ${tabContent}
-      <p class="dashboard-version-footer">${escapeHtml(`AssetFlow Invest ${APP_VERSION}`)}</p>
-    </div>
+    <div class="dashboard-tab-content">${tabContent}</div>
     <nav class="dashboard-tabs" role="tablist" aria-label="AssetFlow Invest">
       ${dashboardTabButton("home", "首頁")}
       ${dashboardTabButton("holdings", "庫存")}
       ${dashboardTabButton("capture", "新增")}
+      <span class="dashboard-tab-version">${escapeHtml(APP_VERSION)}</span>
     </nav>
   `;
   els.cloudSnapshot.querySelector("#dashboard-refresh")?.addEventListener("click", () => {
