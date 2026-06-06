@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.38";
+const APP_VERSION = "v0.26.39";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
@@ -1113,13 +1113,18 @@ async function recognizeImage(image, onProgress, options = {}) {
     : baseImage;
   await ensureTesseract();
 
+  // 偵測暗色背景（方舟截圖黑底白字）→ 反色後送 Tesseract（白底黑字）
+  // 偵測函式（detectArkRowSeparators / detectCompleteCircleMarkers）仍用原圖（已針對暗色主題校準）
+  const dark = await isDarkBackground(imageForOcr.dataUrl);
+  const ocrDataUrl = dark ? await invertImageColors(imageForOcr.dataUrl) : imageForOcr.dataUrl;
+
   const attempts = [
     { lang: "chi_tra+eng", label: "繁中/英文" },
     { lang: "eng", label: "英文/數字備援" },
   ];
   const errors = [];
 
-  const full = await recognizeDataUrl(imageForOcr.dataUrl, attempts, (progress, label) => {
+  const full = await recognizeDataUrl(ocrDataUrl, attempts, (progress, label) => {
     onProgress?.(progress, label);
   }, errors);
   const expectedTotalCount = extractExpectedHoldingCount(full.text);
@@ -1128,7 +1133,7 @@ async function recognizeImage(image, onProgress, options = {}) {
     if (!options.columnOcr) {
       return {
         text: full.text,
-        mode: full.mode,
+        mode: dark ? `${full.mode}（反色）` : full.mode,
         elapsedMs: Math.round(performance.now() - startedAt),
       };
     }
@@ -1138,7 +1143,7 @@ async function recognizeImage(image, onProgress, options = {}) {
     if (rowLineReview.needsReview && !options.rowLinePercents?.length) {
       return {
         text: full.text,
-        mode: `${full.mode} + 截取線校準`,
+        mode: dark ? `${full.mode}（反色）+ 截取線校準` : `${full.mode} + 截取線校準`,
         elapsedMs: Math.round(performance.now() - startedAt),
         needsRowLineReview: true,
         rowLineReview: {
@@ -1157,7 +1162,7 @@ async function recognizeImage(image, onProgress, options = {}) {
       : rowLineReview.rects;
     const rowResult = await recognizeArkRows(imageForOcr.dataUrl, full.lines || [], completeMarkers.markers || [], calibratedRects, (progress, label) => {
       onProgress?.(progress, label);
-    });
+    }, { ocrDataUrl: dark ? ocrDataUrl : null });
     const rowRows = rowResult.rows || [];
     const fullRows = parseHoldings(full.text);
     const rows = rowRows.length ? dedupeRows(rowRows) : [];
@@ -1247,7 +1252,7 @@ function normalizeTesseractLines(lines) {
     .filter((line) => line && line.text && line.bbox.x1 > line.bbox.x0 && line.bbox.y1 > line.bbox.y0);
 }
 
-async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) {
+async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress, { ocrDataUrl } = {}) {
   const rowRects = rects?.length ? rects : await detectArkRowRects(dataUrl, fullLines, markers);
   const attempts = [{ lang: "chi_tra+eng", label: "橫列" }];
   const rows = [];
@@ -1257,8 +1262,10 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
   for (let index = 0; index < rowRects.length; index += 1) {
     const rect = rowRects[index];
     const crop = await cropImageDataUrl(dataUrl, rect);
+    // 暗色截圖：用反色版裁切做 OCR，但原圖裁切留給 debug UI 顯示
+    const ocrCrop = ocrDataUrl ? await cropImageDataUrl(ocrDataUrl, rect) : crop;
     const label = rect.fallback ? `備援第 ${index + 1} 列` : `第 ${index + 1} 列`;
-    const result = await recognizeDataUrl(crop, attempts, (progress) => {
+    const result = await recognizeDataUrl(ocrCrop, attempts, (progress) => {
       onProgress?.(progress, `${label} OCR`);
     });
     const parsedRow = parseArkRowCropText(result.text, crop, label);
@@ -1296,9 +1303,16 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress) 
       cropImageDataUrl(dataUrl, SHARES_RECT),
       cropImageDataUrl(dataUrl, AVG_COST_RECT),
     ]);
+    // 暗色截圖：欄位裁切也用反色版做 OCR
+    const [sharesOcrUrl, avgCostOcrUrl] = ocrDataUrl
+      ? await Promise.all([
+        cropImageDataUrl(ocrDataUrl, SHARES_RECT),
+        cropImageDataUrl(ocrDataUrl, AVG_COST_RECT),
+      ])
+      : [sharesUrl, avgCostUrl];
     const [sharesOcr, avgCostOcr] = await Promise.all([
-      recognizeDataUrl(sharesUrl, numAttempts, (p) => onProgress?.(p, "股數欄 OCR")),
-      recognizeDataUrl(avgCostUrl, numAttempts, (p) => onProgress?.(p, "均價欄 OCR")),
+      recognizeDataUrl(sharesOcrUrl, numAttempts, (p) => onProgress?.(p, "股數欄 OCR")),
+      recognizeDataUrl(avgCostOcrUrl, numAttempts, (p) => onProgress?.(p, "均價欄 OCR")),
     ]);
 
     columnCrops.push(
@@ -1666,6 +1680,37 @@ async function prepareImageForOcr(image, options = {}) {
     maskedForOcr: true,
   };
 }
+
+// ── 暗色背景偵測與反色（方舟截圖為黑底白字，Tesseract 需白底黑字）─────────────
+async function isDarkBackground(dataUrl) {
+  const img = await loadImage(dataUrl);
+  const W = 64, H = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, W, H);
+  const data = ctx.getImageData(0, 0, W, H).data;
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+  return (sum / (data.length / 4)) < 128;
+}
+
+async function invertImageColors(dataUrl) {
+  const img = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2];
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png", 0.95);
+}
+// ───────────────────────────────────────────────────────────────────────────────
 
 function loadImage(dataUrl) {
   return new Promise((resolve, reject) => {
