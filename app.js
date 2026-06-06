@@ -2,8 +2,9 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.37";
+const APP_VERSION = "v0.26.38";
 const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
+document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_WORKER_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js";
@@ -2250,7 +2251,7 @@ function normalizeOcrText(text) {
     .replace(/[－]/g, "-")
     .replace(/[|｜]/g, " ")
     .replace(/[：]/g, ":")
-    .replace(/[．｡·・]/g, ".");  // 全形小數點 / 中點 → ASCII 句點
+    .replace(/[．｡·・﹒]/g, ".");  // 全形/小型小數點 / 中點 → ASCII 句點（含 U+FE52）
 }
 
 function parseNumberToken(token) {
