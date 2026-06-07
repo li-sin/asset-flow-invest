@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.26.41";
-const APP_VERSION_NOTE = "切換 tab 時自動重新載入雲端資料";
+const APP_VERSION = "v0.27.8";
+const APP_VERSION_NOTE = "頂部趨勢條加組合 vs 大盤對照（領先/落後）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -84,6 +84,8 @@ const state = {
   dashboardTab: "home",
   levelChartRange: "1M",
   levelChartMarket: "TW",
+  adjustSort: "severity", // 待關注調節清單排序：severity/perfDrop/relWeak/held/curRate
+  adjustFilter: "all",    // 待關注調節清單篩選：all/weak/perf/stall
   plTrendRange: "1M",
   scatterRateCap: null,
   scatterAmountCap: null,
@@ -3125,7 +3127,11 @@ async function ensureGoogleIdentity() {
 }
 
 async function getGoogleAccessToken() {
-  if (IS_LOCAL_DEV) throw new Error("本機開發模式：Google Sheets API 不可用，儲存功能需在正式環境使用");
+  if (IS_LOCAL_DEV) {
+    // 本機開發：OAuth origin 限制下不跑彈窗登入，只接受手動貼上的 dev token
+    if (googleAccessToken && Date.now() < googleAccessTokenExpiresAt) return googleAccessToken;
+    throw new Error("本機開發：請先貼上有效的 dev token（正式 App DevTools → 工作階段儲存空間 → afi_token）");
+  }
   const config = ensureAuthConfig();
   if (googleAccessToken && Date.now() < googleAccessTokenExpiresAt && state.auth.authorized) return googleAccessToken;
 
@@ -3147,6 +3153,7 @@ async function getGoogleAccessToken() {
         }
         googleAccessToken = response.access_token;
         googleAccessTokenExpiresAt = Date.now() + ((response.expires_in || 3600) * 1000) - 60000;
+        try { sessionStorage.setItem("afi_token", googleAccessToken); } catch {} // 供本機開發從正式 App 撈取
         const profile = await fetchGoogleProfile(googleAccessToken);
         authorizeGoogleProfile(profile, latestConfig);
         resolve(googleAccessToken);
@@ -4323,7 +4330,7 @@ async function fetchHistoricalCloses(snapshots, positions, retryCount = 0) {
   if (!snapshots?.length || !positions?.length || !googleAccessToken) return;
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || "").filter(Boolean))].sort();
   if (!dates.length) return;
-  const symbols = [...new Set([...positions.map((p) => p.symbol).filter(Boolean), "USDTWD=X"])];
+  const symbols = [...new Set([...positions.map((p) => p.symbol).filter(Boolean), "USDTWD=X", "^TWII", "^IXIC"])];
   if (!symbols.length) return;
   state.historicalCloseLoading = true;
   renderCloudSnapshot();
@@ -4910,6 +4917,253 @@ function renderPerfRateTrendChart(cloudHistory, _quotes, marketKey) {
   }
   const legend = activeMarkets.map((m) => `<span class="level-legend-dot" style="background:${colors[m]}"></span>${marketLabel(m)}`).join(" ");
   return `<div class="level-chart-topbar" style="margin-bottom:6px"><div class="level-range-btns">${renderMarketBtns()}</div><div class="level-chart-legend">${legend}</div><div></div></div>${renderSharesSvg(series, dates, colors)}`;
+}
+
+// ── 待關注調節：個股表現率 / 損益率趨勢警示 ──────────────────────────────────
+// 線性回歸斜率（每筆快照的平均變化量）；points: [{ x, y }]
+function linregSlope(points) {
+  const n = points.length;
+  if (n < 2) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const p of points) { sx += p.x; sy += p.y; sxx += p.x * p.x; sxy += p.x * p.y; }
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null;
+  return (n * sxy - sx * sy) / denom;
+}
+
+// 小型 sparkline（趨勢縮圖），pts: [{ x, y }]，往下走顯示紅、往上走顯示綠
+function renderSparkline(pts, down) {
+  if (!pts || pts.length < 2) return "";
+  const W = 56, H = 18, pad = 2;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = maxX - minX || 1, spanY = maxY - minY || 1;
+  const px = (x) => pad + (x - minX) / spanX * (W - 2 * pad);
+  const py = (y) => H - pad - (y - minY) / spanY * (H - 2 * pad);
+  const color = down ? "var(--red)" : "var(--green)";
+  const poly = pts.map((p) => `${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  return `<svg class="adjust-spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">`
+    + `<polyline points="${poly}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`
+    + `<circle cx="${px(last.x).toFixed(1)}" cy="${py(last.y).toFixed(1)}" r="2" fill="${color}"/></svg>`;
+}
+
+// 找出「資金卡住、效率變差」的標的：表現率趨勢往下 + 損益率停滯
+function renderAdjustmentAlerts(cloudHistory, marketKey) {
+  const MAX_SNAPS = 10;        // 趨勢最多取最近 N 筆快照
+  const MIN_POINTS = 3;        // 至少要 N 個有效點才判斷趨勢
+  const RATE_STALL_SLOPE = 0.5; // 損益率斜率 ≤ 此值（%/快照）視為「停滯」（含負）
+
+  marketKey = marketKey || state.levelChartMarket || "TW";
+  const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
+  const snapshots = cloudHistory?.snapshots || [];
+  const positions = cloudHistory?.positions || [];
+
+  const alerts = [];
+  const marketSlopes = {};       // 各市場「你的組合」平均損益率斜率（每列弱於/優於基準）
+  const marketIndexSlopes = {};  // 各市場真指數報酬率斜率（頂部趨勢條用）
+  const marketPortReturn = {};   // 各市場組合等權「價格報酬率」斜率（與指數同量綱，頂部對照用）
+  const INDEX_SYMBOLS = { TW: "^TWII", US: "^IXIC" };
+  const INDEX_LABELS = { "^TWII": "加權指數", "^IXIC": "Nasdaq", "^GSPC": "S&P500" };
+  for (const market of activeMarkets) {
+    // 該市場每個日期取最新一筆快照，再取最近 MAX_SNAPS 筆
+    const byDate = {};
+    snapshots
+      .filter((s) => normalizeMarketKey(s.market) === market)
+      .sort((a, b) => String(a.date || a.createdAt).localeCompare(String(b.date || b.createdAt)))
+      .forEach((s) => { const d = s.date || s.createdAt?.slice(0, 10) || ""; if (d) byDate[d] = s; });
+    const dates = Object.keys(byDate).sort().slice(-MAX_SNAPS);
+    if (dates.length < MIN_POINTS) continue;
+
+    // 大盤對照：該市場每日平均損益率序列 → 回歸斜率（系統性漲跌基準）
+    const marketRatePts = dates.map((d, i) => {
+      const snapId = byDate[d].snapshotId;
+      const rs = positions
+        .filter((p) => p.snapshotId === snapId && Number(p.avgCost) > 0)
+        .map((p) => {
+          const price = historicalClose(p.symbol, d);
+          if (price === null || price <= 0) return null;
+          const r = (price - Number(p.avgCost)) / Number(p.avgCost) * 100;
+          return (!Number.isFinite(r) || Math.abs(r) > 500) ? null : r;
+        })
+        .filter((r) => r !== null);
+      return rs.length ? { x: i, y: rs.reduce((s, v) => s + v, 0) / rs.length } : null;
+    }).filter(Boolean);
+    const marketRateSlope = marketRatePts.length >= MIN_POINTS ? linregSlope(marketRatePts) : null;
+    marketSlopes[market] = marketRateSlope;
+
+    // 頂部趨勢條：真指數報酬率斜率（以區間首個有效收盤為基準，回歸 %/快照）
+    const indexSymbol = INDEX_SYMBOLS[market];
+    let idxBase = null;
+    const idxPts = [];
+    dates.forEach((d, i) => {
+      const c = historicalClose(indexSymbol, d);
+      if (c === null || c <= 0) return;
+      if (idxBase === null) idxBase = c;
+      idxPts.push({ x: i, y: (c / idxBase - 1) * 100 });
+    });
+    marketIndexSlopes[market] = {
+      symbol: indexSymbol,
+      slope: idxPts.length >= MIN_POINTS ? linregSlope(idxPts) : null,
+    };
+
+    const lastSnapId = byDate[dates[dates.length - 1]].snapshotId;
+    const symbols = [...new Set(positions.filter((p) => p.snapshotId === lastSnapId).map((p) => p.symbol))];
+
+    // 組合等權「價格報酬率」斜率（不含成本，與指數同量綱 → 對照是否跑贏大盤）
+    const retBase = {};
+    const portRetPts = dates.map((d, i) => {
+      const rs = [];
+      for (const sym of symbols) {
+        const c = historicalClose(sym, d);
+        if (c === null || c <= 0) continue;
+        if (retBase[sym] === undefined) retBase[sym] = c;
+        rs.push((c / retBase[sym] - 1) * 100);
+      }
+      return rs.length ? { x: i, y: rs.reduce((s, v) => s + v, 0) / rs.length } : null;
+    }).filter(Boolean);
+    marketPortReturn[market] = portRetPts.length >= MIN_POINTS ? linregSlope(portRetPts) : null;
+
+    for (const symbol of symbols) {
+      const firstBuy = state.firstBuyDates[`${market}_${symbol}`] || "";
+      const ratePts = []; // { x:i, y:損益率% }
+      const perfPts = []; // { x:i, y:表現率(%/日) }
+      dates.forEach((d, i) => {
+        const pos = positions.find((p) => p.snapshotId === byDate[d].snapshotId && p.symbol === symbol);
+        if (!pos || !(Number(pos.avgCost) > 0)) return;
+        const price = historicalClose(symbol, d);
+        if (price === null || price <= 0) return;
+        const rate = (price - Number(pos.avgCost)) / Number(pos.avgCost) * 100;
+        if (!Number.isFinite(rate) || Math.abs(rate) > 500) return; // 濾除 OCR 均價誤讀造成的爆量
+        ratePts.push({ x: i, y: rate });
+        if (firstBuy) {
+          const days = Math.max(1, Math.floor((new Date(d).getTime() - new Date(firstBuy).getTime()) / 86400000));
+          perfPts.push({ x: i, y: rate / days });
+        }
+      });
+      if (ratePts.length < MIN_POINTS) continue;
+
+      const rateSlope = linregSlope(ratePts);
+      const perfSlope = perfPts.length >= MIN_POINTS ? linregSlope(perfPts) : null;
+      const perfDown = perfSlope !== null && perfSlope < 0;        // 表現率趨勢往下
+      const rateStall = rateSlope !== null && rateSlope <= RATE_STALL_SLOPE; // 損益率沒在推進
+      if (!perfDown && !rateStall) continue;
+
+      const latestPos = positions.find((p) => p.snapshotId === lastSnapId && p.symbol === symbol);
+      alerts.push({
+        market, symbol,
+        name: latestPos?.name || symbol,
+        perfDown, rateStall, perfSlope, rateSlope,
+        firstRate: ratePts[0].y,
+        curRate: ratePts[ratePts.length - 1].y,
+        heldDays: holdingDays(market, symbol),
+        sparkPts: perfPts.length >= MIN_POINTS ? perfPts : ratePts,
+        marketRateSlope, // 大盤對照基準（該市場平均損益率斜率）
+        // 嚴重度分組：兩徽章 > 表現率↓ > 損益率停滯；組內看趨勢掉幅
+        group: (perfDown && rateStall) ? 0 : (perfDown ? 1 : 2),
+      });
+    }
+  }
+
+  if (!alerts.length) {
+    return state.historicalCloseLoading
+      ? "<p class=\"muted-text\">正在載入歷史收盤價…</p>"
+      : "<p class=\"muted-text\">目前沒有需要優先調節的標的 👍（表現率與損益率都在推進中）</p>";
+  }
+
+  // 篩選
+  const filter = state.adjustFilter || "all";
+  const shown = alerts.filter((a) => {
+    if (filter === "weak") return a.marketRateSlope != null && (a.rateSlope - a.marketRateSlope) < 0;
+    if (filter === "perf") return a.perfDown;
+    if (filter === "stall") return a.rateStall;
+    return true;
+  });
+
+  // 排序
+  const sortKey = state.adjustSort || "severity";
+  shown.sort((a, b) => {
+    switch (sortKey) {
+      case "perfDrop": return (a.perfSlope ?? 0) - (b.perfSlope ?? 0); // 表現率掉最兇在前
+      case "held":     return (b.heldDays ?? -1) - (a.heldDays ?? -1); // 持有最久在前
+      case "curRate":  return (a.curRate ?? 0) - (b.curRate ?? 0);     // 目前損益率最低在前
+      case "relWeak": {
+        const ea = a.marketRateSlope != null ? a.rateSlope - a.marketRateSlope : Infinity;
+        const eb = b.marketRateSlope != null ? b.rateSlope - b.marketRateSlope : Infinity;
+        return ea - eb; // 相對大盤最弱在前
+      }
+      default: // severity：兩徽章 > 表現率↓ > 損益率停滯，組內看掉幅
+        if (a.group !== b.group) return a.group - b.group;
+        if ((a.perfSlope ?? 0) !== (b.perfSlope ?? 0)) return (a.perfSlope ?? 0) - (b.perfSlope ?? 0);
+        return (a.rateSlope ?? 0) - (b.rateSlope ?? 0);
+    }
+  });
+
+  const rows = shown.map((a) => {
+    // 大盤對照標籤：個股損益率斜率 vs 該市場平均斜率
+    const relBadge = (a.marketRateSlope === null || a.marketRateSlope === undefined)
+      ? ''
+      : ((a.rateSlope - a.marketRateSlope) < 0
+          ? '<span class="adjust-badge badge-weak">弱於大盤</span>'
+          : '<span class="adjust-badge badge-rel">優於大盤</span>');
+    const badges = [
+      a.perfDown ? '<span class="adjust-badge badge-perf">表現率↓</span>' : '',
+      a.rateStall ? '<span class="adjust-badge badge-stall">損益率停滯</span>' : '',
+      relBadge,
+    ].join('');
+    const curColor = a.curRate >= 0 ? 'var(--green)' : 'var(--red)';
+    const rateMove = `${a.firstRate >= 0 ? '+' : ''}${a.firstRate.toFixed(1)}% → <strong style="color:${curColor}">${a.curRate >= 0 ? '+' : ''}${a.curRate.toFixed(1)}%</strong>`;
+    const heldText = a.heldDays !== null ? `${a.heldDays} 天` : '—';
+    return `
+      <div class="adjust-alert-row" data-symbol-row="${escapeHtml(a.symbol)}" data-symbol-name="${escapeHtml(a.name)}" tabindex="0" style="cursor:pointer">
+        <div class="adjust-alert-main">
+          <div class="adjust-alert-title"><strong>${escapeHtml(a.symbol)}</strong> <span class="muted-text">${escapeHtml(a.name)}</span></div>
+          <div class="adjust-badges">${badges}</div>
+        </div>
+        <div class="adjust-alert-meta">
+          ${renderSparkline(a.sparkPts, a.perfDown)}
+          <div class="adjust-alert-nums">
+            <span>損益率 ${rateMove}</span>
+            <span class="muted-text">持有 ${heldText}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  const marketTrendSummary = activeMarkets.map((m) => {
+    const info = marketIndexSlopes[m];
+    if (!info || info.slope === null || info.slope === undefined) return '';
+    const idxS = info.slope;
+    const idxName = INDEX_LABELS[info.symbol] || info.symbol;
+    const fmtSlope = (s) => `<strong style="color:${s < 0 ? 'var(--red)' : 'var(--green)'}">${s < 0 ? '▼' : '▲'} ${s >= 0 ? '+' : ''}${s.toFixed(2)}%/快照</strong>`;
+    let portPart = '';
+    const portS = marketPortReturn[m];
+    if (portS !== null && portS !== undefined) {
+      const lead = (portS - idxS) >= 0; // 同為價格報酬率斜率，可直接比
+      const verdict = `<span style="color:${lead ? 'var(--green)' : 'var(--red)'};font-weight:600">${lead ? '✓ 領先大盤' : '✗ 落後大盤'}</span>`;
+      portPart = `<span class="adjust-trend-sep">｜</span><span class="muted-text">你的${marketLabel(m)}</span>${fmtSlope(portS)}${verdict}`;
+    }
+    return `<div class="adjust-market-trend"><span class="muted-text">${marketLabel(m)}大盤 · ${idxName}</span>${fmtSlope(idxS)}${portPart}</div>`;
+  }).filter(Boolean).join('');
+
+  const sortOptions = [
+    ["severity", "嚴重度"], ["perfDrop", "表現率掉最兇"], ["relWeak", "相對大盤最弱"], ["held", "持有最久"], ["curRate", "損益率最低"],
+  ].map(([v, l]) => `<option value="${v}"${sortKey === v ? " selected" : ""}>${l}</option>`).join("");
+  const filterChips = [
+    ["all", "全部"], ["weak", "弱於大盤"], ["perf", "表現率↓"], ["stall", "損益率停滯"],
+  ].map(([v, l]) => `<button type="button" class="adjust-chip${filter === v ? " is-active" : ""}" data-adjust-filter="${v}">${l}</button>`).join("");
+  const controls = `
+    <div class="adjust-controls">
+      <label class="adjust-sort-label">排序
+        <select class="adjust-sort-select" data-adjust-sort>${sortOptions}</select>
+      </label>
+      <div class="adjust-chips">${filterChips}</div>
+    </div>`;
+  const listHtml = shown.length
+    ? `<div class="adjust-alert-list">${rows}</div>`
+    : '<p class="muted-text">目前篩選條件下沒有標的，換個篩選看看。</p>';
+  return `${marketTrendSummary ? `<div class="adjust-market-trends">${marketTrendSummary}</div>` : ""}${controls}${listHtml}`;
 }
 
 // ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────
@@ -5711,6 +5965,15 @@ function renderCloudSnapshot() {
 
     <section class="dashboard-card">
       <div class="card-heading">
+        <h3>待關注調節 ⚠️</h3>
+        <span>表現率↓／損益率停滯、效率變差的標的，可優先調節（近 10 筆快照 + 大盤對照）</span>
+        <div class="level-range-btns">${renderMarketBtns()}</div>
+      </div>
+      ${renderAdjustmentAlerts(state.cloudHistory, mkt)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
         <h3>損益率趨勢</h3>
         <span>整體平均損益率（依各快照日期收盤價計算，單位 %）</span>
       </div>
@@ -6085,6 +6348,18 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-level-market]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.levelChartMarket = btn.dataset.levelMarket;
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-adjust-sort]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      state.adjustSort = sel.value;
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-adjust-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.adjustFilter = btn.dataset.adjustFilter;
       renderCloudSnapshot();
     });
   });
@@ -6798,14 +7073,7 @@ async function signInAndLoadApp() {
   }
   try {
     await getGoogleAccessToken();
-    setAppLocked(false);
-    if (!appDataLoaded) {
-      state.entries = await getAllEntries();
-      appDataLoaded = true;
-    }
-    renderCloudSnapshot();
-    render();
-    await loadLatestCloudSnapshot(false);
+    await loadAppAfterAuth();
   } catch (error) {
     console.error(error);
     resetGoogleSession(error.message || "Google 登入失敗");
@@ -6813,6 +7081,90 @@ async function signInAndLoadApp() {
     authFlowInProgress = false;
     renderAuthGate();
   }
+}
+
+// 取得 token / 授權成功後共用的 App 載入流程
+async function loadAppAfterAuth() {
+  setAppLocked(false);
+  if (!appDataLoaded) {
+    state.entries = await getAllEntries();
+    appDataLoaded = true;
+  }
+  renderCloudSnapshot();
+  render();
+  await loadLatestCloudSnapshot(false);
+}
+
+// 本機開發橘色 banner（切換模式時只更新文字，不重複插入）
+function showDevBanner(text) {
+  let banner = document.getElementById("dev-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "dev-banner";
+    banner.style.cssText = "position:fixed;bottom:60px;left:0;right:0;background:#f59e0b;color:#fff;text-align:center;font-size:12px;padding:4px;z-index:9999;";
+    document.body.appendChild(banner);
+  }
+  banner.textContent = text;
+}
+
+// 本機開發：套用手動貼上的 access token（繞過 OAuth origin 限制，讀真實 Sheet）
+async function applyDevToken(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) throw new Error("請先貼上 token");
+  const res = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(token)}`);
+  if (!res.ok) throw new Error("Token 無效或已過期，請重新從正式 App 複製");
+  const info = await res.json().catch(() => ({}));
+  googleAccessToken = token;
+  googleAccessTokenExpiresAt = Date.now() + ((Number(info.expires_in) || 3000) * 1000) - 60000;
+  authorizeGoogleProfile({ email: info.email }); // 驗白名單 + 設 state.auth（不符會 throw）
+  localStorage.setItem("afi_dev_token", token);
+  return info.email;
+}
+
+// 本機開發：空資料預覽模式（不連 Sheet，僅測 OCR）
+function enterDevPreviewMode() {
+  state.auth = { signedIn: true, authorized: true, email: "dev@localhost", message: "" };
+  state.cloudSnapshot = {
+    snapshot: { snapshotId: "dev", date: today(), market: "TW", createdAt: new Date().toISOString(), stockCount: 0, totalCost: 0 },
+    positions: [],
+  };
+  state.dashboardTab = "capture";
+  setAppLocked(false);
+  render();
+  renderCloudSnapshot();
+  showDevBanner("🛠 本機預覽模式（空資料）— 僅測 OCR，未連 Sheet");
+}
+
+// 本機開發：在登入畫面插入「貼上 token」入口
+function renderDevTokenEntry() {
+  const actions = document.querySelector(".auth-actions");
+  if (!actions || document.getElementById("dev-token-area")) return;
+  if (els.authSignIn) els.authSignIn.hidden = true; // localhost OAuth 彈窗無效，隱藏
+  actions.insertAdjacentHTML("beforeend", `
+    <div id="dev-token-area" style="display:flex;flex-direction:column;gap:8px;margin-top:12px;width:100%">
+      <textarea id="dev-token-input" rows="3" placeholder="貼上 afi_token（正式 App DevTools → 工作階段儲存空間 → afi_token）" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid var(--border);font-size:12px;resize:vertical"></textarea>
+      <button id="dev-token-submit" class="button primary" type="button">貼 token 登入並讀取 Sheet</button>
+      <button id="dev-token-skip" class="button secondary" type="button">跳過（空資料預覽，僅測 OCR）</button>
+      <div id="dev-token-error" style="color:var(--red);font-size:12px;display:none"></div>
+    </div>`);
+  document.getElementById("dev-token-submit").onclick = async () => {
+    const input = document.getElementById("dev-token-input");
+    const errEl = document.getElementById("dev-token-error");
+    const btn = document.getElementById("dev-token-submit");
+    errEl.style.display = "none";
+    btn.disabled = true;
+    btn.textContent = "驗證中…";
+    try {
+      await applyDevToken(input.value);
+      await loadAppAfterAuth();
+    } catch (e) {
+      errEl.textContent = String(e.message || e);
+      errEl.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "貼 token 登入並讀取 Sheet";
+    }
+  };
+  document.getElementById("dev-token-skip").onclick = () => enterDevPreviewMode();
 }
 
 async function init() {
@@ -6825,22 +7177,22 @@ async function init() {
   registerServiceWorker();
 
   if (IS_LOCAL_DEV) {
-    // 本機開發模式：跳過 Google OAuth，直接進入 App
-    state.auth = { signedIn: true, authorized: true, email: "dev@localhost", message: "" };
-    // 設定最小假快照讓 dashboard tabs 可以渲染
-    state.cloudSnapshot = {
-      snapshot: { snapshotId: "dev", date: today(), market: "TW", createdAt: new Date().toISOString(), stockCount: 0, totalCost: 0 },
-      positions: [],
-    };
-    state.dashboardTab = "capture";
-    setAppLocked(false);
-    render();
-    renderCloudSnapshot();
-    // 顯示 dev banner
-    const banner = document.createElement("div");
-    banner.style.cssText = "position:fixed;bottom:60px;left:0;right:0;background:#f59e0b;color:#fff;text-align:center;font-size:12px;padding:4px;z-index:9999;";
-    banner.textContent = "🛠 本機開發模式 — Google Sheets API 不可用，解析與預覽功能正常";
-    document.body.appendChild(banner);
+    // 本機開發：優先用已存的 dev token 讀真實 Sheet，否則顯示「貼 token / 跳過」入口
+    showDevBanner("🛠 本機開發模式 — 可貼 token 讀真實 Sheet，或跳過僅測 OCR");
+    const saved = localStorage.getItem("afi_dev_token");
+    if (saved) {
+      try {
+        await applyDevToken(saved);
+        await loadAppAfterAuth();
+        return;
+      } catch (error) {
+        localStorage.removeItem("afi_dev_token");
+        console.warn("已存 dev token 失效，請重新貼上", error);
+      }
+    }
+    setAppLocked(true);
+    renderAuthGate("本機開發：貼上正式 App 的 afi_token 讀真實 Sheet，或跳過僅測 OCR");
+    renderDevTokenEntry();
     return;
   }
 

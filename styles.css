@@ -289,6 +289,11 @@ textarea {
   margin: 0;
 }
 
+/* 標題不被長副標擠斷行 */
+.card-heading h3 {
+  white-space: nowrap;
+}
+
 .section-eyebrow {
   margin: 0 0 4px;
   color: var(--green-dark);
@@ -463,6 +468,7 @@ textarea {
 .level-range-btns {
   display: flex;
   gap: 4px;
+  flex-shrink: 0; /* 按鈕群不被長副標壓縮 */
 }
 
 .level-range-btn {
@@ -474,6 +480,7 @@ textarea {
   font-weight: 600;
   padding: 2px 10px;
   cursor: pointer;
+  white-space: nowrap; /* 「台股」不被擠成直行 */
 }
 
 .level-range-btn.is-active {
@@ -2556,6 +2563,131 @@ textarea {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   min-width: 56px;
+}
+
+/* ⚠️ 待關注調節清單 */
+.adjust-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.adjust-alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  border-radius: 10px;
+  background: var(--card-2, rgba(127, 127, 127, 0.04));
+}
+.adjust-alert-row:hover { background: rgba(127, 127, 127, 0.08); }
+.adjust-alert-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.adjust-alert-title { font-size: 14px; }
+.adjust-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.adjust-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge-perf { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.badge-stall { background: rgba(245, 158, 11, 0.18); color: #d97706; }
+.badge-weak { background: var(--red); color: #fff; }
+.badge-rel { background: rgba(127, 127, 127, 0.18); color: var(--muted); }
+
+/* 大盤趨勢對照條 */
+.adjust-market-trends {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.06);
+  font-size: 12px;
+}
+.adjust-market-trend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.adjust-trend-sep { opacity: 0.4; }
+
+/* 待關注調節：排序 + 篩選控制 */
+.adjust-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.adjust-sort-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap; /* 「排序」兩字維持橫排，不被擠成直行 */
+  flex-shrink: 0;      /* label 不被壓縮，空間不足時改讓 chips 換行 */
+}
+.adjust-sort-select {
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-bg, transparent);
+  color: inherit;
+}
+.adjust-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.adjust-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.adjust-chip.is-active {
+  background: var(--accent, #4f8ef7);
+  border-color: var(--accent, #4f8ef7);
+  color: #fff;
+}
+.adjust-alert-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.adjust-spark { flex: none; }
+.adjust-alert-nums {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+@media (max-width: 540px) {
+  .adjust-alert-row { gap: 8px; }
+  .adjust-alert-meta { width: 100%; justify-content: space-between; }
+  .adjust-alert-nums { align-items: flex-end; }
 }
 
 /* A1: 水位更新圖案按鈕 */
