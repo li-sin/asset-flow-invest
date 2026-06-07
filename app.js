@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.27.8";
-const APP_VERSION_NOTE = "頂部趨勢條加組合 vs 大盤對照（領先/落後）";
+const APP_VERSION = "v0.28.0";
+const APP_VERSION_NOTE = "待關注調節加整合損益率趨勢圖（多線）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5059,6 +5059,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
         curRate: ratePts[ratePts.length - 1].y,
         heldDays: holdingDays(market, symbol),
         sparkPts: perfPts.length >= MIN_POINTS ? perfPts : ratePts,
+        ratePts, // 整合趨勢圖用（損益率序列）
         marketRateSlope, // 大盤對照基準（該市場平均損益率斜率）
         // 嚴重度分組：兩徽章 > 表現率↓ > 損益率停滯；組內看趨勢掉幅
         group: (perfDown && rateStall) ? 0 : (perfDown ? 1 : 2),
@@ -5160,10 +5161,48 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
       </label>
       <div class="adjust-chips">${filterChips}</div>
     </div>`;
+  const trendChart = shown.length ? renderAdjustTrendChart(shown) : "";
   const listHtml = shown.length
     ? `<div class="adjust-alert-list">${rows}</div>`
     : '<p class="muted-text">目前篩選條件下沒有標的，換個篩選看看。</p>';
-  return `${marketTrendSummary ? `<div class="adjust-market-trends">${marketTrendSummary}</div>` : ""}${controls}${listHtml}`;
+  return `${marketTrendSummary ? `<div class="adjust-market-trends">${marketTrendSummary}</div>` : ""}${controls}${trendChart}${listHtml}`;
+}
+
+// 待關注調節：所有上榜標的損益率趨勢整合成一張多線圖（跟著清單篩選/排序）
+const ADJUST_TREND_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#14b8a6"];
+function renderAdjustTrendChart(alerts) {
+  const lines = alerts.filter((a) => a.ratePts && a.ratePts.length >= 2);
+  if (!lines.length) return "";
+  const W = 320, H = 150, padL = 30, padR = 8, padT = 10, padB = 16;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const a of lines) for (const p of a.ratePts) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const spanX = (maxX - minX) || 1;
+  const spanY = (maxY - minY) || 1;
+  const px = (x) => padL + (x - minX) / spanX * (W - padL - padR);
+  const py = (y) => H - padB - (y - minY) / spanY * (H - padT - padB);
+  // Y 軸：0 線 + 上下界標籤
+  const zeroLine = (minY < 0 && maxY > 0)
+    ? `<line x1="${padL}" y1="${py(0).toFixed(1)}" x2="${W - padR}" y2="${py(0).toFixed(1)}" stroke="var(--border)" stroke-dasharray="3 3"/>`
+    : "";
+  const yLabels = `<text x="2" y="${(py(maxY) + 3).toFixed(1)}" font-size="9" fill="var(--muted)">${maxY.toFixed(0)}%</text>`
+    + `<text x="2" y="${(py(minY) + 3).toFixed(1)}" font-size="9" fill="var(--muted)">${minY.toFixed(0)}%</text>`;
+  const polylines = lines.map((a, idx) => {
+    const color = ADJUST_TREND_COLORS[idx % ADJUST_TREND_COLORS.length];
+    const pts = a.ratePts.map((p) => `${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join(" ");
+    const dots = a.ratePts.map((p) => `<circle cx="${px(p.x).toFixed(1)}" cy="${py(p.y).toFixed(1)}" r="2" fill="${color}"><title>${escapeHtml(a.symbol)} ${p.y.toFixed(1)}%</title></circle>`).join("");
+    return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>${dots}`;
+  }).join("");
+  const legend = lines.map((a, idx) =>
+    `<span class="adjust-legend-item"><span class="adjust-legend-dot" style="background:${ADJUST_TREND_COLORS[idx % ADJUST_TREND_COLORS.length]}"></span>${escapeHtml(a.symbol)}</span>`
+  ).join("");
+  return `<div class="adjust-trend-chart">`
+    + `<svg viewBox="0 0 ${W} ${H}" class="adjust-trend-svg" preserveAspectRatio="xMidYMid meet">${zeroLine}${yLabels}${polylines}</svg>`
+    + `<div class="adjust-trend-legend">${legend}</div></div>`;
 }
 
 // ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────

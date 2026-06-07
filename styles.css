@@ -2624,6 +2624,40 @@ textarea {
 }
 .adjust-trend-sep { opacity: 0.4; }
 
+/* 待關注調節：整合多線趨勢圖 */
+.adjust-trend-chart {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-2, rgba(127, 127, 127, 0.04));
+}
+.adjust-trend-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.adjust-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.adjust-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.adjust-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
 /* 待關注調節：排序 + 篩選控制 */
 .adjust-controls {
   display: flex;
