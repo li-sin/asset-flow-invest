@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.28.1";
-const APP_VERSION_NOTE = "整合趨勢圖縮小 + 風格對齊其他趨勢圖";
+const APP_VERSION = "v0.29.0";
+const APP_VERSION_NOTE = "趨勢圖點圖例聚焦＋放大、改代號自動帶名、解析依選定市場";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -86,6 +86,7 @@ const state = {
   levelChartMarket: "TW",
   adjustSort: "severity", // 待關注調節清單排序：severity/perfDrop/relWeak/held/curRate
   adjustFilter: "all",    // 待關注調節清單篩選：all/weak/perf/stall
+  adjustTrendFocus: null, // 待關注調節整合趨勢圖：點圖例聚焦的代號（null=全部）
   plTrendRange: "1M",
   scatterRateCap: null,
   scatterAmountCap: null,
@@ -895,7 +896,7 @@ function buildEntry() {
     title: `${els.market.value || "截圖"} ${els.date.value || today()}`,
     text: els.text.value.trim(),
     note: els.note.value.trim(),
-    parsedRows: parseHoldings(els.text.value.trim()),
+    parsedRows: parseHoldings(els.text.value.trim(), els.market?.value),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -996,8 +997,8 @@ function openDetail(id) {
         <button class="button primary" type="button" data-action="save-cloud-snapshot">存到 Google Sheet</button>
         <button class="button ghost danger" type="button" data-action="delete">刪除</button>
       </div>
-      ${renderOcrCompleteness(entry.expectedTotalCount || entry.completeCircleCount || 0, (entry.parsedRows || []).length || parseHoldings(entry.text || "").length, entry.missingRowCount || 0, "detail", entry.expectedTotalCount ? "total" : "circle")}
-      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || ""), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
+      ${renderOcrCompleteness(entry.expectedTotalCount || entry.completeCircleCount || 0, (entry.parsedRows || []).length || parseHoldings(entry.text || "", entry.market).length, entry.missingRowCount || 0, "detail", entry.expectedTotalCount ? "total" : "circle")}
+      ${renderParsedRows(entry.parsedRows || parseHoldings(entry.text || "", entry.market), "detail", id, entry.columnCrops || [], entry.rowCrops || [], entry.skippedRowCrops || [])}
       <div class="detail-grid">
         <div class="detail-field"><span>建立時間</span><strong>${new Date(entry.createdAt).toLocaleString()}</strong></div>
         <div class="detail-field"><span>檔名</span><strong>${escapeHtml(entry.images[0]?.name || "")}</strong></div>
@@ -1102,6 +1103,8 @@ async function ensureTesseract() {
 }
 
 async function recognizeImage(image, onProgress, options = {}) {
+  // 依使用者選定市場限制代號辨識，避免台美股混用（整條 OCR 管線共用）
+  setParseMarketHint(els.market?.value);
   const startedAt = performance.now();
   const baseImage = await prepareImageForOcr(image, { ...options, maskEditButtons: false });
   const completeMarkers = options.columnOcr ? await detectCompleteCircleMarkers(baseImage.dataUrl) : { count: 0, markers: [] };
@@ -1166,7 +1169,7 @@ async function recognizeImage(image, onProgress, options = {}) {
       onProgress?.(progress, label);
     }, { ocrDataUrl: dark ? ocrDataUrl : null });
     const rowRows = rowResult.rows || [];
-    const fullRows = parseHoldings(full.text);
+    const fullRows = parseHoldings(full.text, els.market?.value);
     const rows = rowRows.length ? dedupeRows(rowRows) : [];
     const rowText = renderRowOcrText(rowResult);
     const expectedCount = expectedTotalCount || completeMarkers.count || 0;
@@ -1270,7 +1273,7 @@ async function recognizeArkRows(dataUrl, fullLines, markers, rects, onProgress, 
     const result = await recognizeDataUrl(ocrCrop, attempts, (progress) => {
       onProgress?.(progress, `${label} OCR`);
     });
-    const parsedRow = parseArkRowCropText(result.text, crop, label);
+    const parsedRow = parseArkRowCropText(result.text, crop, label, els.market?.value);
     const row = rect.fallback ? null : parsedRow;
     const cropRecord = {
       key: `row_${index + 1}`,
@@ -1824,11 +1827,12 @@ async function applyManualRowFix(entryId, rowIndex, values) {
   }
 
   const row = entry.parsedRows[rowIndex];
-  const officialName = lookupSymbolName(symbol);
+  // 名稱依代號自動帶出（內建表→雲端歷史），找不到則清空標待補，不留舊代號的錯名稱
+  const officialName = resolveSymbolName(symbol);
   entry.parsedRows[rowIndex] = {
     ...row,
     symbol,
-    name: officialName || row.ocrName || row.name || "",
+    name: officialName,
     shares,
     avgCost,
     needsReview: !officialName,
@@ -1867,8 +1871,13 @@ function bindDraftPreviewAfterRender(parsedRows) {
     input.addEventListener("input", () => {
       const i = Number(input.dataset.draftSymbol);
       if (state.draftEditedRows?.[i]) {
-        state.draftEditedRows[i].symbol = input.value.trim().toUpperCase();
-        state.draftEditedRows[i].name = SYMBOL_NAMES[state.draftEditedRows[i].symbol] || state.draftEditedRows[i].name;
+        const sym = input.value.trim().toUpperCase();
+        state.draftEditedRows[i].symbol = sym;
+        // 名稱依代號自動帶出（內建表→雲端歷史），找不到則清空標待補
+        const resolved = resolveSymbolName(sym);
+        state.draftEditedRows[i].name = resolved;
+        const nameInput = els.parsePreview.querySelector(`[data-draft-name="${i}"]`);
+        if (nameInput) nameInput.value = resolved;
       }
     });
   });
@@ -2011,7 +2020,7 @@ async function parseDraftImages() {
     const combinedText = texts.filter(Boolean).join("\n\n---\n\n");
     els.text.value = combinedText;
     const rows = state.draftImages.flatMap((image) => image.parsedRows || []);
-    const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value);
+    const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value, els.market?.value);
     const columnCrops = state.draftImages.flatMap((image) => image.columnCrops || []);
     const rowCrops = state.draftImages.flatMap((image) => image.rowCrops || []);
     const skippedRowCrops = state.draftImages.flatMap((image) => image.skippedRowCrops || []);
@@ -2184,7 +2193,7 @@ async function parseDraftImagesWithRowLines() {
     const combinedText = resultTextParts.filter(Boolean).join("\n\n---\n\n");
     els.text.value = combinedText;
     const rows = state.draftImages.flatMap((image) => image.parsedRows || []);
-    const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value);
+    const parsedRows = rows.length ? dedupeRows(rows) : parseHoldings(els.text.value, els.market?.value);
     const rowCrops = state.draftImages.flatMap((image) => image.rowCrops || []);
     const skippedRowCrops = state.draftImages.flatMap((image) => image.skippedRowCrops || []);
     const expectedTotal = Math.max(...state.draftImages.map((image) => image.expectedTotalCount || 0), 0);
@@ -2270,7 +2279,7 @@ async function parseExistingEntry(id) {
       columnOcr: entry.kind === "ark_position",
     });
     entry.text = result.text.trim();
-    entry.parsedRows = Array.isArray(result.rows) ? result.rows : parseHoldings(entry.text);
+    entry.parsedRows = Array.isArray(result.rows) ? result.rows : parseHoldings(entry.text, entry.market);
     entry.ocrElapsedMs = result.elapsedMs;
     entry.columnOcrMs = result.columnOcrMs;
     entry.rowOcrMs = result.rowOcrMs;
@@ -2317,7 +2326,8 @@ function parseNumberToken(token) {
   return Number(normalized);
 }
 
-function parseHoldings(text) {
+function parseHoldings(text, market = null) {
+  setParseMarketHint(market);
   const normalized = normalizeOcrText(text);
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const arkRows = parseArkPositionRows(lines);
@@ -2326,7 +2336,8 @@ function parseHoldings(text) {
   return parseLineBasedRows(lines);
 }
 
-function parseArkRowCropText(text, cropDataUrl, label) {
+function parseArkRowCropText(text, cropDataUrl, label, market = null) {
+  setParseMarketHint(market);
   const normalized = normalizeOcrText(text);
   const compact = compactText(normalized);
   if (!/現\s*股/.test(normalized) || !compact.includes("現股")) return null;
@@ -2346,8 +2357,10 @@ function parseArkRowCropText(text, cropDataUrl, label) {
   // 股數：取第一個正數（美股允許小數股數，不限整數）
   const shares = numbers.find((value) => value > 0) ?? null;
   const rawAvgCost = numbers.find((value) => value !== shares && value > 0) ?? null;
-  // 美股均價不套用 normalizeArkAvgCost（美股均價可合法 ≥1000，除以100會出錯）
-  const avgCost = isUsSymbol(symbol) ? rawAvgCost : normalizeArkAvgCost(rawAvgCost);
+  // 美股均價不套用 normalizeArkAvgCost（美股均價可合法 ≥1000，除以100會出錯）。
+  // 優先用選定市場判斷；無市場提示時才回退到以代號推測。
+  const isUs = parseMarketHint === "US" || (!parseMarketHint && isUsSymbol(symbol));
+  const avgCost = isUs ? rawAvgCost : normalizeArkAvgCost(rawAvgCost);
   if (shares === null || avgCost === null) return null;
 
   return {
@@ -2383,9 +2396,10 @@ function normalizeArkAvgCost(value) {
 
 function findKnownSymbolInText(text) {
   const compact = compactText(text).replace(/[^\dA-Za-z]/g, "").toUpperCase();
-  // 數字代號（台股）優先；英文代號（美股）其次，避免 OCR 誤讀數字為英文
-  const numeric = Object.keys(SYMBOL_NAMES).filter((s) => /^\d/.test(s)).sort((a, b) => b.length - a.length);
-  const alpha = Object.keys(SYMBOL_NAMES).filter((s) => /^[A-Z]/.test(s)).sort((a, b) => b.length - a.length);
+  // 數字代號（台股）優先；英文代號（美股）其次，避免 OCR 誤讀數字為英文。
+  // 有市場提示時只比對該市場代號子集，避免台美股混用。
+  const numeric = parseMarketHint === "US" ? [] : Object.keys(SYMBOL_NAMES).filter((s) => /^\d/.test(s)).sort((a, b) => b.length - a.length);
+  const alpha = parseMarketHint === "TW" ? [] : Object.keys(SYMBOL_NAMES).filter((s) => /^[A-Z]/.test(s)).sort((a, b) => b.length - a.length);
   return numeric.find((s) => compact.includes(s)) || alpha.find((s) => compact.includes(s)) || "";
 }
 
@@ -2397,8 +2411,9 @@ function findSymbolByOcrName(text) {
     S0: "0053",
     水: "2330",
   };
-  if (aliases[normalized]) return aliases[normalized];
+  if (aliases[normalized] && symbolMatchesHint(aliases[normalized])) return aliases[normalized];
   const entries = Object.entries(SYMBOL_NAMES)
+    .filter(([symbol]) => symbolMatchesHint(symbol))
     .map(([symbol, name]) => ({ symbol, name, normalized: normalizeStockNameForMatch(name) }))
     .sort((a, b) => b.normalized.length - a.normalized.length);
   const exact = entries.find((item) => normalized.includes(item.normalized) || item.normalized.includes(normalized));
@@ -2577,8 +2592,10 @@ function parseArkPositionRows(lines) {
     const officialName = lookupSymbolName(symbol);
     const shares = parseNumberToken(holdingMatch[1]);
     const rawAvgCost = parseNumberToken(holdingMatch[2]);
-    // 台股均價若為整數且 ≥1000 → 可能是 OCR 遺漏小數點（如 192486 → 1924.86）
-    const avgCost = isUsSymbol(symbol) ? rawAvgCost : normalizeArkAvgCost(rawAvgCost);
+    // 台股均價若為整數且 ≥1000 → 可能是 OCR 遺漏小數點（如 192486 → 1924.86）。
+    // 優先用選定市場判斷；無市場提示時才回退到以代號推測。
+    const isUs = parseMarketHint === "US" || (!parseMarketHint && isUsSymbol(symbol));
+    const avgCost = isUs ? rawAvgCost : normalizeArkAvgCost(rawAvgCost);
 
     rows.push({
       symbol,
@@ -2657,6 +2674,20 @@ function lookupSymbolName(symbol) {
   return SYMBOL_NAMES[String(symbol || "").toUpperCase()] || "";
 }
 
+// 改代號後自動帶名：先查內建表 SYMBOL_NAMES，再查雲端歷史庫存曾出現過的同代號名稱；
+// 都查不到回 ""（呼叫端據此清空名稱並標「名稱待補」），避免留著舊代號的錯名稱。
+function resolveSymbolName(symbol) {
+  const s = String(symbol || "").toUpperCase().trim();
+  if (!s) return "";
+  if (SYMBOL_NAMES[s]) return SYMBOL_NAMES[s];
+  const positions = state.cloudHistory?.positions || [];
+  for (let i = positions.length - 1; i >= 0; i -= 1) {
+    const name = String(positions[i]?.name || "").trim();
+    if (name && String(positions[i].symbol || "").toUpperCase().trim() === s) return name;
+  }
+  return "";
+}
+
 // 台股 ETF 代號補 "00" 前綴（OCR 常漏掉）
 // 規則：SYMBOL_NAMES 裡找不到原代號，但 "00"+代號 找得到 → 補上
 function normalizeTWSymbol(symbol) {
@@ -2669,6 +2700,22 @@ function normalizeTWSymbol(symbol) {
 
 function compactText(value) {
   return String(value || "").replace(/\s+/g, "");
+}
+
+// 解析時的市場提示："TW"/"US" 嚴格限制代號候選；null = 不限制（相容舊行為）。
+// 由 recognizeImage / parseHoldings / parseArkRowCropText 在解析前設定，
+// 深層符號辨識函式（findKnownSymbolInText / findSymbolByOcrName / exactSymbolFromLine）讀取，
+// 避免台美股代號混用（如美股截圖把 4 位數字誤判成台股代號）。
+let parseMarketHint = null;
+function setParseMarketHint(market) {
+  const k = normalizeMarketKey(market);
+  parseMarketHint = (k === "TW" || k === "US") ? k : null;
+}
+// 依目前市場提示判斷代號是否屬於選定市場（hint 為 null 時一律允許）
+function symbolMatchesHint(symbol) {
+  if (!parseMarketHint) return true;
+  const s = String(symbol || "").trim().toUpperCase();
+  return parseMarketHint === "TW" ? /^\d/.test(s) : /^[A-Z]/.test(s);
 }
 
 function isTwSymbol(value) {
@@ -2700,8 +2747,9 @@ function findNearbySymbol(lines, index, pendingNameLines) {
 function exactSymbolFromLine(line) {
   if (/[\u3400-\u9fff]/.test(String(line || ""))) return "";
   const compact = compactText(line).replace(/[^\dA-Za-z]/g, "").toUpperCase();
-  if (isTwSymbol(compact)) return compact;
-  if (isUsSymbol(compact)) return compact;
+  // 有市場提示時只認該市場格式，避免跨市場誤判
+  if (parseMarketHint !== "US" && isTwSymbol(compact)) return compact;
+  if (parseMarketHint !== "TW" && isUsSymbol(compact)) return compact;
   return "";
 }
 
@@ -3318,7 +3366,7 @@ function snapshotId(createdAt = new Date().toISOString()) {
 }
 
 function buildSnapshotPayload(entry) {
-  const rows = validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || ""));
+  const rows = validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "", entry.market));
   const createdAt = new Date().toISOString();
   const id = snapshotId(createdAt);
   return buildSnapshotPayloadFromRows({
@@ -3358,7 +3406,7 @@ function buildMarketSnapshotPayloadsFromRows({ createdAt, date, market, sourceEn
 }
 
 function buildMarketSnapshotPayloads(entry) {
-  const rows = validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || ""));
+  const rows = validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "", entry.market));
   return buildMarketSnapshotPayloadsFromRows({
     createdAt: new Date().toISOString(),
     date: entry.date || today(),
@@ -3754,6 +3802,8 @@ function parseColumnArk(text) {
 }
 
 function parsePasteTable(text) {
+  // 貼上模式同樣依選定市場限制代號辨識（共用符號比對函式）
+  setParseMarketHint(state.pasteMeta?.market);
   const trimmed = text.trim();
   if (!trimmed) return null;
 
@@ -3794,7 +3844,7 @@ function parsePasteTable(text) {
   };
 
   // fallback：parseHoldings（OCR 同行格式）
-  const arkRaw = parseHoldings(trimmed);
+  const arkRaw = parseHoldings(trimmed, state.pasteMeta?.market);
   const arkRows = validSnapshotRows(arkRaw);
   return arkRows.length ? { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: arkRows, colMap: null, source: "ark" } : null;
 }
@@ -3969,7 +4019,7 @@ function mergeSnapshotEntries(entries) {
     .filter((entry) => entry.kind === "ark_position" && entry.status === "reviewed")
     .map((entry) => ({
       entry,
-      rows: validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "")),
+      rows: validSnapshotRows(entry.parsedRows || parseHoldings(entry.text || "", entry.market)),
     }))
     .filter((item) => item.rows.length > 0);
 
@@ -4829,7 +4879,8 @@ function renderSnapshotTrendChart(cloudHistory, _quotes, marketKey) {
 }
 
 // 時間比例 x 軸 SVG — x 位置依實際日期比例計算，避免多日期等距擠壓
-function renderTimedSvg(series, dates, W = 600, H = 140) {
+function renderTimedSvg(series, dates, W = 600, H = 140, opts = {}) {
+  const focusKey = opts.focusKey || null; // 有值時：聚焦該 key 的線，其餘淡化
   if (!dates.length) return "<p class=\"muted-text\">尚無資料。</p>";
   const PL = 52; const PR = 8; const PT = 8; const PB = 24;
   const cW = W - PL - PR; const cH = H - PT - PB;
@@ -4870,11 +4921,16 @@ function renderTimedSvg(series, dates, W = 600, H = 140) {
     return `<text x="${xPos(d)}" y="${H - 4}" text-anchor="${anchor}" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join("");
   // 折線與圓點
-  const svgLines = series.map(({ pts, color }) => {
+  const svgLines = series.map(({ pts, color, key }) => {
     if (!pts.length) return "";
     const sorted = [...pts].sort((a, b) => a.d.localeCompare(b.d));
-    const polyline = `<polyline points="${sorted.map((p) => `${xPos(p.d)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
-    const dots = sorted.map((p) => `<circle cx="${xPos(p.d)}" cy="${yPos(p.v)}" r="2.5" fill="${color}" data-tooltip="${p.d} ${p.v.toLocaleString()}"><title>${p.d} ${p.v.toLocaleString()}</title></circle>`).join("");
+    // 聚焦模式：非聚焦線淡化，聚焦線加粗
+    const focused = focusKey && key === focusKey;
+    const op = focusKey && !focused ? 0.12 : 1;
+    const sw = focused ? 3 : 2;
+    const seriesAttr = key ? ` data-series="${escapeHtml(key)}"` : "";
+    const polyline = `<polyline${seriesAttr} points="${sorted.map((p) => `${xPos(p.d)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round" opacity="${op}"/>`;
+    const dots = sorted.map((p) => `<circle cx="${xPos(p.d)}" cy="${yPos(p.v)}" r="2.5" fill="${color}" opacity="${op}" data-tooltip="${p.d} ${p.v.toLocaleString()}"><title>${p.d} ${p.v.toLocaleString()}</title></circle>`).join("");
     return polyline + dots;
   }).join("");
   return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
@@ -5176,13 +5232,22 @@ function renderAdjustTrendChart(alerts) {
   const lines = alerts.filter((a) => a.ratePtsDated && a.ratePtsDated.length >= 2);
   if (!lines.length) return "";
   const allDates = [...new Set(lines.flatMap((a) => a.ratePtsDated.map((p) => p.d)))].sort();
+  // 聚焦的代號若已不在清單（篩選變動）則自動解除
+  const focus = lines.some((a) => a.symbol === state.adjustTrendFocus) ? state.adjustTrendFocus : null;
   const series = lines.map((a, idx) => ({
     pts: a.ratePtsDated, // { d, v }，與 renderTimedSvg 相容
     color: ADJUST_TREND_COLORS[idx % ADJUST_TREND_COLORS.length],
     symbol: a.symbol,
+    key: a.symbol,
   }));
-  const legend = series.map((s) => `<span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}`).join(" ");
-  return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}</div>${renderTimedSvg(series, allDates, 600, 130)}`;
+  // 圖例可點：點代號聚焦該線、其餘淡化；再點同一個取消聚焦
+  const legend = series.map((s) => {
+    const active = focus === s.symbol;
+    const style = `cursor:pointer;${focus && !active ? "opacity:0.4;" : ""}`;
+    return `<span class="adjust-trend-legend-item${active ? " is-active" : ""}" data-adjust-trend-symbol="${escapeHtml(s.symbol)}" style="${style}"><span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}</span>`;
+  }).join(" ");
+  const hint = focus ? `<span class="muted-text" style="font-size:11px;margin-left:6px">（聚焦 ${escapeHtml(focus)}，點同一個取消）</span>` : "";
+  return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}${hint}</div>${renderTimedSvg(series, allDates, 600, 220, { focusKey: focus })}`;
 }
 
 // ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────
@@ -6382,6 +6447,14 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
+  els.cloudSnapshot.querySelectorAll("[data-adjust-trend-symbol]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const sym = el.dataset.adjustTrendSymbol;
+      // 點同一個取消聚焦，否則聚焦該代號
+      state.adjustTrendFocus = state.adjustTrendFocus === sym ? null : sym;
+      renderCloudSnapshot();
+    });
+  });
   els.cloudSnapshot.querySelectorAll("[data-pl-trend-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.plTrendRange = btn.dataset.plTrendRange;
@@ -7008,7 +7081,7 @@ function bindEvents() {
       if (!symbol) { alert("請填入代號"); return; }
       if (!Number.isFinite(shares) || shares <= 0) { alert("請填入有效股數"); return; }
       if (!state.draftEditedRows) state.draftEditedRows = [];
-      state.draftEditedRows.push({ symbol, name: name || SYMBOL_NAMES[symbol] || "", shares, avgCost: Number.isFinite(avgCost) ? avgCost : 0 });
+      state.draftEditedRows.push({ symbol, name: name || resolveSymbolName(symbol), shares, avgCost: Number.isFinite(avgCost) ? avgCost : 0 });
       const newIndex = state.draftEditedRows.length - 1;
       if (els.save) els.save.disabled = false; // OCR 後 skipped row 加入也啟用 save
       const tbody = els.parsePreview?.querySelector(".parsed-table tbody");
@@ -7025,7 +7098,15 @@ function bindEvents() {
           <td class="raw-cell"></td>
         `;
         tr.querySelector("[data-draft-symbol]")?.addEventListener("input", (ev) => {
-          if (state.draftEditedRows?.[newIndex]) state.draftEditedRows[newIndex].symbol = ev.target.value.trim().toUpperCase();
+          if (state.draftEditedRows?.[newIndex]) {
+            const sym = ev.target.value.trim().toUpperCase();
+            state.draftEditedRows[newIndex].symbol = sym;
+            // 名稱依代號自動帶出，找不到則清空待補
+            const resolved = resolveSymbolName(sym);
+            state.draftEditedRows[newIndex].name = resolved;
+            const nameInput = tr.querySelector("[data-draft-name]");
+            if (nameInput) nameInput.value = resolved;
+          }
         });
         tr.querySelector("[data-draft-name]")?.addEventListener("input", (ev) => {
           if (state.draftEditedRows?.[newIndex]) state.draftEditedRows[newIndex].name = ev.target.value.trim();

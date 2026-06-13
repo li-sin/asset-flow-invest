@@ -465,6 +465,20 @@ textarea {
   margin-right: 3px;
 }
 
+/* 待關注調節整合趨勢圖：可點圖例聚焦單條 */
+.adjust-trend-legend-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: opacity 0.12s, background 0.12s;
+}
+.adjust-trend-legend-item.is-active {
+  background: var(--surface-2, rgba(127, 127, 127, 0.15));
+  font-weight: 600;
+  color: var(--text, inherit);
+}
+
 .level-range-btns {
   display: flex;
   gap: 4px;
