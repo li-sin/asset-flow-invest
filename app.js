@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.0";
-const APP_VERSION_NOTE = "趨勢圖點圖例聚焦＋放大、改代號自動帶名、解析依選定市場";
+const APP_VERSION = "v0.29.1";
+const APP_VERSION_NOTE = "市場水位改 append 寫入（grid 滿自動擴列）＋寫入失敗會提示";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -670,20 +670,30 @@ async function saveTargetLevelToSheet(market, level) {
     // only consider rows where A col has a non-empty value
     const dataRows = values.map((row, i) => ({ row, sheetRow: i + 1 })).filter(({ row }) => row[0]);
     const existing = dataRows.find(({ row }) => normalizeDateText(row[0]) === todayStr);
-    const writeRange = existing
-      ? `B${existing.sheetRow}`
-      : `A${(dataRows[dataRows.length - 1]?.sheetRow ?? 0) + 1}:B${(dataRows[dataRows.length - 1]?.sheetRow ?? 0) + 1}`;
-    const writeValues = existing ? [[levelStr]] : [[todayStr, levelStr]];
-    await sheetsFetch(`/values/${sheetRange(tabName, writeRange)}?valueInputOption=USER_ENTERED`, {
-      method: "PUT",
-      body: JSON.stringify({ majorDimension: "ROWS", values: writeValues }),
-    });
+    if (existing) {
+      // 更新今天既有列：只改水位欄（B）
+      await sheetsFetch(`/values/${sheetRange(tabName, `B${existing.sheetRow}`)}?valueInputOption=USER_ENTERED`, {
+        method: "PUT",
+        body: JSON.stringify({ majorDimension: "ROWS", values: [[levelStr]] }),
+      });
+    } else {
+      // 新增列：用 append（非 update PUT），grid 列數不足時 INSERT_ROWS 會自動擴充，
+      // 避免「水位欄已滿、寫超出 grid 範圍」時 API 回 400 而靜默失敗。
+      await sheetsFetch(
+        `/values/${sheetRange(tabName, "A:B")}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        {
+          method: "POST",
+          body: JSON.stringify({ majorDimension: "ROWS", values: [[todayStr, levelStr]] }),
+        },
+      );
+    }
     state.targetLevelHistory = [
       { date: todayStr, market, targetLevel: level, source: "水位" },
       ...state.targetLevelHistory.filter((item) => !(item.date === todayStr && item.market === market)),
     ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   } catch (error) {
     console.warn("saveTargetLevelToSheet", error);
+    throw error; // 往外拋給呼叫端顯示「儲存失敗，請重試」，不再默默吞掉
   }
 }
 
