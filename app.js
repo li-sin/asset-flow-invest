@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.1";
-const APP_VERSION_NOTE = "市場水位改 append 寫入（grid 滿自動擴列）＋寫入失敗會提示";
+const APP_VERSION = "v0.29.2";
+const APP_VERSION_NOTE = "手機庫存：代號欄修黑底黑字＋編輯鈕移到卡片標題列；首頁建議水位改雲端歷史優先（不被本機舊值蓋過）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -635,10 +635,12 @@ function holdingDays(market, symbol) {
 
 function targetLevelForMarket(market, snapshotDate = "") {
   const key = normalizeMarketKey(market);
-  const value = state.targetLevels[key];
-  if (Number.isFinite(value)) return value;
+  // 雲端歷史（依快照日期）為準，才能跟著快照日期連動；
+  // 本機手動值僅在歷史尚未載入/該市場無紀錄時作 fallback，避免舊值蓋過最新。
   const sheetValue = targetLevelFromHistory(key, snapshotDate);
-  return sheetValue === null ? null : sheetValue;
+  if (sheetValue !== null) return sheetValue;
+  const value = state.targetLevels[key];
+  return Number.isFinite(value) ? value : null;
 }
 
 function updateTargetLevel(market, value) {
@@ -5942,6 +5944,7 @@ function renderCloudSnapshot() {
           <h3>${marketLabel(item.market)}明細</h3>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span>建議水位 ${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</span>
+            <button class="button compact secondary detail-edit-toggle${state.detailEditMode[item.market] ? ' active' : ''}" data-edit-market="${escapeHtml(item.market)}" title="${state.detailEditMode[item.market] ? '關閉編輯模式' : '開啟編輯（可修改股數、均價、布局日）'}">${state.detailEditMode[item.market] ? '✎ 編輯中' : '✎ 編輯'}</button>
             <button class="button compact secondary batch-firstbuy-toggle-btn"
                     data-market="${escapeHtml(item.market)}">
               ${state.batchFirstBuyMode[item.market] ? "關閉" : "批次設定布局日"}
@@ -5963,7 +5966,7 @@ function renderCloudSnapshot() {
                 <th class="sortable-th" data-sort-key="perf">表現率（%/日）${sortArrow("perf")}</th>
                 <th class="sortable-th" data-sort-key="dailyGain">日均損益（元）${sortArrow("dailyGain")}</th>
                 <th class="sortable-th" data-sort-key="cost">估算成本${sortArrow("cost")}</th>
-                <th class="sortable-th" data-sort-key="firstBuy">持有天數${sortArrow("firstBuy")} <button class="detail-edit-toggle${state.detailEditMode[item.market] ? ' active' : ''}" data-edit-market="${escapeHtml(item.market)}" title="${state.detailEditMode[item.market] ? '關閉編輯模式' : '開啟編輯（可修改股數、均價、布局日）'}">✎</button></th>
+                <th class="sortable-th" data-sort-key="firstBuy">持有天數${sortArrow("firstBuy")}</th>
               </tr>
             </thead>
             <tbody>${rows || "<tr><td colspan=\"10\">沒有庫存</td></tr>"}</tbody>
