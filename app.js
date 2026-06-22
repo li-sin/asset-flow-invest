@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.3";
-const APP_VERSION_NOTE = "待關注調節：當天無快照時，圖與清單列補「今日預估損益率」（依現價）＋虛線/半透明網底/空心點與快照資料區別";
+const APP_VERSION = "v0.29.4";
+const APP_VERSION_NOTE = "修 PWA 卡舊版：SW 抓殼層檔(html/js/css)改 no-store 繞過 GitHub Pages HTTP 快取＋註冊 updateViaCache:none";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7375,7 +7375,8 @@ function registerServiceWorker() {
     refreshing = true;
     window.location.reload();
   });
-  navigator.serviceWorker.register("./sw.js").then((registration) => {
+  // updateViaCache:"none" → 更新檢查時連 sw.js 本身都不吃 HTTP 快取，確保新版即時偵測
+  navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then((registration) => {
     swRegistration = registration;
     registration.update?.();
   }).catch((error) => console.warn("service worker", error));
