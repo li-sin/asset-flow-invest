@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.4";
-const APP_VERSION_NOTE = "修 PWA 卡舊版：SW 抓殼層檔(html/js/css)改 no-store 繞過 GitHub Pages HTTP 快取＋註冊 updateViaCache:none";
+const APP_VERSION = "v0.29.5";
+const APP_VERSION_NOTE = "待關注調節改用價格報酬率當汰出訊號（趨勢轉弱/弱於組合），不受逐日加碼影響；損益率降為顯示用；sparkline/整合圖/今日預估同步改報酬率";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5043,11 +5043,12 @@ function renderSparkline(pts, down) {
     + `<circle cx="${px(last.x).toFixed(1)}" cy="${py(last.y).toFixed(1)}" r="2" fill="${color}"/></svg>`;
 }
 
-// 找出「資金卡住、效率變差」的標的：表現率趨勢往下 + 損益率停滯
+// 找出「該汰出」的標的：價格報酬率趨勢轉弱（自己沒在漲）或弱於你的組合（相對落後）。
+// 用「價格報酬率」而非「損益率」當訊號 → 不受你逐日加碼拉動均價的影響（加碼期損益率天生被壓低）。
 function renderAdjustmentAlerts(cloudHistory, marketKey) {
   const MAX_SNAPS = 10;        // 趨勢最多取最近 N 筆快照
   const MIN_POINTS = 3;        // 至少要 N 個有效點才判斷趨勢
-  const RATE_STALL_SLOPE = 0.5; // 損益率斜率 ≤ 此值（%/快照）視為「停滯」（含負）
+  const RET_DOWN_SLOPE = 0;    // 報酬率斜率 ≤ 此值（%/快照）視為「趨勢轉弱」
 
   marketKey = marketKey || state.levelChartMarket || "TW";
   const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
@@ -5055,7 +5056,6 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   const positions = cloudHistory?.positions || [];
 
   const alerts = [];
-  const marketSlopes = {};       // 各市場「你的組合」平均損益率斜率（每列弱於/優於基準）
   const marketIndexSlopes = {};  // 各市場真指數報酬率斜率（頂部趨勢條用）
   const marketPortReturn = {};   // 各市場組合等權「價格報酬率」斜率（與指數同量綱，頂部對照用）
   const INDEX_SYMBOLS = { TW: "^TWII", US: "^IXIC" };
@@ -5069,23 +5069,6 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
       .forEach((s) => { const d = s.date || s.createdAt?.slice(0, 10) || ""; if (d) byDate[d] = s; });
     const dates = Object.keys(byDate).sort().slice(-MAX_SNAPS);
     if (dates.length < MIN_POINTS) continue;
-
-    // 大盤對照：該市場每日平均損益率序列 → 回歸斜率（系統性漲跌基準）
-    const marketRatePts = dates.map((d, i) => {
-      const snapId = byDate[d].snapshotId;
-      const rs = positions
-        .filter((p) => p.snapshotId === snapId && Number(p.avgCost) > 0)
-        .map((p) => {
-          const price = historicalClose(p.symbol, d);
-          if (price === null || price <= 0) return null;
-          const r = (price - Number(p.avgCost)) / Number(p.avgCost) * 100;
-          return (!Number.isFinite(r) || Math.abs(r) > 500) ? null : r;
-        })
-        .filter((r) => r !== null);
-      return rs.length ? { x: i, y: rs.reduce((s, v) => s + v, 0) / rs.length } : null;
-    }).filter(Boolean);
-    const marketRateSlope = marketRatePts.length >= MIN_POINTS ? linregSlope(marketRatePts) : null;
-    marketSlopes[market] = marketRateSlope;
 
     // 頂部趨勢條：真指數報酬率斜率（以區間首個有效收盤為基準，回歸 %/快照）
     const indexSymbol = INDEX_SYMBOLS[market];
@@ -5119,58 +5102,65 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     }).filter(Boolean);
     marketPortReturn[market] = portRetPts.length >= MIN_POINTS ? linregSlope(portRetPts) : null;
 
+    const portSlope = marketPortReturn[market]; // 你的組合平均報酬率斜率（相對基準）
     for (const symbol of symbols) {
-      const firstBuy = state.firstBuyDates[`${market}_${symbol}`] || "";
-      const ratePts = []; // { x:i, y:損益率% }
-      const ratePtsDated = []; // { d:日期, v:損益率% }（整合趨勢圖用，按真實日期對齊）
-      const perfPts = []; // { x:i, y:表現率(%/日) }
+      // 價格報酬率序列（汰出訊號用，與成本無關）：以區間首個有效收盤為基準
+      const retPts = [];       // { x:i, y:報酬率% }
+      const retPtsDated = [];  // { d, v }（整合趨勢圖用，按真實日期對齊）
+      let retBaseSym = null;
+      // 損益率序列（僅供顯示：列上「首次 → 最後快照」與今日預估）
+      const ratePts = [];      // { x:i, y:損益率% }
       dates.forEach((d, i) => {
-        const pos = positions.find((p) => p.snapshotId === byDate[d].snapshotId && p.symbol === symbol);
-        if (!pos || !(Number(pos.avgCost) > 0)) return;
         const price = historicalClose(symbol, d);
         if (price === null || price <= 0) return;
-        const rate = (price - Number(pos.avgCost)) / Number(pos.avgCost) * 100;
-        if (!Number.isFinite(rate) || Math.abs(rate) > 500) return; // 濾除 OCR 均價誤讀造成的爆量
-        ratePts.push({ x: i, y: rate });
-        ratePtsDated.push({ d, v: rate });
-        if (firstBuy) {
-          const days = Math.max(1, Math.floor((new Date(d).getTime() - new Date(firstBuy).getTime()) / 86400000));
-          perfPts.push({ x: i, y: rate / days });
+        // 報酬率（不看均價，不受加碼影響）
+        if (retBaseSym === null) retBaseSym = price;
+        const ret = (price / retBaseSym - 1) * 100;
+        if (Number.isFinite(ret)) { retPts.push({ x: i, y: ret }); retPtsDated.push({ d, v: ret }); }
+        // 損益率（顯示用）
+        const pos = positions.find((p) => p.snapshotId === byDate[d].snapshotId && p.symbol === symbol);
+        if (pos && Number(pos.avgCost) > 0) {
+          const rate = (price - Number(pos.avgCost)) / Number(pos.avgCost) * 100;
+          if (Number.isFinite(rate) && Math.abs(rate) <= 500) ratePts.push({ x: i, y: rate });
         }
       });
-      if (ratePts.length < MIN_POINTS) continue;
+      if (retPts.length < MIN_POINTS) continue; // 報酬率訊號至少要 N 個有效點
 
-      const rateSlope = linregSlope(ratePts);
-      const perfSlope = perfPts.length >= MIN_POINTS ? linregSlope(perfPts) : null;
-      const perfDown = perfSlope !== null && perfSlope < 0;        // 表現率趨勢往下
-      const rateStall = rateSlope !== null && rateSlope <= RATE_STALL_SLOPE; // 損益率沒在推進
-      if (!perfDown && !rateStall) continue;
+      const retSlope = linregSlope(retPts);
+      const trendDown = retSlope !== null && retSlope <= RET_DOWN_SLOPE;                 // 趨勢轉弱（絕對：自己沒在漲）
+      const relWeak = retSlope !== null && portSlope != null && (retSlope - portSlope) < 0; // 弱於組合（相對落後）
+      if (!trendDown && !relWeak) continue;
 
       const latestPos = positions.find((p) => p.snapshotId === lastSnapId && p.symbol === symbol);
-      // 今日預估損益率（依即時現價 × 最新快照均價，僅供顯示參考，不影響上榜/徽章/斜率）。
-      // 只在「今天尚無該市場快照」時才算（lastSnapDate < 今天）。
       const lastSnapDate = dates[dates.length - 1];
       const latestAvgCost = Number(latestPos?.avgCost) || 0;
-      let todayEstRate = null;
+      // 今日預估（依即時現價，僅當天尚無快照時）：報酬率（圖/sparkline 訊號）＋ 損益率（列上顯示）
+      let todayEstRet = null, todayEstRate = null;
       const liveQ = state.quotes[symbol];
       const livePrice = typeof liveQ === "number" ? liveQ : (liveQ?.price ?? null);
-      if (livePrice > 0 && latestAvgCost > 0 && today() > lastSnapDate) {
-        const er = (livePrice - latestAvgCost) / latestAvgCost * 100;
-        if (Number.isFinite(er) && Math.abs(er) <= 500) todayEstRate = er;
+      if (livePrice > 0 && today() > lastSnapDate) {
+        if (retBaseSym) {
+          const er = (livePrice / retBaseSym - 1) * 100;
+          if (Number.isFinite(er)) todayEstRet = er;
+        }
+        if (latestAvgCost > 0) {
+          const ep = (livePrice - latestAvgCost) / latestAvgCost * 100;
+          if (Number.isFinite(ep) && Math.abs(ep) <= 500) todayEstRate = ep;
+        }
       }
       alerts.push({
         market, symbol,
         name: latestPos?.name || symbol,
-        perfDown, rateStall, perfSlope, rateSlope,
-        firstRate: ratePts[0].y,
-        curRate: ratePts[ratePts.length - 1].y,
+        trendDown, relWeak, retSlope, portSlope,
+        // 損益率（顯示用，無有效均價點時為 null）
+        firstRate: ratePts.length ? ratePts[0].y : null,
+        curRate: ratePts.length ? ratePts[ratePts.length - 1].y : null,
         heldDays: holdingDays(market, symbol),
-        sparkPts: perfPts.length >= MIN_POINTS ? perfPts : ratePts,
-        ratePts, ratePtsDated, // 整合趨勢圖用（損益率序列 + 日期化）
-        lastSnapDate, todayEstRate, // 今日預估（虛線/網底用）
-        marketRateSlope, // 大盤對照基準（該市場平均損益率斜率）
-        // 嚴重度分組：兩徽章 > 表現率↓ > 損益率停滯；組內看趨勢掉幅
-        group: (perfDown && rateStall) ? 0 : (perfDown ? 1 : 2),
+        sparkPts: retPts,   // sparkline 畫報酬率趨勢
+        retPtsDated,        // 整合趨勢圖用（報酬率序列 + 日期化）
+        lastSnapDate, todayEstRet, todayEstRate, // 今日預估（虛線/網底/列上）
+        // 嚴重度分組：兩訊號 > 弱於組合 > 趨勢轉弱；組內看報酬率斜率
+        group: (trendDown && relWeak) ? 0 : (relWeak ? 1 : 2),
       });
     }
   }
@@ -5178,15 +5168,14 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   if (!alerts.length) {
     return state.historicalCloseLoading
       ? "<p class=\"muted-text\">正在載入歷史收盤價…</p>"
-      : "<p class=\"muted-text\">目前沒有需要優先調節的標的 👍（表現率與損益率都在推進中）</p>";
+      : "<p class=\"muted-text\">目前沒有需要汰出的標的 👍（持股報酬率都在推進、且沒有弱於你的組合）</p>";
   }
 
   // 篩選
   const filter = state.adjustFilter || "all";
   const shown = alerts.filter((a) => {
-    if (filter === "weak") return a.marketRateSlope != null && (a.rateSlope - a.marketRateSlope) < 0;
-    if (filter === "perf") return a.perfDown;
-    if (filter === "stall") return a.rateStall;
+    if (filter === "trendDown") return a.trendDown;
+    if (filter === "relWeak") return a.relWeak;
     return true;
   });
 
@@ -5194,36 +5183,36 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   const sortKey = state.adjustSort || "severity";
   shown.sort((a, b) => {
     switch (sortKey) {
-      case "perfDrop": return (a.perfSlope ?? 0) - (b.perfSlope ?? 0); // 表現率掉最兇在前
-      case "held":     return (b.heldDays ?? -1) - (a.heldDays ?? -1); // 持有最久在前
-      case "curRate":  return (a.curRate ?? 0) - (b.curRate ?? 0);     // 目前損益率最低在前
+      case "retWeak":  return (a.retSlope ?? 0) - (b.retSlope ?? 0); // 報酬率最弱在前
       case "relWeak": {
-        const ea = a.marketRateSlope != null ? a.rateSlope - a.marketRateSlope : Infinity;
-        const eb = b.marketRateSlope != null ? b.rateSlope - b.marketRateSlope : Infinity;
-        return ea - eb; // 相對大盤最弱在前
+        const ea = a.portSlope != null ? a.retSlope - a.portSlope : Infinity;
+        const eb = b.portSlope != null ? b.retSlope - b.portSlope : Infinity;
+        return ea - eb; // 相對組合最弱在前
       }
-      default: // severity：兩徽章 > 表現率↓ > 損益率停滯，組內看掉幅
+      case "held":     return (b.heldDays ?? -1) - (a.heldDays ?? -1); // 持有最久在前
+      case "curRate":  return (a.curRate ?? Infinity) - (b.curRate ?? Infinity); // 損益率最低在前（無資料殿後）
+      default: // severity：兩訊號 > 弱於組合 > 趨勢轉弱，組內看報酬率斜率
         if (a.group !== b.group) return a.group - b.group;
-        if ((a.perfSlope ?? 0) !== (b.perfSlope ?? 0)) return (a.perfSlope ?? 0) - (b.perfSlope ?? 0);
-        return (a.rateSlope ?? 0) - (b.rateSlope ?? 0);
+        return (a.retSlope ?? 0) - (b.retSlope ?? 0);
     }
   });
 
   const rows = shown.map((a) => {
-    // 大盤對照標籤：個股損益率斜率 vs 該市場平均斜率
-    const relBadge = (a.marketRateSlope === null || a.marketRateSlope === undefined)
-      ? ''
-      : ((a.rateSlope - a.marketRateSlope) < 0
-          ? '<span class="adjust-badge badge-weak">弱於大盤</span>'
-          : '<span class="adjust-badge badge-rel">優於大盤</span>');
     const badges = [
-      a.perfDown ? '<span class="adjust-badge badge-perf">表現率↓</span>' : '',
-      a.rateStall ? '<span class="adjust-badge badge-stall">損益率停滯</span>' : '',
-      relBadge,
+      a.trendDown ? '<span class="adjust-badge badge-perf">趨勢轉弱</span>' : '',
+      a.relWeak ? '<span class="adjust-badge badge-weak">弱於組合</span>' : '',
     ].join('');
-    const curColor = a.curRate >= 0 ? 'var(--green)' : 'var(--red)';
-    const rateMove = `${a.firstRate >= 0 ? '+' : ''}${a.firstRate.toFixed(1)}% → <strong style="color:${curColor}">${a.curRate >= 0 ? '+' : ''}${a.curRate.toFixed(1)}%</strong>`;
-    // 今日預估（依現價，非快照）：虛線底線樣式快速區別
+    // 報酬率斜率（主訊號）：價格趨勢，與成本無關
+    const retText = a.retSlope !== null
+      ? `<span title="價格報酬率斜率（汰出訊號，不受加碼影響）">報酬率 <strong style="color:${a.retSlope >= 0 ? 'var(--green)' : 'var(--red)'}">${a.retSlope >= 0 ? '▲' : '▼'}${Math.abs(a.retSlope).toFixed(2)}%/快照</strong></span>`
+      : '';
+    // 損益率（顯示用，可能無均價資料）
+    const hasRate = a.curRate !== null;
+    const curColor = (a.curRate ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const rateMove = hasRate
+      ? `${a.firstRate >= 0 ? '+' : ''}${a.firstRate.toFixed(1)}% → <strong style="color:${curColor}">${a.curRate >= 0 ? '+' : ''}${a.curRate.toFixed(1)}%</strong>`
+      : '<span class="muted-text">—</span>';
+    // 今日預估損益率（依現價，非快照）：虛線底線快速區別
     const estChip = a.todayEstRate !== null
       ? ` <span class="adjust-est" title="依今日現價預估，非快照資料">⇢ 今日 <strong style="color:${a.todayEstRate >= 0 ? 'var(--green)' : 'var(--red)'}">${a.todayEstRate >= 0 ? '+' : ''}${a.todayEstRate.toFixed(1)}%</strong></span>`
       : '';
@@ -5235,9 +5224,10 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
           <div class="adjust-badges">${badges}</div>
         </div>
         <div class="adjust-alert-meta">
-          ${renderSparkline(a.sparkPts, a.perfDown)}
+          ${renderSparkline(a.sparkPts, a.trendDown)}
           <div class="adjust-alert-nums">
-            <span>損益率 ${rateMove}${estChip}</span>
+            <span>${retText}</span>
+            <span class="muted-text">損益率 ${rateMove}${estChip}</span>
             <span class="muted-text">持有 ${heldText}</span>
           </div>
         </div>
@@ -5261,10 +5251,10 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   }).filter(Boolean).join('');
 
   const sortOptions = [
-    ["severity", "嚴重度"], ["perfDrop", "表現率掉最兇"], ["relWeak", "相對大盤最弱"], ["held", "持有最久"], ["curRate", "損益率最低"],
+    ["severity", "嚴重度"], ["retWeak", "報酬率最弱"], ["relWeak", "相對組合最弱"], ["held", "持有最久"], ["curRate", "損益率最低"],
   ].map(([v, l]) => `<option value="${v}"${sortKey === v ? " selected" : ""}>${l}</option>`).join("");
   const filterChips = [
-    ["all", "全部"], ["weak", "弱於大盤"], ["perf", "表現率↓"], ["stall", "損益率停滯"],
+    ["all", "全部"], ["trendDown", "趨勢轉弱"], ["relWeak", "弱於組合"],
   ].map(([v, l]) => `<button type="button" class="adjust-chip${filter === v ? " is-active" : ""}" data-adjust-filter="${v}">${l}</button>`).join("");
   const controls = `
     <div class="adjust-controls">
@@ -5280,20 +5270,20 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   return `${marketTrendSummary ? `<div class="adjust-market-trends">${marketTrendSummary}</div>` : ""}${controls}${trendChart}${listHtml}`;
 }
 
-// 待關注調節：所有上榜標的損益率趨勢整合成一張多線圖（風格對齊其他趨勢圖，用 renderTimedSvg）
+// 待關注調節：所有上榜標的價格報酬率趨勢整合成一張多線圖（風格對齊其他趨勢圖，用 renderTimedSvg）
 const ADJUST_TREND_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#14b8a6"];
 function renderAdjustTrendChart(alerts) {
-  const lines = alerts.filter((a) => a.ratePtsDated && a.ratePtsDated.length >= 2);
+  const lines = alerts.filter((a) => a.retPtsDated && a.retPtsDated.length >= 2);
   if (!lines.length) return "";
   // 聚焦的代號若已不在清單（篩選變動）則自動解除
   const focus = lines.some((a) => a.symbol === state.adjustTrendFocus) ? state.adjustTrendFocus : null;
   const todayStr = today();
   let hasEst = false;
   const series = lines.map((a, idx) => {
-    let pts = a.ratePtsDated; // { d, v }，與 renderTimedSvg 相容
+    let pts = a.retPtsDated; // { d, v }（報酬率），與 renderTimedSvg 相容
     // 今日尚無快照 → 末端接一個「今日預估點」（est:true，畫成虛線 + 空心點）
-    if (a.todayEstRate !== null && todayStr > a.lastSnapDate) {
-      pts = [...a.ratePtsDated, { d: todayStr, v: Math.round(a.todayEstRate * 10) / 10, est: true }];
+    if (a.todayEstRet !== null && todayStr > a.lastSnapDate) {
+      pts = [...a.retPtsDated, { d: todayStr, v: Math.round(a.todayEstRet * 10) / 10, est: true }];
       hasEst = true;
     }
     return {
@@ -6116,7 +6106,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>待關注調節 ⚠️</h3>
-        <span>表現率↓／損益率停滯、效率變差的標的，可優先調節（近 10 筆快照 + 大盤對照）</span>
+        <span>價格報酬率趨勢轉弱／弱於你的組合的標的，可考慮汰弱換強（近 10 筆快照，與成本無關不受加碼影響）</span>
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderAdjustmentAlerts(state.cloudHistory, mkt)}
