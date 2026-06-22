@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.6";
-const APP_VERSION_NOTE = "待關注調節：點榜上股票即聚焦整合趨勢圖那條線（同點圖例，再點取消），列高亮";
+const APP_VERSION = "v0.29.7";
+const APP_VERSION_NOTE = "待關注調節：相對訊號基準由「組合平均」改「大盤指數」→ 弱於組合改為跑輸大盤（避免明星股灌高平均、上榜一面倒）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5102,7 +5102,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     }).filter(Boolean);
     marketPortReturn[market] = portRetPts.length >= MIN_POINTS ? linregSlope(portRetPts) : null;
 
-    const portSlope = marketPortReturn[market]; // 你的組合平均報酬率斜率（相對基準）
+    const idxSlope = marketIndexSlopes[market]?.slope ?? null; // 大盤指數報酬率斜率（相對基準）
     for (const symbol of symbols) {
       // 價格報酬率序列（汰出訊號用，與成本無關）：以區間首個有效收盤為基準
       const retPts = [];       // { x:i, y:報酬率% }
@@ -5128,7 +5128,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
 
       const retSlope = linregSlope(retPts);
       const trendDown = retSlope !== null && retSlope <= RET_DOWN_SLOPE;                 // 趨勢轉弱（絕對：自己沒在漲）
-      const relWeak = retSlope !== null && portSlope != null && (retSlope - portSlope) < 0; // 弱於組合（相對落後）
+      const relWeak = retSlope !== null && idxSlope != null && (retSlope - idxSlope) < 0; // 跑輸大盤（相對落後）
       if (!trendDown && !relWeak) continue;
 
       const latestPos = positions.find((p) => p.snapshotId === lastSnapId && p.symbol === symbol);
@@ -5151,7 +5151,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
       alerts.push({
         market, symbol,
         name: latestPos?.name || symbol,
-        trendDown, relWeak, retSlope, portSlope,
+        trendDown, relWeak, retSlope, idxSlope,
         // 損益率（顯示用，無有效均價點時為 null）
         firstRate: ratePts.length ? ratePts[0].y : null,
         curRate: ratePts.length ? ratePts[ratePts.length - 1].y : null,
@@ -5159,7 +5159,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
         sparkPts: retPts,   // sparkline 畫報酬率趨勢
         retPtsDated,        // 整合趨勢圖用（報酬率序列 + 日期化）
         lastSnapDate, todayEstRet, todayEstRate, // 今日預估（虛線/網底/列上）
-        // 嚴重度分組：兩訊號 > 弱於組合 > 趨勢轉弱；組內看報酬率斜率
+        // 嚴重度分組：兩訊號 > 跑輸大盤 > 趨勢轉弱；組內看報酬率斜率
         group: (trendDown && relWeak) ? 0 : (relWeak ? 1 : 2),
       });
     }
@@ -5168,7 +5168,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   if (!alerts.length) {
     return state.historicalCloseLoading
       ? "<p class=\"muted-text\">正在載入歷史收盤價…</p>"
-      : "<p class=\"muted-text\">目前沒有需要汰出的標的 👍（持股報酬率都在推進、且沒有弱於你的組合）</p>";
+      : "<p class=\"muted-text\">目前沒有需要汰出的標的 👍（持股報酬率都在推進、且沒有跑輸大盤）</p>";
   }
 
   // 篩選
@@ -5185,13 +5185,13 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     switch (sortKey) {
       case "retWeak":  return (a.retSlope ?? 0) - (b.retSlope ?? 0); // 報酬率最弱在前
       case "relWeak": {
-        const ea = a.portSlope != null ? a.retSlope - a.portSlope : Infinity;
-        const eb = b.portSlope != null ? b.retSlope - b.portSlope : Infinity;
-        return ea - eb; // 相對組合最弱在前
+        const ea = a.idxSlope != null ? a.retSlope - a.idxSlope : Infinity;
+        const eb = b.idxSlope != null ? b.retSlope - b.idxSlope : Infinity;
+        return ea - eb; // 相對大盤最弱在前
       }
       case "held":     return (b.heldDays ?? -1) - (a.heldDays ?? -1); // 持有最久在前
       case "curRate":  return (a.curRate ?? Infinity) - (b.curRate ?? Infinity); // 損益率最低在前（無資料殿後）
-      default: // severity：兩訊號 > 弱於組合 > 趨勢轉弱，組內看報酬率斜率
+      default: // severity：兩訊號 > 跑輸大盤 > 趨勢轉弱，組內看報酬率斜率
         if (a.group !== b.group) return a.group - b.group;
         return (a.retSlope ?? 0) - (b.retSlope ?? 0);
     }
@@ -5200,7 +5200,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   const rows = shown.map((a) => {
     const badges = [
       a.trendDown ? '<span class="adjust-badge badge-perf">趨勢轉弱</span>' : '',
-      a.relWeak ? '<span class="adjust-badge badge-weak">弱於組合</span>' : '',
+      a.relWeak ? '<span class="adjust-badge badge-weak">跑輸大盤</span>' : '',
     ].join('');
     // 報酬率斜率（主訊號）：價格趨勢，與成本無關
     const retText = a.retSlope !== null
@@ -5251,10 +5251,10 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
   }).filter(Boolean).join('');
 
   const sortOptions = [
-    ["severity", "嚴重度"], ["retWeak", "報酬率最弱"], ["relWeak", "相對組合最弱"], ["held", "持有最久"], ["curRate", "損益率最低"],
+    ["severity", "嚴重度"], ["retWeak", "報酬率最弱"], ["relWeak", "相對大盤最弱"], ["held", "持有最久"], ["curRate", "損益率最低"],
   ].map(([v, l]) => `<option value="${v}"${sortKey === v ? " selected" : ""}>${l}</option>`).join("");
   const filterChips = [
-    ["all", "全部"], ["trendDown", "趨勢轉弱"], ["relWeak", "弱於組合"],
+    ["all", "全部"], ["trendDown", "趨勢轉弱"], ["relWeak", "跑輸大盤"],
   ].map(([v, l]) => `<button type="button" class="adjust-chip${filter === v ? " is-active" : ""}" data-adjust-filter="${v}">${l}</button>`).join("");
   const controls = `
     <div class="adjust-controls">
@@ -6106,7 +6106,7 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>待關注調節 ⚠️</h3>
-        <span>價格報酬率趨勢轉弱／弱於你的組合的標的，可考慮汰弱換強（近 10 筆快照，與成本無關不受加碼影響）</span>
+        <span>價格報酬率趨勢轉弱／跑輸大盤的標的，可考慮汰弱換強（近 10 筆快照，與成本無關不受加碼影響）</span>
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderAdjustmentAlerts(state.cloudHistory, mkt)}
