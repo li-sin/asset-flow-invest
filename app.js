@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.7";
-const APP_VERSION_NOTE = "待關注調節：相對訊號基準由「組合平均」改「大盤指數」→ 弱於組合改為跑輸大盤（避免明星股灌高平均、上榜一面倒）";
+const APP_VERSION = "v0.29.8";
+const APP_VERSION_NOTE = "待關注趨勢圖：聚焦某檔後，點圖外空白處即解除聚焦（document 監聽只綁一次）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -159,6 +159,7 @@ const els = {
 
 let dbPromise = null;
 let swRegistration = null;
+let adjustFocusOutsideBound = false; // 待關注趨勢圖：點圖外解除聚焦的 document 監聽只綁一次
 let tesseractLoadPromise = null;
 let heicLoadPromise = null;
 let googleIdentityLoadPromise = null;
@@ -5300,9 +5301,9 @@ function renderAdjustTrendChart(alerts) {
     const style = `cursor:pointer;${focus && !active ? "opacity:0.4;" : ""}`;
     return `<span class="adjust-trend-legend-item${active ? " is-active" : ""}" data-adjust-trend-symbol="${escapeHtml(s.symbol)}" style="${style}"><span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}</span>`;
   }).join(" ");
-  const hint = focus ? `<span class="muted-text" style="font-size:11px;margin-left:6px">（聚焦 ${escapeHtml(focus)}，點同一個取消）</span>` : "";
+  const hint = focus ? `<span class="muted-text" style="font-size:11px;margin-left:6px">（聚焦 ${escapeHtml(focus)}，點同一個或圖外空白處取消）</span>` : "";
   const estHint = hasEst ? `<span class="muted-text" style="font-size:11px;margin-left:6px">（虛線／網底＝今日預估，依現價）</span>` : "";
-  return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}${hint}${estHint}</div>${renderTimedSvg(series, allDates, 600, 220, { focusKey: focus })}`;
+  return `<div class="adjust-trend-block"><div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}${hint}${estHint}</div>${renderTimedSvg(series, allDates, 600, 220, { focusKey: focus })}</div>`;
 }
 
 // ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────
@@ -6511,6 +6512,17 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
+  // 聚焦態下，點「圖外空白處」（非整合趨勢圖、非榜上列）即解除聚焦。document 層只綁一次（旗標保護），避免每次重繪堆疊。
+  if (!adjustFocusOutsideBound) {
+    adjustFocusOutsideBound = true;
+    document.addEventListener("click", (e) => {
+      if (!state.adjustTrendFocus) return;
+      const t = e.target;
+      if (t && t.closest && (t.closest(".adjust-trend-block") || t.closest(".adjust-alert-row"))) return; // 圖上 / 榜上列 → 保持
+      state.adjustTrendFocus = null;
+      renderCloudSnapshot();
+    });
+  }
   els.cloudSnapshot.querySelectorAll("[data-pl-trend-range]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.plTrendRange = btn.dataset.plTrendRange;
