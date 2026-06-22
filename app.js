@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.2";
-const APP_VERSION_NOTE = "手機庫存：代號欄修黑底黑字＋編輯鈕移到卡片標題列；首頁建議水位改雲端歷史優先（不被本機舊值蓋過）";
+const APP_VERSION = "v0.29.3";
+const APP_VERSION_NOTE = "待關注調節：當天無快照時，圖與清單列補「今日預估損益率」（依現價）＋虛線/半透明網底/空心點與快照資料區別";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4932,6 +4932,19 @@ function renderTimedSvg(series, dates, W = 600, H = 140, opts = {}) {
     const anchor = i === dates.length - 1 ? "end" : "middle";
     return `<text x="${xPos(d)}" y="${H - 4}" text-anchor="${anchor}" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join("");
+  // 預估網底區塊：從最後一個「實點」日期 → 最大「預估點」日期（僅當有 est 點）
+  const hasEst = series.some((s) => s.pts.some((p) => p.est));
+  let estZone = "";
+  if (hasEst) {
+    const realDates = series.flatMap((s) => s.pts.filter((p) => !p.est).map((p) => p.d)).sort();
+    const estDates = series.flatMap((s) => s.pts.filter((p) => p.est).map((p) => p.d)).sort();
+    if (realDates.length && estDates.length) {
+      const x1 = xPos(realDates[realDates.length - 1]);
+      const x2 = xPos(estDates[estDates.length - 1]);
+      estZone = `<rect x="${x1}" y="${PT}" width="${Math.max(0, x2 - x1)}" height="${cH}" fill="var(--muted)" opacity="0.08"/>`
+        + `<text x="${(x1 + x2) / 2}" y="${PT + 9}" text-anchor="middle" font-size="8" fill="var(--muted)">預估</text>`;
+    }
+  }
   // 折線與圓點
   const svgLines = series.map(({ pts, color, key }) => {
     if (!pts.length) return "";
@@ -4941,11 +4954,24 @@ function renderTimedSvg(series, dates, W = 600, H = 140, opts = {}) {
     const op = focusKey && !focused ? 0.12 : 1;
     const sw = focused ? 3 : 2;
     const seriesAttr = key ? ` data-series="${escapeHtml(key)}"` : "";
-    const polyline = `<polyline${seriesAttr} points="${sorted.map((p) => `${xPos(p.d)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round" opacity="${op}"/>`;
-    const dots = sorted.map((p) => `<circle cx="${xPos(p.d)}" cy="${yPos(p.v)}" r="2.5" fill="${color}" opacity="${op}" data-tooltip="${p.d} ${p.v.toLocaleString()}"><title>${p.d} ${p.v.toLocaleString()}</title></circle>`).join("");
-    return polyline + dots;
+    const realPts = sorted.filter((p) => !p.est);
+    const estPts = sorted.filter((p) => p.est);
+    // 實線段（快照資料）
+    const polyline = realPts.length
+      ? `<polyline${seriesAttr} points="${realPts.map((p) => `${xPos(p.d)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linejoin="round" opacity="${op}"/>`
+      : "";
+    // 虛線段（最後實點 → 今日預估點）
+    let dashedLine = "";
+    if (estPts.length && realPts.length) {
+      const seg = [realPts[realPts.length - 1], ...estPts];
+      dashedLine = `<polyline${seriesAttr} points="${seg.map((p) => `${xPos(p.d)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="4,3" stroke-linejoin="round" opacity="${op}"/>`;
+    }
+    const dots = realPts.map((p) => `<circle cx="${xPos(p.d)}" cy="${yPos(p.v)}" r="2.5" fill="${color}" opacity="${op}" data-tooltip="${p.d} ${p.v.toLocaleString()}"><title>${p.d} ${p.v.toLocaleString()}</title></circle>`).join("");
+    // 預估點：空心圈（外框色、底色填 bg），與實心點區別
+    const estDots = estPts.map((p) => `<circle cx="${xPos(p.d)}" cy="${yPos(p.v)}" r="3" fill="var(--bg)" stroke="${color}" stroke-width="1.5" opacity="${op}" data-tooltip="${p.d} ${p.v.toLocaleString()}（預估）"><title>${p.d} ${p.v.toLocaleString()}（預估）</title></circle>`).join("");
+    return polyline + dashedLine + dots + estDots;
   }).join("");
-  return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${svgLines}</svg></div>`;
+  return `<div class="shares-chart-container" style="position:relative"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${estZone}${xLabels}${svgLines}</svg></div>`;
 }
 
 function renderPerfRateTrendChart(cloudHistory, _quotes, marketKey) {
@@ -5121,6 +5147,17 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
       if (!perfDown && !rateStall) continue;
 
       const latestPos = positions.find((p) => p.snapshotId === lastSnapId && p.symbol === symbol);
+      // 今日預估損益率（依即時現價 × 最新快照均價，僅供顯示參考，不影響上榜/徽章/斜率）。
+      // 只在「今天尚無該市場快照」時才算（lastSnapDate < 今天）。
+      const lastSnapDate = dates[dates.length - 1];
+      const latestAvgCost = Number(latestPos?.avgCost) || 0;
+      let todayEstRate = null;
+      const liveQ = state.quotes[symbol];
+      const livePrice = typeof liveQ === "number" ? liveQ : (liveQ?.price ?? null);
+      if (livePrice > 0 && latestAvgCost > 0 && today() > lastSnapDate) {
+        const er = (livePrice - latestAvgCost) / latestAvgCost * 100;
+        if (Number.isFinite(er) && Math.abs(er) <= 500) todayEstRate = er;
+      }
       alerts.push({
         market, symbol,
         name: latestPos?.name || symbol,
@@ -5130,6 +5167,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
         heldDays: holdingDays(market, symbol),
         sparkPts: perfPts.length >= MIN_POINTS ? perfPts : ratePts,
         ratePts, ratePtsDated, // 整合趨勢圖用（損益率序列 + 日期化）
+        lastSnapDate, todayEstRate, // 今日預估（虛線/網底用）
         marketRateSlope, // 大盤對照基準（該市場平均損益率斜率）
         // 嚴重度分組：兩徽章 > 表現率↓ > 損益率停滯；組內看趨勢掉幅
         group: (perfDown && rateStall) ? 0 : (perfDown ? 1 : 2),
@@ -5185,6 +5223,10 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     ].join('');
     const curColor = a.curRate >= 0 ? 'var(--green)' : 'var(--red)';
     const rateMove = `${a.firstRate >= 0 ? '+' : ''}${a.firstRate.toFixed(1)}% → <strong style="color:${curColor}">${a.curRate >= 0 ? '+' : ''}${a.curRate.toFixed(1)}%</strong>`;
+    // 今日預估（依現價，非快照）：虛線底線樣式快速區別
+    const estChip = a.todayEstRate !== null
+      ? ` <span class="adjust-est" title="依今日現價預估，非快照資料">⇢ 今日 <strong style="color:${a.todayEstRate >= 0 ? 'var(--green)' : 'var(--red)'}">${a.todayEstRate >= 0 ? '+' : ''}${a.todayEstRate.toFixed(1)}%</strong></span>`
+      : '';
     const heldText = a.heldDays !== null ? `${a.heldDays} 天` : '—';
     return `
       <div class="adjust-alert-row" data-symbol-row="${escapeHtml(a.symbol)}" data-symbol-name="${escapeHtml(a.name)}" tabindex="0" style="cursor:pointer">
@@ -5195,7 +5237,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
         <div class="adjust-alert-meta">
           ${renderSparkline(a.sparkPts, a.perfDown)}
           <div class="adjust-alert-nums">
-            <span>損益率 ${rateMove}</span>
+            <span>損益率 ${rateMove}${estChip}</span>
             <span class="muted-text">持有 ${heldText}</span>
           </div>
         </div>
@@ -5243,15 +5285,25 @@ const ADJUST_TREND_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f
 function renderAdjustTrendChart(alerts) {
   const lines = alerts.filter((a) => a.ratePtsDated && a.ratePtsDated.length >= 2);
   if (!lines.length) return "";
-  const allDates = [...new Set(lines.flatMap((a) => a.ratePtsDated.map((p) => p.d)))].sort();
   // 聚焦的代號若已不在清單（篩選變動）則自動解除
   const focus = lines.some((a) => a.symbol === state.adjustTrendFocus) ? state.adjustTrendFocus : null;
-  const series = lines.map((a, idx) => ({
-    pts: a.ratePtsDated, // { d, v }，與 renderTimedSvg 相容
-    color: ADJUST_TREND_COLORS[idx % ADJUST_TREND_COLORS.length],
-    symbol: a.symbol,
-    key: a.symbol,
-  }));
+  const todayStr = today();
+  let hasEst = false;
+  const series = lines.map((a, idx) => {
+    let pts = a.ratePtsDated; // { d, v }，與 renderTimedSvg 相容
+    // 今日尚無快照 → 末端接一個「今日預估點」（est:true，畫成虛線 + 空心點）
+    if (a.todayEstRate !== null && todayStr > a.lastSnapDate) {
+      pts = [...a.ratePtsDated, { d: todayStr, v: Math.round(a.todayEstRate * 10) / 10, est: true }];
+      hasEst = true;
+    }
+    return {
+      pts,
+      color: ADJUST_TREND_COLORS[idx % ADJUST_TREND_COLORS.length],
+      symbol: a.symbol,
+      key: a.symbol,
+    };
+  });
+  const allDates = [...new Set(series.flatMap((s) => s.pts.map((p) => p.d)))].sort();
   // 圖例可點：點代號聚焦該線、其餘淡化；再點同一個取消聚焦
   const legend = series.map((s) => {
     const active = focus === s.symbol;
@@ -5259,7 +5311,8 @@ function renderAdjustTrendChart(alerts) {
     return `<span class="adjust-trend-legend-item${active ? " is-active" : ""}" data-adjust-trend-symbol="${escapeHtml(s.symbol)}" style="${style}"><span class="level-legend-dot" style="background:${s.color}"></span>${escapeHtml(s.symbol)}</span>`;
   }).join(" ");
   const hint = focus ? `<span class="muted-text" style="font-size:11px;margin-left:6px">（聚焦 ${escapeHtml(focus)}，點同一個取消）</span>` : "";
-  return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}${hint}</div>${renderTimedSvg(series, allDates, 600, 220, { focusKey: focus })}`;
+  const estHint = hasEst ? `<span class="muted-text" style="font-size:11px;margin-left:6px">（虛線／網底＝今日預估，依現價）</span>` : "";
+  return `<div class="level-chart-legend" style="margin-bottom:6px;flex-wrap:wrap">${legend}${hint}${estHint}</div>${renderTimedSvg(series, allDates, 600, 220, { focusKey: focus })}`;
 }
 
 // ── 個股損益貢獻橫向 bar chart ──────────────────────────────────────────────

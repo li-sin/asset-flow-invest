@@ -2699,6 +2699,13 @@ textarea {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* 今日預估（依現價，非快照）：虛線底線與快照數值區別 */
+.adjust-est {
+  margin-left: 4px;
+  padding-bottom: 1px;
+  border-bottom: 1px dashed var(--muted);
+  color: var(--muted);
+}
 @media (max-width: 540px) {
   .adjust-alert-row { gap: 8px; }
   .adjust-alert-meta { width: 100%; justify-content: space-between; }
