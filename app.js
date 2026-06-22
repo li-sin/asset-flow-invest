@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.5";
-const APP_VERSION_NOTE = "待關注調節改用價格報酬率當汰出訊號（趨勢轉弱/弱於組合），不受逐日加碼影響；損益率降為顯示用；sparkline/整合圖/今日預估同步改報酬率";
+const APP_VERSION = "v0.29.6";
+const APP_VERSION_NOTE = "待關注調節：點榜上股票即聚焦整合趨勢圖那條線（同點圖例，再點取消），列高亮";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5218,7 +5218,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
       : '';
     const heldText = a.heldDays !== null ? `${a.heldDays} 天` : '—';
     return `
-      <div class="adjust-alert-row" data-symbol-row="${escapeHtml(a.symbol)}" data-symbol-name="${escapeHtml(a.name)}" tabindex="0" style="cursor:pointer">
+      <div class="adjust-alert-row${state.adjustTrendFocus === a.symbol ? ' is-focused' : ''}" data-symbol-row="${escapeHtml(a.symbol)}" data-symbol-name="${escapeHtml(a.name)}" tabindex="0" style="cursor:pointer">
         <div class="adjust-alert-main">
           <div class="adjust-alert-title"><strong>${escapeHtml(a.symbol)}</strong> <span class="muted-text">${escapeHtml(a.name)}</span></div>
           <div class="adjust-badges">${badges}</div>
@@ -6607,6 +6607,12 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-symbol-row]").forEach((row) => {
     row.addEventListener("click", () => {
       const symbol = row.dataset.symbolRow;
+      // 待關注調節清單：點列＝聚焦整合趨勢圖那條線（同點圖例），再點同一檔取消
+      if (row.classList.contains("adjust-alert-row")) {
+        state.adjustTrendFocus = state.adjustTrendFocus === symbol ? null : symbol;
+        renderCloudSnapshot();
+        return;
+      }
       const name = row.dataset.symbolName || symbol;
       const display = els.cloudSnapshot.querySelector("#symbol-chart-display");
       const content = els.cloudSnapshot.querySelector("#symbol-chart-content");

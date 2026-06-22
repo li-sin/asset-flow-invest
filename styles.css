@@ -2600,6 +2600,12 @@ textarea {
   background: var(--card-2, rgba(127, 127, 127, 0.04));
 }
 .adjust-alert-row:hover { background: rgba(127, 127, 127, 0.08); }
+/* 點選後聚焦整合趨勢圖那條線：列高亮，表示「圖上正在看這檔」 */
+.adjust-alert-row.is-focused {
+  border-left-width: 5px;
+  background: rgba(59, 130, 246, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
 .adjust-alert-main {
   display: flex;
   flex-direction: column;
