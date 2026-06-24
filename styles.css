@@ -1036,6 +1036,23 @@ textarea {
   white-space: nowrap;
 }
 
+/* 編輯模式輸入框收窄，避免 10 欄表格撐爆卡片把右側「修改/設定」鈕切掉 */
+.compact-table .parsed-table .cell-input {
+  width: 76px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.compact-table .parsed-table .edit-symbol-input,
+.compact-table .parsed-table .add-symbol-input,
+.compact-table .parsed-table .edit-name-input,
+.compact-table .parsed-table .add-name-input {
+  width: 92px;
+}
+.compact-table .parsed-table .add-position-hint {
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 .snapshot-admin-card {
   display: grid;
   gap: 12px;

@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.8";
-const APP_VERSION_NOTE = "待關注趨勢圖：聚焦某檔後，點圖外空白處即解除聚焦（document 監聽只綁一次）";
+const APP_VERSION = "v0.29.9";
+const APP_VERSION_NOTE = "庫存編輯模式可改代號(自動帶名)、末列＋新增庫存；編輯框收窄避免右欄被切掉";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -445,17 +445,39 @@ async function cleanupZeroPositions() {
   }
 }
 
-async function savePositionEdits(market, symbol, shares, avgCost) {
-  if (!state.auth.authorized) { alert("請先登入"); return; }
-  // 使用 B tab 當前選擇的日期（selectedSnapshotDate），不寫死最新快照
+// 依市場標準化代號（台股補 00 前綴；美股轉大寫）
+function normalizeSymbolForMarket(market, symbol) {
+  const s = String(symbol || "").trim();
+  if (!s) return s;
+  return normalizeMarketKey(market) === "US" ? s.toUpperCase() : normalizeTWSymbol(s);
+}
+
+// 取得目前所選日期（B tab）對應市場的快照
+function snapshotForSelectedDate(market) {
   const mktSnaps = (state.cloudHistory?.snapshots || [])
     .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(market))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const selectedDate = state.selectedSnapshotDate;
-  const latestSnap = selectedDate
+  return selectedDate
     ? (mktSnaps.find((s) => s.date === selectedDate) || mktSnaps[0])
     : mktSnaps[0];
+}
+
+async function savePositionEdits(market, symbol, shares, avgCost, newSymbolRaw, newNameRaw) {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  // 使用 B tab 當前選擇的日期（selectedSnapshotDate），不寫死最新快照
+  const latestSnap = snapshotForSelectedDate(market);
   if (!latestSnap) { alert("找不到對應快照"); return; }
+  // 代號變更（僅套用目前所選快照）
+  const newSymbol = newSymbolRaw != null ? normalizeSymbolForMarket(market, newSymbolRaw) : symbol;
+  const symbolChanged = !!newSymbol && newSymbol !== symbol;
+  if (symbolChanged) {
+    const dupInSnap = (state.cloudHistory.positions || []).some(
+      (p) => p.snapshotId === latestSnap.snapshotId && p.symbol === newSymbol
+    );
+    if (dupInSnap) { alert(`此快照已有 ${newSymbol}，請改為編輯該列`); return; }
+  }
+  const newName = newNameRaw != null ? String(newNameRaw).trim() : null;
   try {
     await ensureCloudSheetTables();
     const values = await readSheetValues(SHEET_NAMES.positions, "A:J");
@@ -463,22 +485,73 @@ async function savePositionEdits(market, symbol, shares, avgCost) {
       .map((row, i) => ({ row, sheetRow: i + 1 }))
       .filter(({ row }) => row[0] === latestSnap.snapshotId && row[3] === symbol);
     if (!matchingRows.length) { alert(`找不到 ${symbol} 的列`); return; }
-    for (const { sheetRow } of matchingRows) {
-      await sheetsFetch(
-        `/values/${sheetRange(SHEET_NAMES.positions, `G${sheetRow}:H${sheetRow}`)}?valueInputOption=RAW`,
-        { method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[shares, avgCost]] }) }
-      );
+    const batchData = [];
+    for (const { row, sheetRow } of matchingRows) {
+      batchData.push({ range: `${SHEET_NAMES.positions}!G${sheetRow}:H${sheetRow}`, values: [[shares, avgCost]] });
+      if (symbolChanged || newName != null) {
+        const finalName = newName != null ? newName : String(row[4] || "");
+        batchData.push({ range: `${SHEET_NAMES.positions}!D${sheetRow}:E${sheetRow}`, values: [[symbolChanged ? newSymbol : symbol, finalName]] });
+      }
     }
+    await sheetsFetch("/values:batchUpdate", {
+      method: "POST",
+      body: JSON.stringify({ valueInputOption: "RAW", data: batchData }),
+    });
     state.cloudHistory.positions = (state.cloudHistory.positions || []).map((p) =>
       p.snapshotId === latestSnap.snapshotId && p.symbol === symbol
-        ? { ...p, shares, avgCost }
+        ? { ...p, shares, avgCost, ...(symbolChanged ? { symbol: newSymbol } : {}), ...(newName != null ? { name: newName } : {}) }
         : p
     );
-    await recalcLayoutAfterPositionEdit(market, symbol, latestSnap.snapshotId, shares);
+    // 代號變更：搬移首次布局日 key（市場_代號）
+    if (symbolChanged) {
+      const oldKey = `${market}_${symbol}`;
+      const fbVal = state.firstBuyDates[oldKey];
+      if (fbVal) {
+        state.firstBuyDates[`${market}_${newSymbol}`] = fbVal;
+        delete state.firstBuyDates[oldKey];
+        localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(state.firstBuyDates));
+        await writeFirstBuyDatesToSheet().catch(() => {});
+      }
+    }
+    await recalcLayoutAfterPositionEdit(market, symbolChanged ? newSymbol : symbol, latestSnap.snapshotId, shares);
+    if (symbolChanged) fetchQuotes([newSymbol]);
     renderCloudSnapshot();
   } catch (err) {
     console.error(err);
     alert(err.message || "儲存失敗");
+  }
+}
+
+// 編輯模式：新增一筆庫存到目前所選快照
+async function addPositionToSnapshot(market, symbolRaw, nameRaw, shares, avgCost) {
+  if (!state.auth.authorized) { alert("請先登入"); return; }
+  const symbol = normalizeSymbolForMarket(market, symbolRaw);
+  if (!symbol) { alert("請輸入代號"); return; }
+  const snap = snapshotForSelectedDate(market);
+  if (!snap) { alert("找不到對應快照，請先建立庫存快照"); return; }
+  const dup = (state.cloudHistory.positions || []).some(
+    (p) => p.snapshotId === snap.snapshotId && p.symbol === symbol
+  );
+  if (dup) { alert(`此快照已有 ${symbol}，請改為編輯該列`); return; }
+  const name = String(nameRaw || "").trim() || resolveSymbolName(symbol);
+  const date = snap.date || today();
+  const mktKey = normalizeMarketKey(market);
+  const createdAt = new Date().toISOString();
+  try {
+    await ensureCloudSheetTables();
+    // 欄位順序須對齊 buildSnapshotPayloadFromRows
+    const rowArr = [snap.snapshotId, date, mktKey, symbol, name, "", shares ?? "", avgCost ?? "", "manual", createdAt];
+    await appendSheetValues(SHEET_NAMES.positions, "A:J", [rowArr]);
+    state.cloudHistory.positions = [
+      ...(state.cloudHistory.positions || []),
+      { snapshotId: snap.snapshotId, date, market: mktKey, symbol, name, kind: "", shares: Number(shares || 0), avgCost: Number(avgCost || 0), source: "manual", createdAt },
+    ];
+    await recalcLayoutAfterPositionEdit(market, symbol, snap.snapshotId, Number(shares || 0));
+    fetchQuotes([symbol]);
+    renderCloudSnapshot();
+  } catch (err) {
+    console.error(err);
+    alert(err.message || "新增失敗");
   }
 }
 
@@ -5953,6 +6026,12 @@ function renderCloudSnapshot() {
         ? `<span style="color:${gainColor};font-variant-numeric:tabular-nums">${dailyGain >= 0 ? '+' : ''}${formatNumber(Math.round(dailyGain))}</span>`
         : "<span class=\"muted-text\">—</span>";
       const editMode = !!state.detailEditMode[item.market];
+      const symbolCell = editMode
+        ? `<input class="cell-input edit-symbol-input" type="text" value="${escapeHtml(row.symbol)}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
+        : escapeHtml(row.symbol);
+      const nameCell = editMode
+        ? `<input class="cell-input edit-name-input" type="text" value="${escapeHtml(row.name)}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
+        : escapeHtml(row.name);
       const sharesCell = editMode
         ? `<input class="cell-input edit-shares-input" type="number" step="0.001" value="${row.shares || 0}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
         : escapeHtml(displayValue(row.shares));
@@ -5967,8 +6046,8 @@ function renderCloudSnapshot() {
         : holdDaysDisplay;
       return `
         <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0"${editMode ? '' : ' style="cursor:pointer"'}>
-          <td data-label="代號">${escapeHtml(row.symbol)}</td>
-          <td data-label="名稱">${escapeHtml(row.name)}</td>
+          <td data-label="代號">${symbolCell}</td>
+          <td data-label="名稱">${nameCell}</td>
           <td data-label="股數">${sharesCell}</td>
           <td data-label="均價">${avgCostCell}</td>
           <td data-label="現價">${priceCell}</td>
@@ -5980,6 +6059,17 @@ function renderCloudSnapshot() {
         </tr>
       `;
     }).join("");
+    const sectionEditMode = !!state.detailEditMode[item.market];
+    const addRowHtml = sectionEditMode
+      ? `<tr class="add-position-row">
+          <td data-label="代號"><input class="cell-input add-symbol-input" type="text" placeholder="代號" data-market="${escapeHtml(item.market)}"></td>
+          <td data-label="名稱"><input class="cell-input add-name-input" type="text" placeholder="自動帶出" data-market="${escapeHtml(item.market)}"></td>
+          <td data-label="股數"><input class="cell-input add-shares-input" type="number" step="0.001" placeholder="股數" data-market="${escapeHtml(item.market)}"></td>
+          <td data-label="均價"><input class="cell-input add-avgcost-input" type="number" step="0.001" placeholder="均價" data-market="${escapeHtml(item.market)}"></td>
+          <td colspan="5" class="add-position-hint"><span class="muted-text">輸入代號→名稱自動帶出</span></td>
+          <td><button class="button compact primary add-position-btn" data-market="${escapeHtml(item.market)}" title="新增此庫存到目前快照">＋ 新增</button></td>
+        </tr>`
+      : "";
     const quoteLoading = Object.keys(state.quotes).length === 0
       ? "<p class=\"muted-text quote-loading\">正在載入現價…</p>" : "";
     return `
@@ -6013,7 +6103,7 @@ function renderCloudSnapshot() {
                 <th class="sortable-th" data-sort-key="firstBuy">持有天數${sortArrow("firstBuy")}</th>
               </tr>
             </thead>
-            <tbody>${rows || "<tr><td colspan=\"10\">沒有庫存</td></tr>"}</tbody>
+            <tbody>${(rows || "<tr><td colspan=\"10\">沒有庫存</td></tr>") + addRowHtml}</tbody>
           </table>
         </div>
       </section>
@@ -6726,7 +6816,17 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  // edit mode 每行儲存按鈕（股數 + 均價）
+  // edit mode：改代號時自動帶出名稱
+  els.cloudSnapshot.querySelectorAll(".edit-symbol-input").forEach((input) => {
+    input.addEventListener("change", () => {
+      const tr = input.closest("tr");
+      const nameInput = tr?.querySelector(".edit-name-input");
+      if (!nameInput) return;
+      const resolved = resolveSymbolName(input.value);
+      if (resolved) nameInput.value = resolved;
+    });
+  });
+  // edit mode 每行儲存按鈕（代號 + 名稱 + 股數 + 均價）
   els.cloudSnapshot.querySelectorAll(".edit-row-save-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -6734,11 +6834,41 @@ function renderCloudSnapshot() {
       const tr = btn.closest("tr");
       const shares = Number(tr?.querySelector(".edit-shares-input")?.value) || 0;
       const avgCost = Number(tr?.querySelector(".edit-avgcost-input")?.value) || 0;
+      const newSymbol = tr?.querySelector(".edit-symbol-input")?.value;
+      const newName = tr?.querySelector(".edit-name-input")?.value;
       btn.disabled = true;
       btn.textContent = "儲存中…";
-      await savePositionEdits(market, symbol, shares, avgCost);
+      await savePositionEdits(market, symbol, shares, avgCost, newSymbol, newName);
       btn.disabled = false;
       btn.textContent = "儲存";
+    });
+  });
+  // edit mode：新增列代號自動帶出名稱
+  els.cloudSnapshot.querySelectorAll(".add-symbol-input").forEach((input) => {
+    input.addEventListener("change", () => {
+      const tr = input.closest("tr");
+      const nameInput = tr?.querySelector(".add-name-input");
+      if (!nameInput) return;
+      const resolved = resolveSymbolName(input.value);
+      if (resolved) nameInput.value = resolved;
+    });
+  });
+  // edit mode：新增庫存到目前快照
+  els.cloudSnapshot.querySelectorAll(".add-position-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const market = btn.dataset.market;
+      const tr = btn.closest("tr");
+      const symbol = tr?.querySelector(".add-symbol-input")?.value;
+      const name = tr?.querySelector(".add-name-input")?.value;
+      const shares = Number(tr?.querySelector(".add-shares-input")?.value) || 0;
+      const avgCost = Number(tr?.querySelector(".add-avgcost-input")?.value) || 0;
+      if (!String(symbol || "").trim()) { alert("請輸入代號"); return; }
+      btn.disabled = true;
+      btn.textContent = "新增中…";
+      await addPositionToSnapshot(market, symbol, name, shares, avgCost);
+      btn.disabled = false;
+      btn.textContent = "＋ 新增";
     });
   });
   // C tab 已儲存截圖列表
