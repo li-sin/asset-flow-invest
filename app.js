@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.1";
-const APP_VERSION_NOTE = "手動輸入改逐欄表格（代號自動帶名、＋加列、滑動刪列、當天無快照可從零建）；含美股 Firstrade 貼上解析＋均價待補提醒";
+const APP_VERSION = "v0.31.2";
+const APP_VERSION_NOTE = "手動輸入逐欄表格自動帶入最新庫存代號（只填股數/均價）、＋加列、滑動刪列、重新帶入/清空；含 Firstrade 貼上＋均價待補";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4010,6 +4010,28 @@ async function saveManualSnapshot() {
   await savePasteSnapshot();
   state.manualRows = [{ symbol: "", name: "", shares: "", avgCost: "" }];
 }
+// 手動 mode 預填：帶入該市場最新快照的所有持倉（代號+名稱），股數/均價留空供填寫
+function prefillManualFromLatest(market) {
+  const mkt = normalizeMarketKey(market) || "TW";
+  const snaps = (state.cloudHistory.snapshots || [])
+    .filter((s) => normalizeMarketKey(s.market) === mkt)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const latest = snaps[0];
+  const rows = latest
+    ? (state.cloudHistory.positions || [])
+        .filter((p) => p.snapshotId === latest.snapshotId && Number(p.shares || 0) > 0)
+        .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }))
+        .map((p) => ({ symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol), shares: "", avgCost: "" }))
+    : [];
+  rows.push({ symbol: "", name: "", shares: "", avgCost: "" }); // 末尾空列供新增
+  state.manualRows = rows;
+}
+function isManualRowsEmpty() {
+  return state.manualRows.length === 1
+    && !String(state.manualRows[0].symbol || "").trim()
+    && !String(state.manualRows[0].shares || "").trim()
+    && !String(state.manualRows[0].avgCost || "").trim();
+}
 
 function parsePasteTable(text) {
   // 貼上模式同樣依選定市場限制代號辨識（共用符號比對函式）
@@ -6672,7 +6694,7 @@ function renderCloudSnapshot() {
         </div>
       </div>
       ${state.captureMode === "manual" ? `
-        <p class="muted-text">逐欄輸入持倉（像庫存表格，一格一格打）；代號輸入後自動帶名稱。已全賣出的股票可<strong>左滑該列刪除</strong>。選市場/日期後存快照，當天還沒快照也能從零建。</p>
+        <p class="muted-text">已自動帶入最新快照的庫存代號，對照券商<strong>填股數和均價</strong>即可；代號輸入會自動帶名稱。已全賣出的股票<strong>左滑該列刪除</strong>，新買的按「＋新增一列」。選市場/日期後存快照。</p>
         <div class="manual-table-head"><span>代號</span><span>名稱</span><span>股數</span><span>均價</span></div>
         <div class="manual-rows">
           ${state.manualRows.map((r, i) => `
@@ -6686,7 +6708,11 @@ function renderCloudSnapshot() {
               </div>
             </div>`).join("")}
         </div>
-        <button id="manual-add-row" class="button compact secondary" type="button" style="margin-top:8px">＋ 新增一列</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button id="manual-add-row" class="button compact secondary" type="button">＋ 新增一列</button>
+          <button id="manual-prefill" class="button compact ghost" type="button">重新帶入最新庫存</button>
+          <button id="manual-clear" class="button compact ghost" type="button">清空</button>
+        </div>
         <div class="paste-meta-row" style="margin-top:10px">
           <label>市場
             <select id="manual-market" class="cell-input">
@@ -6772,6 +6798,7 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-capture-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.captureMode = btn.dataset.captureMode;
+      if (state.captureMode === "manual" && isManualRowsEmpty()) prefillManualFromLatest(state.pasteMeta.market);
       renderCloudSnapshot();
     });
   });
@@ -6816,6 +6843,14 @@ function renderCloudSnapshot() {
     state.manualRows.push({ symbol: "", name: "", shares: "", avgCost: "" });
     renderCloudSnapshot();
   });
+  els.cloudSnapshot.querySelector("#manual-prefill")?.addEventListener("click", () => {
+    prefillManualFromLatest(state.pasteMeta.market);
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelector("#manual-clear")?.addEventListener("click", () => {
+    state.manualRows = [{ symbol: "", name: "", shares: "", avgCost: "" }];
+    renderCloudSnapshot();
+  });
   els.cloudSnapshot.querySelectorAll("[data-manual-delete]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.manualRows.splice(+btn.dataset.manualDelete, 1);
@@ -6823,7 +6858,11 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  els.cloudSnapshot.querySelector("#manual-market")?.addEventListener("change", (e) => { state.pasteMeta.market = e.target.value; });
+  els.cloudSnapshot.querySelector("#manual-market")?.addEventListener("change", (e) => {
+    state.pasteMeta.market = e.target.value;
+    prefillManualFromLatest(state.pasteMeta.market);
+    renderCloudSnapshot();
+  });
   els.cloudSnapshot.querySelector("#manual-date")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; });
   els.cloudSnapshot.querySelector("#manual-save")?.addEventListener("click", saveManualSnapshot);
   els.cloudSnapshot.querySelectorAll("[data-ark-copy]").forEach((btn) => {
