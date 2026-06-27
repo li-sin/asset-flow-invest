@@ -3,7 +3,7 @@ const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
 const APP_VERSION = "v0.31.0";
-const APP_VERSION_NOTE = "美股 Firstrade 持倉貼上解析（跳統計行/碎股/單位成本=均價）＋均價待補提醒（成本0偵測，首頁 banner＋庫存補填）";
+const APP_VERSION_NOTE = "美股 Firstrade 持倉貼上解析＋均價待補提醒（成本0偵測）＋手動輸入 mode（每行代號股數均價，手機友善、當天無快照可從零建）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3978,6 +3978,22 @@ async function handleBrokerFile(file) {
   }
 }
 
+// 手動輸入：每行「代號 股數 均價」（空白/逗號分隔），手機友善（不需 Tab 表格）
+function parseManualRows(text) {
+  const lines = String(text || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows = [];
+  for (const line of lines) {
+    const parts = line.split(/[\s,]+/).filter(Boolean);
+    if (parts.length < 2) continue;
+    const symbol = parts[0].replace(/\*+$/, "").toUpperCase();
+    const shares = parseFloat((parts[1] || "").replace(/,/g, "")) || 0;
+    const avgCost = parseFloat((parts[2] || "").replace(/[,$]/g, "")) || 0;
+    if (!symbol || shares <= 0) continue;
+    rows.push({ symbol, name: resolveSymbolName(symbol), shares, avgCost });
+  }
+  return rows.length ? rows : null;
+}
+
 function parsePasteTable(text) {
   // 貼上模式同樣依選定市場限制代號辨識（共用符號比對函式）
   setParseMarketHint(state.pasteMeta?.market);
@@ -6635,9 +6651,15 @@ function renderCloudSnapshot() {
           <button class="capture-mode-btn${state.captureMode === "broker" ? " is-active" : ""}" data-capture-mode="broker" type="button">券商檔</button>
           <button class="capture-mode-btn${state.captureMode === "ocr" ? " is-active" : ""}" data-capture-mode="ocr" type="button">截圖 OCR</button>
           <button class="capture-mode-btn${state.captureMode === "paste" ? " is-active" : ""}" data-capture-mode="paste" type="button">貼上表格</button>
+          <button class="capture-mode-btn${state.captureMode === "manual" ? " is-active" : ""}" data-capture-mode="manual" type="button">手動</button>
         </div>
       </div>
-      ${state.captureMode === "broker" ? `
+      ${state.captureMode === "manual" ? `
+        <p class="muted-text">手機快速手動輸入：每行一支「代號 股數 均價」（空白分隔，均價可先省略、之後用待補提醒補）。選市場/日期後存快照。當天還沒快照也能從零建。</p>
+        <textarea id="manual-input" class="paste-table-textarea" placeholder="2330 5 1085　（每行一支，例如）" rows="6"></textarea>
+        <button id="parse-manual-btn" class="button primary" type="button" style="margin-top:8px">解析</button>
+        ${pastePreviewHtml}
+      ` : state.captureMode === "broker" ? `
         <p class="muted-text">上傳永豐網頁版匯出的「庫存」xlsx（自動解析代號、今餘股數、成本均價），選市場/日期後存成快照。台股用此檔；美股複委託改用「貼上表格」貼 Firstrade 持倉。</p>
         <input type="file" id="broker-file-input" accept=".xlsx,.xls" class="broker-file-input">
         ${pastePreviewHtml}
@@ -6732,6 +6754,14 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelector("#broker-file-input")?.addEventListener("change", (e) => {
     const f = e.target.files?.[0];
     if (f) handleBrokerFile(f);
+  });
+  els.cloudSnapshot.querySelector("#parse-manual-btn")?.addEventListener("click", () => {
+    const text = els.cloudSnapshot.querySelector("#manual-input")?.value || "";
+    const rows = parseManualRows(text);
+    if (!rows) { alert("無法解析。每行請輸入「代號 股數 均價」，例：2330 5 1085"); return; }
+    state.pasteParsed = { headers: ["代號", "名稱", "股數", "均成本"], rows, colMap: null, source: "manual", _debug: `手動輸入 ${rows.length} 筆` };
+    if (!state.pasteMeta.date) state.pasteMeta.date = today();
+    renderCloudSnapshot();
   });
   els.cloudSnapshot.querySelectorAll("[data-ark-copy]").forEach((btn) => {
     btn.addEventListener("click", () => handleArkCopy(btn, btn.dataset.arkCopy));
