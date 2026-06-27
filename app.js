@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.29.9";
-const APP_VERSION_NOTE = "庫存編輯模式可改代號(自動帶名)、末列＋新增庫存；編輯框收窄避免右欄被切掉";
+const APP_VERSION = "v0.30.0";
+const APP_VERSION_NOTE = "新增「方舟回填助手」tab（兩段式複製回方舟、只列有變動、自動跳下一支、手機可接續、資料日期標示）＋「券商檔」上傳永豐庫存 xlsx 自動匯入（自架 fflate 解析）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -82,6 +82,9 @@ const state = {
     positions: [],
   },
   dashboardTab: "home",
+  arkRefill: loadArkRefillState(),
+  holdingsSubTab: "detail", // 庫存 tab 子分頁：detail/refill/delete
+  homeSubTab: "overview", // 首頁子分頁：overview/alerts/analysis
   levelChartRange: "1M",
   levelChartMarket: "TW",
   adjustSort: "severity", // 待關注調節清單排序：severity/perfDrop/relWeak/held/curRate
@@ -3887,6 +3890,94 @@ function parseColumnArk(text) {
   });
 }
 
+// ===== 券商 xlsx 解析（v0.30.0，自架 fflate，不依賴外部 CDN）=====
+function colLettersToIndex(s) {
+  let n = 0;
+  for (const ch of String(s).toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1; // A→0
+}
+// 讀 xlsx：fflate 解壓 → 解析第一張 sheet + sharedStrings，回傳 2D 陣列（用 cell r 座標定位，正確處理稀疏空格）
+function readXlsxRows(arrayBuffer) {
+  if (typeof fflate === "undefined") throw new Error("xlsx 解析元件（fflate）未載入");
+  const files = fflate.unzipSync(new Uint8Array(arrayBuffer));
+  const dec = new TextDecoder("utf-8");
+  // sharedStrings
+  const sst = [];
+  if (files["xl/sharedStrings.xml"]) {
+    const doc = new DOMParser().parseFromString(dec.decode(files["xl/sharedStrings.xml"]), "application/xml");
+    for (const si of doc.getElementsByTagName("si")) {
+      let s = "";
+      for (const t of si.getElementsByTagName("t")) s += t.textContent;
+      sst.push(s);
+    }
+  }
+  const sheetKey = Object.keys(files).filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(k)).sort()[0];
+  if (!sheetKey) throw new Error("xlsx 找不到工作表");
+  const sheetDoc = new DOMParser().parseFromString(dec.decode(files[sheetKey]), "application/xml");
+  const out = [];
+  for (const row of sheetDoc.getElementsByTagName("row")) {
+    const byCol = {};
+    let maxCol = -1;
+    for (const c of row.getElementsByTagName("c")) {
+      const ref = c.getAttribute("r") || "";
+      const colIdx = colLettersToIndex((ref.match(/[A-Z]+/) || ["A"])[0]);
+      const t = c.getAttribute("t");
+      const vEl = c.getElementsByTagName("v")[0];
+      let val = "";
+      if (t === "s") val = vEl ? (sst[parseInt(vEl.textContent, 10)] || "") : "";
+      else if (t === "inlineStr") { const tEl = c.getElementsByTagName("t")[0]; val = tEl ? tEl.textContent : ""; }
+      else val = vEl ? vEl.textContent : "";
+      byCol[colIdx] = String(val).trim();
+      if (colIdx > maxCol) maxCol = colIdx;
+    }
+    const arr = [];
+    for (let i = 0; i <= maxCol; i++) arr.push(byCol[i] || "");
+    out.push(arr);
+  }
+  return out;
+}
+// 解析永豐網頁版「庫存」xlsx → [{symbol, name, shares, avgCost}]
+function parseSinopacHoldings(arrayBuffer) {
+  const rows = readXlsxRows(arrayBuffer);
+  if (!rows.length) return null;
+  let headerIdx = rows.findIndex((r) => r.includes("商品") && r.some((c) => /今餘|庫存|股數/.test(c)) && r.some((c) => /成本/.test(c)));
+  if (headerIdx < 0) headerIdx = 0;
+  const header = rows[headerIdx];
+  const productCol = header.findIndex((h) => /商品|代號|股票/.test(h));
+  const sharesCol = header.findIndex((h) => /今餘|庫存|股數|持股/.test(h));
+  const costCol = header.findIndex((h) => /^成本$|均價|成交均價/.test(h)); // 精確「成本」，避開「付出成本」
+  if (productCol < 0 || sharesCol < 0 || costCol < 0) {
+    throw new Error(`欄位對應失敗（商品=${productCol} 股數=${sharesCol} 成本=${costCol}），請確認是永豐庫存匯出檔。`);
+  }
+  const out = [];
+  for (let i = headerIdx + 1; i < rows.length; i += 1) {
+    const r = rows[i];
+    const product = (r[productCol] || "").trim();
+    if (!product || /合計|小計/.test(product) || /合計|小計/.test(r[0] || "")) continue;
+    const m = product.match(/^(\S+)\s+(.*)$/);
+    const symbol = (m ? m[1] : product).replace(/\*+$/, "").toUpperCase();
+    const name = (m ? m[2].trim() : "").replace(/\*+$/, "").trim();
+    const shares = parseFloat(String(r[sharesCol] || "").replace(/,/g, "")) || 0;
+    const avgCost = parseFloat(String(r[costCol] || "").replace(/,/g, "")) || 0;
+    if (!symbol || shares <= 0) continue;
+    out.push({ symbol, name, shares, avgCost });
+  }
+  return out.length ? out : null;
+}
+async function handleBrokerFile(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const rows = parseSinopacHoldings(buf);
+    if (!rows || !rows.length) { alert("解析不到持倉資料，請確認是永豐網頁版匯出的「庫存」xlsx。"); return; }
+    state.pasteParsed = { headers: ["代號", "名稱", "股數", "均成本"], rows, colMap: null, source: "broker", _debug: `永豐 xlsx 解析 ${rows.length} 筆` };
+    if (!state.pasteMeta.date) state.pasteMeta.date = today();
+    renderCloudSnapshot();
+  } catch (err) {
+    console.error(err);
+    alert("xlsx 解析失敗：" + (err.message || err));
+  }
+}
+
 function parsePasteTable(text) {
   // 貼上模式同樣依選定市場限制代號辨識（共用符號比對函式）
   setParseMarketHint(state.pasteMeta?.market);
@@ -4033,11 +4124,13 @@ function renderSnapshotDeleteOptions(selectedDate = "") {
   `;
 }
 
-function renderCloudSnapshotSwipeList() {
-  const rows = [...(state.cloudHistory.snapshots || [])]
+function renderCloudSnapshotSwipeList(filterDate) {
+  let snaps = [...(state.cloudHistory.snapshots || [])];
+  if (filterDate) snaps = snaps.filter((s) => s.date === filterDate);
+  const rows = snaps
     .sort((a, b) => snapshotSortValue(b).localeCompare(snapshotSortValue(a)))
     .map(snapshotMetrics);
-  if (!rows.length) return "<p class=\"muted-text\">目前沒有雲端快照。</p>";
+  if (!rows.length) return filterDate ? "<p class=\"muted-text\">這天沒有快照。</p>" : "<p class=\"muted-text\">目前沒有雲端快照。</p>";
   const editingId = state.editingDateSnapshotId;
   return `
     <div class="snapshot-swipe-list">
@@ -5777,6 +5870,143 @@ function renderBatchFirstBuyPanel(market, rows) {
   `;
 }
 
+// ===== 方舟回填助手（v0.30.0）：把目前持倉的股數/均價兩段式複製回方舟 App =====
+function loadArkRefillState() {
+  try {
+    const s = JSON.parse(localStorage.getItem("afi_ark_refill_state_v1") || "{}");
+    return {
+      phase: s && typeof s.phase === "object" && s.phase ? s.phase : {},
+      order: s && s.order === "avgcost-first" ? "avgcost-first" : "shares-first",
+      showAll: !!(s && s.showAll),
+    };
+  } catch (_) {
+    return { phase: {}, order: "shares-first", showAll: false };
+  }
+}
+function saveArkRefillState() {
+  try { localStorage.setItem("afi_ark_refill_state_v1", JSON.stringify(state.arkRefill)); } catch (_) {}
+}
+function loadArkRefillLast() {
+  try { return JSON.parse(localStorage.getItem("afi_ark_refill_last_v1") || "{}") || {}; } catch (_) { return {}; }
+}
+function saveArkRefillLast(map) {
+  try { localStorage.setItem("afi_ark_refill_last_v1", JSON.stringify(map)); } catch (_) {}
+}
+function arkRefillKey(market, symbol) {
+  return `${normalizeMarketKey(market)}_${String(symbol || "").toUpperCase().trim()}`;
+}
+// 是否「跟上次回填值有變動」（或從未回填過 → 視為待回填）
+function arkRefillChanged(market, symbol, shares, avgCost) {
+  const last = loadArkRefillLast()[arkRefillKey(market, symbol)];
+  if (!last) return true;
+  return Number(last.shares) !== Number(shares) || Number(last.avgCost) !== Number(avgCost);
+}
+// 複製到方舟的純數值字串（無千分位、保留小數；美股碎股可能是小數）
+function arkRefillValue(v) {
+  const n = Number(v || 0);
+  return Number.isFinite(n) ? String(n) : "0";
+}
+function renderArkRefill(marketSummaries, dataDate) {
+  const refill = state.arkRefill;
+  const firstLabel = refill.order === "avgcost-first" ? "均價" : "股數";
+  const secondLabel = refill.order === "avgcost-first" ? "股數" : "均價";
+  let totalShown = 0;
+  const sections = ["TW", "US"].map((market) => {
+    const summary = (marketSummaries || []).find((s) => s.market === market);
+    const allRows = (summary?.rows || []).filter((r) => Number(r.shares || 0) > 0);
+    if (!allRows.length) return "";
+    const shown = allRows.filter((r) => {
+      const key = arkRefillKey(market, r.symbol);
+      if (refill.phase[key] === "done") return true; // 剛完成的留著顯示 ✓
+      return refill.showAll || arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
+    }).sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
+    if (!shown.length) {
+      return `<div class="ark-refill-market"><h4 class="market-section-heading">${marketLabel(market)}</h4><p class="muted-text">沒有需要回填的變動 ✓</p></div>`;
+    }
+    totalShown += shown.length;
+    const items = shown.map((r) => {
+      const key = arkRefillKey(market, r.symbol);
+      const phase = refill.phase[key] || "idle";
+      const pending = Number(r.avgCost || 0) <= 0;
+      const name = escapeHtml(r.name || resolveSymbolName(r.symbol) || "");
+      const sym = escapeHtml(r.symbol);
+      const dataAttrs = `data-ark-key="${escapeHtml(key)}" data-ark-shares="${escapeHtml(arkRefillValue(r.shares))}" data-ark-avg="${escapeHtml(arkRefillValue(r.avgCost))}"`;
+      let action;
+      if (pending) {
+        action = `<span class="ark-refill-pending">⚠️ 均價待補，補上後才能回填</span>`;
+      } else if (phase === "done") {
+        action = `<span class="ark-refill-done">✓ 已回填</span><button class="button compact ghost ark-refill-btn" data-ark-redo ${dataAttrs}>重做</button>`;
+      } else if (phase === "mid") {
+        action = `<span class="ark-refill-hint">已複製${firstLabel} ✓ 去方舟貼上</span><button class="button compact primary ark-refill-btn" data-ark-copy="second" ${dataAttrs}>② 複製${secondLabel}</button>`;
+      } else {
+        action = `<button class="button compact primary ark-refill-btn" data-ark-copy="first" ${dataAttrs}>① 複製${firstLabel}</button>`;
+      }
+      return `
+        <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}" data-ark-item="${escapeHtml(key)}">
+          <div class="ark-refill-id"><strong>${sym}</strong> <span class="muted-text">${name}</span></div>
+          <div class="ark-refill-vals"><span>股數 <b>${formatNumber(r.shares, 4)}</b></span><span>均價 <b>${formatNumber(r.avgCost, 4)}</b></span></div>
+          <div class="ark-refill-action">${action}</div>
+        </div>`;
+    }).join("");
+    return `<div class="ark-refill-market"><h4 class="market-section-heading">${marketLabel(market)}</h4>${items}</div>`;
+  }).join("");
+  return `
+    <section class="dashboard-card ark-refill-card">
+      <div class="ark-refill-header">
+        <h3>方舟回填助手</h3>
+        ${dataDate ? `<span class="ark-refill-date">${escapeHtml(dataDate)} 庫存</span>` : `<span class="ark-refill-date is-empty">尚無資料</span>`}
+        <div class="ark-refill-controls">
+          <button class="ark-ctrl-btn${refill.showAll ? " is-on" : ""}" data-ark-toggle-showall>${refill.showAll ? "顯示全部" : "只顯示變動"}</button>
+          <button class="ark-ctrl-btn" data-ark-toggle-order title="切換先複製股數或均價">順序：${firstLabel} → ${secondLabel} ⇄</button>
+          <button class="ark-ctrl-btn" data-ark-reset title="清除回填進度（已回填標記）">清除進度</button>
+        </div>
+      </div>
+      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。預設只列出跟上次回填後有變動的標的。</p>
+      ${totalShown === 0 ? `<p class="muted-text">目前沒有需要回填的變動。有交易或更新持倉後，這裡會列出要同步回方舟的標的。</p>` : sections}
+    </section>`;
+}
+function scrollToNextArkRefill() {
+  setTimeout(() => {
+    if (!els.cloudSnapshot) return;
+    const items = [...els.cloudSnapshot.querySelectorAll(".ark-refill-item")];
+    const next = items.find((el) => state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
+    if (next) {
+      next.scrollIntoView({ behavior: "smooth", block: "center" });
+      next.classList.add("is-next");
+      setTimeout(() => next.classList.remove("is-next"), 1600);
+    }
+  }, 60);
+}
+async function handleArkCopy(btn, segment) {
+  const key = btn.dataset.arkKey;
+  const order = state.arkRefill.order;
+  const firstField = order === "avgcost-first" ? "avgcost" : "shares";
+  const field = segment === "first" ? firstField : (firstField === "shares" ? "avgcost" : "shares");
+  const value = field === "shares" ? btn.dataset.arkShares : btn.dataset.arkAvg;
+  try {
+    await navigator.clipboard.writeText(String(value));
+  } catch (_) {
+    const ta = document.createElement("textarea");
+    ta.value = String(value); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand("copy"); } catch (__) {}
+    document.body.removeChild(ta);
+  }
+  if (segment === "first") {
+    state.arkRefill.phase[key] = "mid";
+    saveArkRefillState();
+    renderCloudSnapshot();
+  } else {
+    state.arkRefill.phase[key] = "done";
+    const lastMap = loadArkRefillLast();
+    lastMap[key] = { shares: Number(btn.dataset.arkShares), avgCost: Number(btn.dataset.arkAvg) };
+    saveArkRefillLast(lastMap);
+    saveArkRefillState();
+    renderCloudSnapshot();
+    scrollToNextArkRefill();
+  }
+}
+
 function renderCloudSnapshot() {
   if (!els.cloudSnapshot) return;
   const cloud = state.cloudSnapshot;
@@ -6131,25 +6361,20 @@ function renderCloudSnapshot() {
   const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
   const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
-    <div class="metric-grid">
-      <div class="metric">
-        <span>庫存檔數</span>
-        <strong>${formatNumber(positions.length)}</strong>
-      </div>
-      <div class="metric">
-        <span>總股數</span>
-        <strong>${formatNumber(totalShares, 3)}</strong>
-      </div>
-      <div class="metric">
-        <span>估算投入成本</span>
-        <strong>${formatMoney(totalCost)}</strong>
-      </div>
-      <div class="metric">
-        <span>雲端快照</span>
-        <strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong>
-      </div>
+    <div class="metric-bar">
+      <span>庫存 <b>${formatNumber(positions.length)}</b> 檔</span>
+      <span>總股數 <b>${formatNumber(totalShares, 3)}</b></span>
+      <span>估算成本 <b>${formatMoney(totalCost)}</b></span>
+      <span>雲端快照 <b>${formatNumber(state.cloudHistory.snapshots.length)}</b></span>
     </div>
-
+    <section class="dashboard-card holdings-nav-card">
+      <div class="holdings-subtabs">
+        <button class="holdings-subtab${state.homeSubTab === "overview" ? " is-active" : ""}" data-home-subtab="overview" type="button">總覽</button>
+        <button class="holdings-subtab${state.homeSubTab === "alerts" ? " is-active" : ""}" data-home-subtab="alerts" type="button">待關注</button>
+        <button class="holdings-subtab${state.homeSubTab === "analysis" ? " is-active" : ""}" data-home-subtab="analysis" type="button">分析</button>
+      </div>
+    </section>
+    ${state.homeSubTab === "overview" ? `
     <div class="dashboard-grid">
       <section class="dashboard-card">
         <div class="card-heading">
@@ -6166,8 +6391,8 @@ function renderCloudSnapshot() {
         </div>
         ${renderTargetLevelChart(state.targetLevelHistory)}
       </section>
-    </div>
-
+    </div>` : ""}
+    ${state.homeSubTab === "analysis" ? `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益趨勢</h3>
@@ -6192,8 +6417,8 @@ function renderCloudSnapshot() {
           ${perfTable(bottom3)}
         </div>
       </div>
-    </section>
-
+    </section>` : ""}
+    ${state.homeSubTab === "alerts" ? `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>待關注調節 ⚠️</h3>
@@ -6201,8 +6426,8 @@ function renderCloudSnapshot() {
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderAdjustmentAlerts(state.cloudHistory, mkt)}
-    </section>
-
+    </section>` : ""}
+    ${state.homeSubTab === "analysis" ? `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>損益率趨勢</h3>
@@ -6243,8 +6468,7 @@ function renderCloudSnapshot() {
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderRateHistogram(filteredPositions, state.quotes)}
-    </section>
-
+    </section>` : ""}
   `;
   const _dateMarketsMap = {};
   for (const snap of (state.cloudHistory.snapshots || [])) {
@@ -6258,8 +6482,8 @@ function renderCloudSnapshot() {
   const snapshotDeleteContent = `
     <section class="dashboard-card">
       <div class="card-heading">
-        <h3>刪除當日庫存紀錄</h3>
-        <span>點選有庫存的日期（圓點標示）後刪除</span>
+        <h3>快照管理</h3>
+        <span>點日期（圓點標示）→ 看當天快照、改日期（✎）或刪除</span>
       </div>
       ${renderSnapCalendar(
         state.homeCalendar.year,
@@ -6269,6 +6493,9 @@ function renderCloudSnapshot() {
         _dateMarketsMap,
         _marketColors
       )}
+      ${state.homeCalendar.selectedDate ? `
+      <h4 class="market-section-heading" style="margin-top:12px">${escapeHtml(state.homeCalendar.selectedDate)} 的快照</h4>
+      ${renderCloudSnapshotSwipeList(state.homeCalendar.selectedDate)}` : `<p class="muted-text" style="margin-top:12px">點上方日期查看／管理當天快照。</p>`}
       <input type="hidden" id="home-delete-snapshot-date" value="${escapeHtml(state.homeCalendar.selectedDate)}">
       <div class="snapshot-delete-row" style="margin-top:10px">
         <select id="home-delete-snapshot-market">
@@ -6288,17 +6515,13 @@ function renderCloudSnapshot() {
       : Object.keys(state.quotes).length === 0
         ? `<span class="quotes-status loading">等待報價…</span>`
         : "";
-  const holdingsContent = `
+  const holdingsSubtabBtn = (key, label) => `<button class="holdings-subtab${state.holdingsSubTab === key ? " is-active" : ""}" data-holdings-subtab="${key}" type="button">${label}</button>`;
+  const holdingsDetailCard = `
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>庫存明細</h3>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${quotesStatusBadge}
-          <select id="holdings-date-select" class="cell-input" style="width:auto">
-            ${availableSnapshotDates.map((d) =>
-              `<option value="${escapeHtml(d)}"${d === selectedDate ? " selected" : ""}>${escapeHtml(d)}</option>`
-            ).join("")}
-          </select>
           <span class="muted-text">${holdingsRaw.length} 筆庫存</span>
           ${matchingEntry
             ? `<button class="button compact secondary" id="view-entry-btn" data-entry-id="${escapeHtml(matchingEntry.id)}">查看截圖</button>`
@@ -6319,7 +6542,28 @@ function renderCloudSnapshot() {
       </div>
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
-    ${snapshotDeleteContent}
+  `;
+  const holdingsContent = `
+    <section class="dashboard-card holdings-nav-card">
+      <div class="holdings-subtabs">
+        ${holdingsSubtabBtn("detail", "庫存明細")}
+        ${holdingsSubtabBtn("refill", "回填助手")}
+        ${holdingsSubtabBtn("delete", "快照管理")}
+      </div>
+      ${state.holdingsSubTab !== "delete" ? `
+      <div class="holdings-date-bar">
+        <label>日期
+          <select id="holdings-date-select" class="cell-input" style="width:auto">
+            ${availableSnapshotDates.map((d) =>
+              `<option value="${escapeHtml(d)}"${d === selectedDate ? " selected" : ""}>${escapeHtml(d)}</option>`
+            ).join("")}
+          </select>
+        </label>
+      </div>` : ""}
+    </section>
+    ${state.holdingsSubTab === "refill" ? renderArkRefill(holdingsMarketSummaries, selectedDate)
+      : state.holdingsSubTab === "delete" ? snapshotDeleteContent
+      : holdingsDetailCard}
   `;
   const captureEntriesHtml = state.entries.length > 0
     ? `<div class="capture-entries-list">
@@ -6368,11 +6612,16 @@ function renderCloudSnapshot() {
       <div class="card-heading">
         <h3>新增庫存</h3>
         <div class="capture-mode-toggle">
+          <button class="capture-mode-btn${state.captureMode === "broker" ? " is-active" : ""}" data-capture-mode="broker" type="button">券商檔</button>
           <button class="capture-mode-btn${state.captureMode === "ocr" ? " is-active" : ""}" data-capture-mode="ocr" type="button">截圖 OCR</button>
           <button class="capture-mode-btn${state.captureMode === "paste" ? " is-active" : ""}" data-capture-mode="paste" type="button">貼上表格</button>
         </div>
       </div>
-      ${state.captureMode === "ocr" ? `
+      ${state.captureMode === "broker" ? `
+        <p class="muted-text">上傳永豐網頁版匯出的「庫存」xlsx（自動解析代號、今餘股數、成本均價），選市場/日期後存成快照。台股用此檔；美股複委託改用「貼上表格」貼 Firstrade 持倉。</p>
+        <input type="file" id="broker-file-input" accept=".xlsx,.xls" class="broker-file-input">
+        ${pastePreviewHtml}
+      ` : state.captureMode === "ocr" ? `
         <p class="muted-text">確認截圖解析後，可用「合併存雲端」寫入 Google Sheet，dashboard 會重新載入最新庫存。</p>
         <button id="dashboard-open-capture" class="button primary" type="button">新增截圖</button>
       ` : `
@@ -6395,9 +6644,9 @@ function renderCloudSnapshot() {
     <section class="dashboard-card">
       <div class="card-heading">
         <h3>雲端快照資料庫</h3>
-        <span>${(state.cloudHistory.snapshots || []).length} 筆 · 左滑刪除 · ✎ 改日期</span>
+        <span>${(state.cloudHistory.snapshots || []).length} 筆</span>
       </div>
-      ${renderCloudSnapshotSwipeList()}
+      <p class="muted-text">快照管理（看當天快照、改日期、刪除）已移到「庫存 → 快照管理」子分頁，用月曆選日期即可，不必在這裡捲長清單。</p>
     </section>
   `;
   const tabContent = {
@@ -6460,6 +6709,35 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelector("#paste-date-input")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; });
   els.cloudSnapshot.querySelector("#paste-save-btn")?.addEventListener("click", savePasteSnapshot);
   els.cloudSnapshot.querySelector("#paste-clear-btn")?.addEventListener("click", () => { state.pasteParsed = null; renderCloudSnapshot(); });
+  els.cloudSnapshot.querySelector("#broker-file-input")?.addEventListener("change", (e) => {
+    const f = e.target.files?.[0];
+    if (f) handleBrokerFile(f);
+  });
+  els.cloudSnapshot.querySelectorAll("[data-ark-copy]").forEach((btn) => {
+    btn.addEventListener("click", () => handleArkCopy(btn, btn.dataset.arkCopy));
+  });
+  els.cloudSnapshot.querySelectorAll("[data-ark-redo]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.arkRefill.phase[btn.dataset.arkKey] = "idle";
+      saveArkRefillState();
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelector("[data-ark-toggle-showall]")?.addEventListener("click", () => {
+    state.arkRefill.showAll = !state.arkRefill.showAll;
+    saveArkRefillState();
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelector("[data-ark-toggle-order]")?.addEventListener("click", () => {
+    state.arkRefill.order = state.arkRefill.order === "shares-first" ? "avgcost-first" : "shares-first";
+    saveArkRefillState();
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelector("[data-ark-reset]")?.addEventListener("click", () => {
+    state.arkRefill.phase = {};
+    saveArkRefillState();
+    renderCloudSnapshot();
+  });
   els.cloudSnapshot.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextTab = button.dataset.dashboardTab || "home";
@@ -6792,6 +7070,18 @@ function renderCloudSnapshot() {
     });
   });
   // B tab：日期選擇器
+  els.cloudSnapshot.querySelectorAll("[data-holdings-subtab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.holdingsSubTab = btn.dataset.holdingsSubtab || "detail";
+      renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-home-subtab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.homeSubTab = btn.dataset.homeSubtab || "overview";
+      renderCloudSnapshot();
+    });
+  });
   els.cloudSnapshot.querySelector("#holdings-date-select")?.addEventListener("change", (e) => {
     state.selectedSnapshotDate = e.target.value;
     renderCloudSnapshot();

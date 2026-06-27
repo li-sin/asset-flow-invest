@@ -2818,3 +2818,167 @@ textarea {
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* ===== 方舟回填助手（v0.30.0）===== */
+.metric-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 8px 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.metric-bar b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.holdings-subtabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.holdings-subtab {
+  padding: 8px 18px;
+  border: 1px solid var(--border, #d4d4d4);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.holdings-subtab:hover {
+  border-color: var(--accent, #4c6ef5);
+}
+.holdings-subtab.is-active {
+  border-color: var(--accent, #4c6ef5);
+  background: var(--accent, #4c6ef5);
+  color: #fff;
+  font-weight: 700;
+}
+.holdings-date-bar {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ark-refill-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ark-refill-header h3 {
+  margin: 0;
+}
+.ark-refill-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ark-ctrl-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border, #d4d4d4);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.ark-ctrl-btn:hover {
+  border-color: var(--accent, #4c6ef5);
+}
+.ark-ctrl-btn.is-on {
+  border-color: var(--accent, #4c6ef5);
+  background: var(--accent-soft, rgba(76, 110, 245, 0.12));
+  color: var(--accent, #4c6ef5);
+  font-weight: 700;
+}
+.ark-refill-date {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(76, 110, 245, 0.14));
+  color: var(--accent, #4c6ef5);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ark-refill-date.is-empty {
+  background: var(--surface-2, #f0f0f0);
+  color: var(--muted);
+}
+.ark-refill-desc {
+  margin: 4px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ark-refill-market + .ark-refill-market {
+  margin-top: 16px;
+}
+.ark-refill-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e2e2e2);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  transition: background 0.3s, border-color 0.3s;
+}
+.ark-refill-item.is-mid {
+  border-color: var(--accent, #4c6ef5);
+  background: var(--accent-soft, rgba(76, 110, 245, 0.08));
+}
+.ark-refill-item.is-done {
+  opacity: 0.6;
+}
+.ark-refill-item.is-next {
+  border-color: var(--accent, #4c6ef5);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(76, 110, 245, 0.25));
+}
+.ark-refill-id {
+  min-width: 0;
+  flex: 1 1 120px;
+}
+.ark-refill-id strong {
+  font-variant-numeric: tabular-nums;
+}
+.ark-refill-vals {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.ark-refill-vals b {
+  color: var(--ink);
+}
+.ark-refill-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.ark-refill-hint {
+  font-size: 12px;
+  color: var(--accent, #4c6ef5);
+  white-space: nowrap;
+}
+.ark-refill-done {
+  font-size: 13px;
+  color: var(--green-dark, #2d6a4f);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ark-refill-pending {
+  font-size: 12px;
+  color: var(--danger, #c92a2a);
+  white-space: nowrap;
+}
