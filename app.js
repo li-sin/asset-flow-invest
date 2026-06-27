@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.30.0";
-const APP_VERSION_NOTE = "新增「方舟回填助手」tab（兩段式複製回方舟、只列有變動、自動跳下一支、手機可接續、資料日期標示）＋「券商檔」上傳永豐庫存 xlsx 自動匯入（自架 fflate 解析）";
+const APP_VERSION = "v0.31.0";
+const APP_VERSION_NOTE = "美股 Firstrade 持倉貼上解析（跳統計行/碎股/單位成本=均價）＋均價待補提醒（成本0偵測，首頁 banner＋庫存補填）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3988,20 +3988,25 @@ function parsePasteTable(text) {
   if (trimmed.includes("\t")) {
     const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) return null;
-    const headers = lines[0].split("\t").map((h) => h.trim());
+    // 找表頭行（含代號＋股數），跳過前面的統計行（如 Firstrade「股票總值 = …」）
+    let headerIdx = lines.findIndex((l) => /代號|symbol|ticker/i.test(l) && /股數|shares|數量|持股/i.test(l));
+    if (headerIdx < 0) headerIdx = 0;
+    const headers = lines[headerIdx].split("\t").map((h) => h.trim());
     const findCol = (re) => headers.findIndex((h) => re.test(h));
     const colMap = {
       symbol: findCol(/代號|symbol|ticker|股票代號/i),
       name: findCol(/名稱|name|公司名/i),
       shares: findCol(/股數|shares|數量|持股|張數/i),
-      avgCost: findCol(/均成本|均價|成本|avg.?cost|cost/i),
+      avgCost: findCol(/單位成本|均成本|均價|avg.?cost|^成本$|cost/i),
     };
-    const rows = lines.slice(1).map((line) => {
+    const rows = lines.slice(headerIdx + 1).map((line) => {
       const cells = line.split("\t");
       const get = (i) => (i >= 0 ? (cells[i] || "").trim() : "");
-      const num = (i) => parseFloat(get(i).replace(/,/g, "")) || 0;
-      return { symbol: get(colMap.symbol).toUpperCase(), name: get(colMap.name), shares: num(colMap.shares), avgCost: num(colMap.avgCost) };
-    }).filter((r) => r.symbol);
+      const num = (i) => parseFloat(get(i).replace(/[,$]/g, "")) || 0;
+      // 代號去尾隨空白與星號（Firstrade「AMAT 」、台股「國巨*」）
+      const symbol = get(colMap.symbol).replace(/\*+$/, "").toUpperCase();
+      return { symbol, name: get(colMap.name), shares: num(colMap.shares), avgCost: num(colMap.avgCost) };
+    }).filter((r) => r.symbol && !/^(代號|symbol|股票總值|合計|小計|total)/i.test(r.symbol));
     return rows.length ? { headers, rows, colMap, source: "spreadsheet" } : null;
   }
 
@@ -6050,6 +6055,10 @@ function renderCloudSnapshot() {
   const holdingsWithMarket = holdingsRaw.map((row) => ({
     ...row, marketKey: marketForPosition(row), cost: estimatedCost(row),
   }));
+  // 均價待補：有股數但均價=0/缺（券商成本0 或匯入未帶均價），補上前每次開 App 提醒
+  const pendingAvgCostRows = holdingsWithMarket
+    .filter((r) => Number(r.shares || 0) > 0 && !(Number(r.avgCost || 0) > 0))
+    .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
   const holdingsMarketSummaries = ["TW", "US"].map((market) => {
     const marketRows = holdingsWithMarket.filter((r) => r.marketKey === market).sort((a, b) => b.cost - a.cost);
     return {
@@ -6361,6 +6370,7 @@ function renderCloudSnapshot() {
   const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
   const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
+    ${pendingAvgCostRows.length ? `<div class="pending-banner" data-go-pending>⚠️ ${pendingAvgCostRows.length} 支均價待補，點此到「庫存」補填</div>` : ""}
     <div class="metric-bar">
       <span>庫存 <b>${formatNumber(positions.length)}</b> 檔</span>
       <span>總股數 <b>${formatNumber(totalShares, 3)}</b></span>
@@ -6537,6 +6547,16 @@ function renderCloudSnapshot() {
             : ""}
         </div>
       </div>
+      ${pendingAvgCostRows.length ? `
+      <div class="pending-list">
+        <p class="pending-title">⚠️ ${pendingAvgCostRows.length} 支均價待補（券商成本顯示 0 或未帶入），補上才能正確算損益並回填方舟：</p>
+        ${pendingAvgCostRows.map((r) => `
+          <div class="pending-row" data-pending-market="${escapeHtml(r.marketKey)}" data-pending-symbol="${escapeHtml(r.symbol)}" data-pending-shares="${escapeHtml(String(r.shares))}">
+            <span class="pending-id"><strong>${escapeHtml(r.symbol)}</strong> ${escapeHtml(r.name || resolveSymbolName(r.symbol) || "")} · ${formatNumber(r.shares, 4)} 股</span>
+            <input type="number" step="0.0001" inputmode="decimal" class="cell-input pending-avg-input" placeholder="均價">
+            <button class="button compact primary pending-save-btn" type="button">存</button>
+          </div>`).join("")}
+      </div>` : ""}
       <div id="symbol-chart-display" class="symbol-chart-display" style="display:none">
         <div id="symbol-chart-content"></div>
       </div>
@@ -7080,6 +7100,20 @@ function renderCloudSnapshot() {
     btn.addEventListener("click", () => {
       state.homeSubTab = btn.dataset.homeSubtab || "overview";
       renderCloudSnapshot();
+    });
+  });
+  els.cloudSnapshot.querySelector("[data-go-pending]")?.addEventListener("click", () => {
+    state.dashboardTab = "holdings";
+    state.holdingsSubTab = "detail";
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelectorAll(".pending-save-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = btn.closest(".pending-row");
+      if (!row) return;
+      const avg = parseFloat(row.querySelector(".pending-avg-input")?.value || "");
+      if (!(avg > 0)) { alert("請輸入有效均價"); return; }
+      savePositionEdits(row.dataset.pendingMarket, row.dataset.pendingSymbol, Number(row.dataset.pendingShares), avg);
     });
   });
   els.cloudSnapshot.querySelector("#holdings-date-select")?.addEventListener("change", (e) => {
