@@ -265,6 +265,7 @@ textarea {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .dashboard-actions {
@@ -1349,6 +1350,9 @@ textarea {
 @media (max-width: 480px) {
   .batch-firstbuy-row { grid-template-columns: 64px 1fr; }
   .batch-firstbuy-input { grid-column: 1 / -1; }
+  /* 窄畫面：卡片標題改直向，長副標不被擠成直行 */
+  .card-heading { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .card-heading h3 { white-space: normal; }
 }
 
 .column-crops {
@@ -3018,6 +3022,7 @@ textarea {
 .ark-refill-id {
   min-width: 0;
   flex: 1 1 120px;
+  font-size: 14px;
 }
 .ark-refill-id strong {
   font-variant-numeric: tabular-nums;
@@ -3038,6 +3043,10 @@ textarea {
   gap: 8px;
   margin-left: auto;
   flex-wrap: wrap;
+}
+.ark-refill-btn {
+  padding: 5px 12px;
+  font-size: 13px;
 }
 .ark-refill-hint {
   font-size: 12px;

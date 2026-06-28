@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.2";
-const APP_VERSION_NOTE = "手動輸入逐欄表格自動帶入最新庫存代號（只填股數/均價）、＋加列、滑動刪列、重新帶入/清空；含 Firstrade 貼上＋均價待補";
+const APP_VERSION = "v0.31.3";
+const APP_VERSION_NOTE = "UI 優化：水位卡去重複數值（上次只留日期）、移除冗餘雲端快照區塊、窄畫面卡片標題不擠成直行、分析散點圖加高、回填按鈕/字型統一";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5564,7 +5564,7 @@ function renderPLContributionChart(positions, quotes) {
 }
 
 // ── 共用：散點圖 SVG 渲染（支援 Y 軸上限裁切 + X 軸天數窗口）──────────────
-function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, dayCapKey = null, dayCapOptions = [], refLineKey = null, W = 600, H = 200, PL = 44, PR = 20, PT = 16, PB = 30 }) {
+function buildScatterSvg({ items, getX, getY, getColor, getTip, capKey, capOptions, unitLabel, maxX, dayCapKey = null, dayCapOptions = [], refLineKey = null, W = 600, H = 300, PL = 44, PR = 20, PT = 16, PB = 30 }) {
   const cW = W - PL - PR, cH = H - PT - PB;
   const dayCap = dayCapKey ? state[dayCapKey] : null;
   const visItems = dayCap !== null ? items.filter(i => getX(i) <= dayCap) : items;
@@ -6166,7 +6166,7 @@ function renderCloudSnapshot() {
     const lastRecord = mktHistory[0];
     const inputVal = todayRecord ? todayRecord.targetLevel : (item.targetLevel ?? "");
     const lastRecordText = lastRecord
-      ? `上次：${lastRecord.date} ${formatPercent(lastRecord.targetLevel)}`
+      ? `上次更新：${lastRecord.date}`
       : "尚未記錄";
     return `
     <section class="market-water-card">
@@ -6748,13 +6748,6 @@ function renderCloudSnapshot() {
       ${state.entries.some((e) => e.status === "imported" && e.title?.includes("${els."))
         ? `<button id="bulk-clear-old" class="button ghost danger" type="button" style="margin-top:10px;font-size:12px;">清除壞標題舊截圖（已匯入）</button>`
         : ""}
-    </section>
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>雲端快照資料庫</h3>
-        <span>${(state.cloudHistory.snapshots || []).length} 筆</span>
-      </div>
-      <p class="muted-text">快照管理（看當天快照、改日期、刪除）已移到「庫存 → 快照管理」子分頁，用月曆選日期即可，不必在這裡捲長清單。</p>
     </section>
   `;
   const tabContent = {
