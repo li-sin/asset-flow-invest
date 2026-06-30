@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.5";
-const APP_VERSION_NOTE = "topbar 加常用快速入口：貼上/券商檔/回填 一鍵直達（省去切 tab/子分頁的中途步驟）";
+const APP_VERSION = "v0.31.6";
+const APP_VERSION_NOTE = "iPad/PWA 登入卡住緩解：偵測 standalone PWA + 登入逾時(12s)提示改用 Safari 開啟登入";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7829,6 +7829,12 @@ function bindEvents() {
 let appDataLoaded = false;
 let authFlowInProgress = false;
 
+// 是否為 iOS「加入主畫面」的 standalone PWA（popup 式 OAuth 在此會被 iOS 擋住）
+function isStandalonePWA() {
+  return window.navigator.standalone === true
+    || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+}
+
 async function signInAndLoadApp() {
   authFlowInProgress = true;
   if (els.authSignIn) {
@@ -7836,11 +7842,22 @@ async function signInAndLoadApp() {
     els.authSignIn.textContent = "登入中...";
   }
   try {
-    await getGoogleAccessToken();
+    if (isStandalonePWA()) {
+      // iOS standalone PWA 的 popup 不顯示，requestAccessToken 會卡住 → 加超時提示
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("__standalone_timeout__")), 12000));
+      await Promise.race([getGoogleAccessToken(), timeout]);
+    } else {
+      await getGoogleAccessToken();
+    }
     await loadAppAfterAuth();
   } catch (error) {
-    console.error(error);
-    resetGoogleSession(error.message || "Google 登入失敗");
+    if (error.message === "__standalone_timeout__") {
+      resetGoogleSession("");
+      alert("偵測到你用「加入主畫面」的 App 模式，iOS 會擋住 Google 登入彈窗，因此卡住。\n\n請改用 Safari 直接開這個網址登入：\nhttps://li-sin.github.io/asset-flow-invest/\n\n登入成功後，主畫面 App 也會記住登入狀態。");
+    } else {
+      console.error(error);
+      resetGoogleSession(error.message || "Google 登入失敗");
+    }
   } finally {
     authFlowInProgress = false;
     renderAuthGate();
