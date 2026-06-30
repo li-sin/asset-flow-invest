@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.4";
-const APP_VERSION_NOTE = "topbar 精簡：移除重複的「重新整理雲端庫存/新增截圖」(dashboard 已有)，「合併存雲端/匯出/匯入備份」收進「⋯ 更多」選單";
+const APP_VERSION = "v0.31.5";
+const APP_VERSION_NOTE = "topbar 加常用快速入口：貼上/券商檔/回填 一鍵直達（省去切 tab/子分頁的中途步驟）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7802,6 +7802,17 @@ function bindEvents() {
   });
   els.exportBackup.addEventListener("click", exportBackup);
   els.syncLatest?.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  // topbar 常用功能快速入口（每天用 2 次以上）：一鍵直達，省去切 tab/子分頁
+  document.querySelectorAll("[data-quick]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const q = btn.dataset.quick;
+      if (q === "paste") { state.dashboardTab = "capture"; state.captureMode = "paste"; }
+      else if (q === "broker") { state.dashboardTab = "capture"; state.captureMode = "broker"; }
+      else if (q === "refill") { state.dashboardTab = "holdings"; state.holdingsSubTab = "refill"; }
+      renderCloudSnapshot();
+      els.cloudSnapshot?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    });
+  });
   els.saveMergedSnapshot?.addEventListener("click", saveMergedSnapshotToGoogleSheet);
   els.authSignIn?.addEventListener("click", signInAndLoadApp);
   els.closeDetail.addEventListener("click", closeDetail);
