@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.6";
-const APP_VERSION_NOTE = "iPad/PWA 登入卡住緩解：偵測 standalone PWA + 登入逾時(12s)提示改用 Safari 開啟登入";
+const APP_VERSION = "v0.31.7";
+const APP_VERSION_NOTE = "回填進度跨裝置同步：上次回填值改存雲端 AssetFlowRefillState tab（完成回填寫雲端、登入讀回記憶體），手機完成電腦打開看得到";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -25,12 +25,14 @@ const SHEET_NAMES = {
   levels: "水位",
   layout: "AssetFlowLayout",
   firstBuy: "AssetFlowFirstBuy",
+  refillState: "AssetFlowRefillState",
 };
 const SHEET_HEADERS = {
   snapshots: ["snapshot_id", "created_at", "date", "market", "source_entry_id", "source_title", "row_count", "app_version"],
   positions: ["snapshot_id", "date", "market", "symbol", "name", "kind", "shares", "avg_cost", "source", "created_at"],
   layout: ["date", "market", "symbol", "name", "shares", "prev_shares", "delta"],
   firstBuy: ["symbol", "first_buy_date", "market"],
+  refillState: ["market", "symbol", "shares", "avg_cost", "updated_at"],
 };
 const SYMBOL_NAMES = {
   // ── 台股 ──────────────────────────────────────────────────────────────────
@@ -83,6 +85,7 @@ const state = {
   },
   dashboardTab: "home",
   arkRefill: loadArkRefillState(),
+  arkRefillLast: loadArkRefillLastLocal(), // 上次回填值（記憶體，初始 localStorage、登入後從雲端覆蓋）
   holdingsSubTab: "detail", // 庫存 tab 子分頁：detail/refill/delete
   homeSubTab: "overview", // 首頁子分頁：overview/alerts/analysis
   manualRows: [{ symbol: "", name: "", shares: "", avgCost: "" }], // 手動輸入逐欄表格的列
@@ -3424,6 +3427,7 @@ async function ensureSheetTables() {
   await updateSheetValues(SHEET_NAMES.positions, "A1:J1", [SHEET_HEADERS.positions]);
   await updateSheetValues(SHEET_NAMES.layout, "A1:G1", [SHEET_HEADERS.layout]);
   await updateSheetValues(SHEET_NAMES.firstBuy, "A1:C1", [SHEET_HEADERS.firstBuy]);
+  await updateSheetValues(SHEET_NAMES.refillState, "A1:E1", [SHEET_HEADERS.refillState]);
 }
 
 async function ensureCloudSheetTables() {
@@ -4475,6 +4479,7 @@ async function loadLatestCloudSnapshot(showAlert = true) {
     await Promise.all([
       loadTargetLevelHistory(),
       loadFirstBuyDatesFromSheet().catch(() => {}),
+      loadRefillStateFromSheet().catch(() => {}),
     ]);
     const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G").catch(() => []);
     const layout = parseLayoutRows(stripHeaderRow(layoutValues, SHEET_HEADERS.layout));
@@ -5946,11 +5951,53 @@ function loadArkRefillState() {
 function saveArkRefillState() {
   try { localStorage.setItem("afi_ark_refill_state_v1", JSON.stringify(state.arkRefill)); } catch (_) {}
 }
-function loadArkRefillLast() {
+function loadArkRefillLastLocal() {
   try { return JSON.parse(localStorage.getItem("afi_ark_refill_last_v1") || "{}") || {}; } catch (_) { return {}; }
 }
+function loadArkRefillLast() {
+  return state.arkRefillLast || {};
+}
 function saveArkRefillLast(map) {
+  state.arkRefillLast = map;
   try { localStorage.setItem("afi_ark_refill_last_v1", JSON.stringify(map)); } catch (_) {}
+}
+// 從雲端 AssetFlowRefillState 載入「上次回填值」→ 記憶體（跨裝置同步：手機完成電腦看得到）
+async function loadRefillStateFromSheet() {
+  try {
+    const values = await readCloudSheetValues(SHEET_NAMES.refillState, "A2:E").catch(() => []);
+    const map = {};
+    for (const row of values) {
+      const market = row[0]; const symbol = row[1];
+      if (!market || !symbol) continue;
+      map[arkRefillKey(market, symbol)] = { shares: Number(row[2]), avgCost: Number(row[3]) };
+    }
+    state.arkRefillLast = map;
+    try { localStorage.setItem("afi_ark_refill_last_v1", JSON.stringify(map)); } catch (_) {}
+  } catch (_) { /* 失敗保留現有 localStorage 值 */ }
+}
+// 完成一支回填 → upsert 寫雲端（依 market+symbol 找列更新，否則 append）
+async function writeRefillEntryToSheet(market, symbol, shares, avgCost) {
+  if (!googleAccessToken || !state.auth.authorized) return;
+  try {
+    await ensureCloudSheetTables();
+    const mkt = normalizeMarketKey(market);
+    const sym = String(symbol || "").toUpperCase().trim();
+    const values = await readSheetValues(SHEET_NAMES.refillState, "A:E");
+    const dataRows = values.map((row, i) => ({ row, sheetRow: i + 1 })).filter(({ row }) => row[0] && row[1]);
+    const existing = dataRows.find(({ row }) => normalizeMarketKey(row[0]) === mkt && String(row[1]).toUpperCase().trim() === sym);
+    const rowVals = [mkt, sym, String(shares), String(avgCost), new Date().toISOString()];
+    if (existing) {
+      await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.refillState, `A${existing.sheetRow}:E${existing.sheetRow}`)}?valueInputOption=RAW`, {
+        method: "PUT",
+        body: JSON.stringify({ majorDimension: "ROWS", values: [rowVals] }),
+      });
+    } else {
+      await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.refillState, "A:E")}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+        method: "POST",
+        body: JSON.stringify({ majorDimension: "ROWS", values: [rowVals] }),
+      });
+    }
+  } catch (err) { console.warn("writeRefillEntryToSheet", err); }
 }
 function arkRefillKey(market, symbol) {
   return `${normalizeMarketKey(market)}_${String(symbol || "").toUpperCase().trim()}`;
@@ -6058,12 +6105,17 @@ async function handleArkCopy(btn, segment) {
     renderCloudSnapshot();
   } else {
     state.arkRefill.phase[key] = "done";
+    const shares = Number(btn.dataset.arkShares);
+    const avgCost = Number(btn.dataset.arkAvg);
     const lastMap = loadArkRefillLast();
-    lastMap[key] = { shares: Number(btn.dataset.arkShares), avgCost: Number(btn.dataset.arkAvg) };
+    lastMap[key] = { shares, avgCost };
     saveArkRefillLast(lastMap);
     saveArkRefillState();
     renderCloudSnapshot();
     scrollToNextArkRefill();
+    // 跨裝置同步：寫雲端（手機完成→電腦打開時該支不再算「變動」）
+    const parts = String(key).split("_");
+    writeRefillEntryToSheet(parts[0], parts.slice(1).join("_"), shares, avgCost).catch(() => {});
   }
 }
 
