@@ -28,14 +28,17 @@
         <p id="summary-line">登入後自動載入雲端庫存</p>
       </div>
       <div class="topbar-actions">
-        <button id="sync-latest" class="button secondary" type="button">重新整理雲端庫存</button>
-        <button id="save-merged-snapshot" class="button primary" type="button">合併存雲端</button>
-        <button id="export-backup" class="button secondary" type="button">匯出備份</button>
-        <label class="button secondary file-button">
-          匯入備份
-          <input id="backup-input" type="file" accept="application/json">
-        </label>
-        <button id="open-capture" class="button primary" type="button">新增截圖</button>
+        <details class="topbar-more">
+          <summary class="button secondary">⋯ 更多</summary>
+          <div class="topbar-more-menu">
+            <button id="save-merged-snapshot" class="button primary" type="button">合併存雲端</button>
+            <button id="export-backup" class="button secondary" type="button">匯出備份</button>
+            <label class="button secondary file-button">
+              匯入備份
+              <input id="backup-input" type="file" accept="application/json">
+            </label>
+          </div>
+        </details>
       </div>
     </header>
 

@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.3";
-const APP_VERSION_NOTE = "UI 優化：水位卡去重複數值（上次只留日期）、移除冗餘雲端快照區塊、窄畫面卡片標題不擠成直行、分析散點圖加高、回填按鈕/字型統一";
+const APP_VERSION = "v0.31.4";
+const APP_VERSION_NOTE = "topbar 精簡：移除重複的「重新整理雲端庫存/新增截圖」(dashboard 已有)，「合併存雲端/匯出/匯入備份」收進「⋯ 更多」選單";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7801,7 +7801,7 @@ function bindEvents() {
     render();
   });
   els.exportBackup.addEventListener("click", exportBackup);
-  els.syncLatest.addEventListener("click", () => loadLatestCloudSnapshot(true));
+  els.syncLatest?.addEventListener("click", () => loadLatestCloudSnapshot(true));
   els.saveMergedSnapshot?.addEventListener("click", saveMergedSnapshotToGoogleSheet);
   els.authSignIn?.addEventListener("click", signInAndLoadApp);
   els.closeDetail.addEventListener("click", closeDetail);

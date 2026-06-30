@@ -149,6 +149,37 @@ textarea {
   flex: 0 0 auto;
 }
 
+/* topbar「⋯ 更多」收納選單（少用的合併存雲端/匯出/匯入備份）*/
+.topbar-more {
+  position: relative;
+}
+.topbar-more > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.topbar-more > summary::-webkit-details-marker { display: none; }
+.topbar-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #d4d4d4);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  z-index: 30;
+  min-width: 150px;
+}
+.topbar-more-menu .button,
+.topbar-more-menu .file-button {
+  width: 100%;
+  text-align: center;
+}
+
 .button {
   border: 0;
   border-radius: 7px;
