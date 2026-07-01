@@ -357,6 +357,67 @@ textarea {
   font-weight: 600;
 }
 
+/* 月績效子分頁 */
+.perf-input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.perf-input-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.perf-input-grid input,
+.perf-input-grid select {
+  font-size: 16px;
+}
+.perf-input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.perf-table th,
+.perf-table td {
+  white-space: nowrap;
+}
+.perf-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.perf-strong {
+  font-weight: 700;
+}
+.perf-sub {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.perf-total-row td {
+  border-top: 2px solid var(--line);
+  font-weight: 700;
+  background: var(--surface-2);
+}
+.perf-year-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.perf-year-bar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.perf-year-bar select {
+  font-size: 16px;
+}
+
 .quote-loading {
   margin-bottom: 8px;
 }

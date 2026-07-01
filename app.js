@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.31.7";
-const APP_VERSION_NOTE = "回填進度跨裝置同步：上次回填值改存雲端 AssetFlowRefillState tab（完成回填寫雲端、登入讀回記憶體），手機完成電腦打開看得到";
+const APP_VERSION = "v0.32.0";
+const APP_VERSION_NOTE = "月績效子分頁：接既有「投資績效紀錄」tab（台股填當月/美股填今年累積，C·E·匯率由 Sheet 公式自動算），跨 Sheet 讀 BudgetAssistant 當月支出（我的負擔＋總支出），總實現損益 vs 我的支出折線對比＋年度總結列；多年支援：每年一張 tab（現有=2026、其他年「投資績效紀錄YYYY」），下拉切年、選未建年份可一鍵建表";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -16,6 +16,11 @@ const GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const GOOGLE_AUTH_SCOPE = "openid email profile";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
+// 月績效：接既有「投資績效紀錄」tab（B 台股當月手填、D 美股今年累積手填；C·E·G 為 Sheet 公式，不可覆蓋）
+const PERF_TAB = "投資績效紀錄";
+// 跨 Sheet 讀 BudgetAssistant 當月支出（同帳號 scope=spreadsheets，現有 token 即可讀）
+const BUDGET_SHEET_ID = "1T2G8leVwJ8EES1GzEcL1bD_NLHe46ylmPPijc-VoKmo";
+const BUDGET_LEDGER_TAB = "月度帳本"; // A=日期 C=總金額 G=Sin負擔
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com";
 const DEFAULT_AUTHORIZED_EMAIL = "lovelisa00000@gmail.com";
 const QUOTE_PROXY_URL = "https://script.google.com/macros/s/AKfycbznKVxtS6OhxfKO6E1PB21U-X__bSHHdlhUGt8Fj5vv7PRf3Pi_xzsByAHvu0sE8G4/exec";
@@ -87,7 +92,14 @@ const state = {
   arkRefill: loadArkRefillState(),
   arkRefillLast: loadArkRefillLastLocal(), // 上次回填值（記憶體，初始 localStorage、登入後從雲端覆蓋）
   holdingsSubTab: "detail", // 庫存 tab 子分頁：detail/refill/delete
-  homeSubTab: "overview", // 首頁子分頁：overview/alerts/analysis
+  homeSubTab: "overview", // 首頁子分頁：overview/alerts/analysis/monthly
+  monthlyPerf: [],      // 各月績效（登入後從「投資績效紀錄」tab 讀）
+  monthlyExpense: {},   // { "YYYY-MM": { total, sinShare, count } }（跨 Sheet 讀 BudgetAssistant）
+  perfRate: null,       // 「投資績效紀錄」G2 的 GOOGLEFINANCE USD/TWD 匯率
+  perfInput: { month: new Date().getMonth() + 1 }, // 月績效輸入區選定月份
+  perfYear: new Date().getFullYear(), // 月績效檢視的年份
+  perfYears: [],        // 可選年份清單（掃描績效 tab + 當前年）
+  perfYearExists: true, // 選定年的績效 tab 是否已存在（否則顯示建表）
   manualRows: [{ symbol: "", name: "", shares: "", avgCost: "" }], // 手動輸入逐欄表格的列
   levelChartRange: "1M",
   levelChartMarket: "TW",
@@ -3402,6 +3414,131 @@ async function appendSheetValues(sheetName, range, values) {
   });
 }
 
+// 讀「其他」試算表（跨 Sheet，如 BudgetAssistant），用現有 token（scope=spreadsheets 全域）
+async function readForeignSheetValues(spreadsheetId, sheetName, range) {
+  const token = await getGoogleAccessToken();
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${sheetRange(sheetName, range)}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.error?.message || `Google Sheets API ${res.status}`);
+  return payload.values || [];
+}
+
+// 去除 NT$ / $ / 千分位，取數值
+function parsePerfNum(s) {
+  const n = Number(String(s ?? "").replace(/[^\d.\-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+// 從「投資績效紀錄」tab 讀各月績效（讀計算後值：C·E 為 Sheet 公式結果、G2 為 GOOGLEFINANCE 匯率）
+// 年份 → tab 名（base 年用現有無後綴 tab，其他年加年份後綴）
+function perfTabForYear(year) {
+  return Number(year) === PERF_BASE_YEAR ? PERF_TAB : `${PERF_TAB}${year}`;
+}
+
+// 掃描 spreadsheet 找出有哪些年的績效 tab（含當前年，即使尚未建）
+async function loadPerfYears() {
+  const years = new Set([new Date().getFullYear()]);
+  try {
+    const meta = await sheetsFetch("?fields=sheets.properties.title");
+    for (const s of (meta.sheets || [])) {
+      const t = s.properties?.title || "";
+      if (t === PERF_TAB) years.add(PERF_BASE_YEAR);
+      else if (t.startsWith(PERF_TAB)) {
+        const suffix = t.slice(PERF_TAB.length);
+        if (/^\d{4}$/.test(suffix)) years.add(Number(suffix));
+      }
+    }
+  } catch (_) { /* 掃描失敗保留當前年 */ }
+  state.perfYears = [...years].sort((a, b) => b - a); // 新到舊
+}
+
+// 建立某年的空白績效表（新 tab：表頭 + 1-12 月 + E/G 公式；C 留空由 saveMonthlyPerf 補、B/D 使用者填）
+async function createPerfYearTab(year) {
+  const title = perfTabForYear(year);
+  await sheetsFetch(":batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title } } }] }),
+  });
+  const months = Array.from({ length: 12 }, (_, i) => [`${i + 1} 月`]);
+  const eFormulas = Array.from({ length: 12 }, (_, i) => [`=B${i + 2}+C${i + 2}*$G$2`]);
+  await sheetsFetch(`/values:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueInputOption: "USER_ENTERED",
+      data: [
+        { range: `${title}!A1:G1`, values: [PERF_HEADER] },
+        { range: `${title}!A2:A13`, values: months },
+        { range: `${title}!E2:E13`, values: eFormulas },
+        { range: `${title}!G2`, values: [[`=GOOGLEFINANCE("Currency:USDTWD")`]] },
+      ],
+    }),
+  });
+}
+
+// 讀某年績效 tab（計算後值）。tab 是否存在改用 state.perfYears（loadPerfYears 掃到的清單）判斷，
+// 不用讀取成敗——否則沒 token／網路失敗會誤判成「tab 不存在」而顯示建表（2026 明明有資料卻跳建表）。
+async function loadMonthlyPerf(year = state.perfYear) {
+  const values = await readSheetValues(perfTabForYear(year), "A2:G13").catch(() => null);
+  // 清單尚未載入（空）→ 保守視為存在；清單有值 → 以是否含此年為準
+  state.perfYearExists = !(state.perfYears || []).length || state.perfYears.includes(Number(year));
+  state.perfRate = parsePerfNum(values?.[0]?.[6]) || null; // G2 即時匯率
+  const rows = [];
+  for (const r of (values || [])) {
+    const m = String(r[0] || "").match(/(\d+)/);
+    if (!m) continue;
+    const twRaw = String(r[1] ?? "").trim();
+    const usCumRaw = String(r[3] ?? "").trim();
+    rows.push({
+      monthNum: Number(m[1]),
+      tw: parsePerfNum(r[1]),        // B 台股當月已實現（台幣，手填）
+      usMonth: parsePerfNum(r[2]),   // C 美股當月已實現（美元，Sheet 公式 =D本月-D前月）
+      usCum: parsePerfNum(r[3]),     // D 美股今年累積已實現（美元，手填）
+      totalTwd: parsePerfNum(r[4]),  // E 總實現損益（台幣，Sheet 公式 =B+C*匯率）
+      note: r[5] || "",              // F 附註
+      hasData: twRaw !== "" || usCumRaw !== "",
+    });
+  }
+  state.monthlyPerf = rows;
+}
+
+// 跨 Sheet 讀 BudgetAssistant 月度帳本，依月份加總 → 當月總支出 / Sin 負擔
+async function loadMonthlyExpense() {
+  const values = await readForeignSheetValues(BUDGET_SHEET_ID, BUDGET_LEDGER_TAB, "A2:G").catch(() => []);
+  const map = {};
+  for (const r of values) {
+    const m = String(r[0] || "").match(/(\d{4})[-/](\d{1,2})/);
+    if (!m) continue;
+    const key = `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+    if (!map[key]) map[key] = { total: 0, sinShare: 0, count: 0 };
+    map[key].total += parsePerfNum(r[2]);    // C 總金額
+    map[key].sinShare += parsePerfNum(r[6]); // G Sin 負擔
+    map[key].count += 1;
+  }
+  state.monthlyExpense = map;
+}
+
+// 寫回「投資績效紀錄」：更新手填欄 B(台股)/D(美股累積)/F(附註)，並補 C 欄公式
+// （C 的「=D本月-D前月」公式只在 1-6 月存在，7-12 月原本空白 → 新月份要補上才會算當月差額）
+// E(=B+C*$G$2) 每列本就有公式、G2 為 GOOGLEFINANCE，兩者不碰。
+async function saveMonthlyPerf(year, monthNum, twRealized, usCumulative, note) {
+  const tab = perfTabForYear(year);
+  const row = monthNum + 1; // 1 月 = row2
+  const cFormula = row <= 2 ? `=D${row}` : `=D${row}-D${row - 1}`; // 首月：當月=累積；其餘：累積差額
+  await sheetsFetch(`/values:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      valueInputOption: "USER_ENTERED",
+      data: [
+        { range: `${tab}!B${row}`, values: [[twRealized]] },
+        { range: `${tab}!C${row}`, values: [[cFormula]] },
+        { range: `${tab}!D${row}`, values: [[usCumulative]] },
+        { range: `${tab}!F${row}`, values: [[note]] },
+      ],
+    }),
+  });
+}
+
 async function clearSheetValues(sheetName, range) {
   return sheetsFetch(`/values/${sheetRange(sheetName, range)}:clear`, {
     method: "POST",
@@ -4480,6 +4617,9 @@ async function loadLatestCloudSnapshot(showAlert = true) {
       loadTargetLevelHistory(),
       loadFirstBuyDatesFromSheet().catch(() => {}),
       loadRefillStateFromSheet().catch(() => {}),
+      loadPerfYears().catch(() => {}),
+      loadMonthlyPerf(state.perfYear).catch(() => {}),
+      loadMonthlyExpense().catch(() => {}),
     ]);
     const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G").catch(() => []);
     const layout = parseLayoutRows(stripHeaderRow(layoutValues, SHEET_HEADERS.layout));
@@ -5024,6 +5164,157 @@ function buildSharesTimeline(cloudHistory) {
   const allPositions = cloudHistory?.positions || [];
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
   return { snapshots, allPositions, dates };
+}
+
+// 月績效子分頁：輸入區（寫回投資績效紀錄）＋各月表格（含 BudgetAssistant 支出）＋雙柱對比
+function renderMonthlyPerf() {
+  const YEAR = state.perfYear;
+  const rate = state.perfRate || getUsdTwdRate();
+  const perf = state.monthlyPerf || [];
+  const shown = perf.filter((r) => r.hasData);
+  const expKey = (mn) => `${YEAR}-${String(mn).padStart(2, "0")}`;
+  // 可選年份＝已建的年 ∪ 當前年 ∪ 明年（明年供預先建表）∪ 目前檢視年
+  const nextYear = new Date().getFullYear() + 1;
+  const years = [...new Set([...(state.perfYears || []), YEAR, nextYear])].sort((a, b) => b - a);
+  const yearOpts = years.map((y) => `<option value="${y}"${y === YEAR ? " selected" : ""}>${y} 年</option>`).join("");
+  const yearBar = `
+    <section class="dashboard-card">
+      <div class="perf-year-bar">
+        <label>年度<select id="perf-year">${yearOpts}</select></label>
+        <span class="muted-text">每年一張績效表，可切換檢視</span>
+      </div>
+    </section>`;
+
+  // 選定年的績效 tab 尚未建立 → 只顯示建表入口
+  if (!state.perfYearExists) {
+    return `${yearBar}
+      <section class="dashboard-card">
+        <div class="card-heading"><h3>${YEAR} 年尚無績效表</h3><span>建立後即可在此逐月輸入已實現損益</span></div>
+        <div class="perf-input-actions">
+          <button id="perf-create-btn" class="button primary" type="button" data-create-year="${YEAR}">建立 ${YEAR} 年績效表</button>
+        </div>
+      </section>`;
+  }
+
+  const curMonth = state.perfInput?.month || (new Date().getMonth() + 1);
+  const editing = perf.find((r) => r.monthNum === curMonth);
+  const monthOpts = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((m) => `<option value="${m}"${m === curMonth ? " selected" : ""}>${m} 月</option>`).join("");
+
+  const inputCard = `
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>輸入月績效</h3>
+        <span>台股填當月已實現、美股填今年累積（App 算當月差額）；美股當月·台幣總·匯率由 Sheet 公式自動算</span>
+      </div>
+      <div class="perf-input-grid">
+        <label>月份<select id="perf-month">${monthOpts}</select></label>
+        <label>台股當月已實現 (NT$)<input id="perf-tw" type="number" inputmode="decimal" value="${editing && editing.hasData ? editing.tw : ""}"></label>
+        <label>美股今年累積已實現 (US$)<input id="perf-uscum" type="number" inputmode="decimal" value="${editing && editing.hasData ? editing.usCum : ""}"></label>
+        <label>附註<input id="perf-note" type="text" value="${editing ? String(editing.note).replace(/"/g, "&quot;") : ""}"></label>
+      </div>
+      <div class="perf-input-actions">
+        <span class="muted-text">匯率 USD/TWD：${rate.toFixed(4)}（Sheet GOOGLEFINANCE 即時）</span>
+        <button id="perf-save-btn" class="button primary" type="button">儲存到 ${YEAR} 年績效表</button>
+      </div>
+    </section>`;
+
+  const rowsHtml = shown.map((r) => {
+    const exp = state.monthlyExpense?.[expKey(r.monthNum)];
+    const sinShare = exp?.sinShare || 0;
+    const total = exp?.total || 0;
+    const net = r.totalTwd - sinShare;
+    const usMonthTwd = r.usMonth * rate;
+    return `<tr>
+      <td>${r.monthNum} 月</td>
+      <td class="perf-num">${formatSignedMoney(r.tw)}</td>
+      <td class="perf-num">${r.usMonth >= 0 ? "+" : ""}${r.usMonth.toFixed(2)}<span class="perf-sub"> / ${formatSignedMoney(usMonthTwd)}</span></td>
+      <td class="perf-num perf-strong">${formatSignedMoney(r.totalTwd)}</td>
+      <td class="perf-num">${exp ? formatMoney(sinShare) : "—"}</td>
+      <td class="perf-num">${exp ? formatMoney(total) : "—"}</td>
+      <td class="perf-num ${net >= 0 ? "perf-positive" : "perf-negative"}">${formatSignedMoney(net)}</td>
+    </tr>`;
+  }).join("");
+  const sum = shown.reduce((a, r) => {
+    const exp = state.monthlyExpense?.[expKey(r.monthNum)];
+    a.tw += r.tw; a.usMonth += r.usMonth; a.totalTwd += r.totalTwd;
+    a.sinShare += exp?.sinShare || 0; a.total += exp?.total || 0;
+    if (exp) a.hasExp = true;
+    return a;
+  }, { tw: 0, usMonth: 0, totalTwd: 0, sinShare: 0, total: 0, hasExp: false });
+  const sumNet = sum.totalTwd - sum.sinShare;
+  const totalRow = `<tr class="perf-total-row">
+      <td>${YEAR} 年度</td>
+      <td class="perf-num">${formatSignedMoney(sum.tw)}</td>
+      <td class="perf-num">${sum.usMonth >= 0 ? "+" : ""}${sum.usMonth.toFixed(2)}<span class="perf-sub"> / ${formatSignedMoney(sum.usMonth * rate)}</span></td>
+      <td class="perf-num perf-strong">${formatSignedMoney(sum.totalTwd)}</td>
+      <td class="perf-num">${sum.hasExp ? formatMoney(sum.sinShare) : "—"}</td>
+      <td class="perf-num">${sum.hasExp ? formatMoney(sum.total) : "—"}</td>
+      <td class="perf-num ${sumNet >= 0 ? "perf-positive" : "perf-negative"}">${formatSignedMoney(sumNet)}</td>
+    </tr>`;
+  const table = shown.length
+    ? `<div class="compact-table"><table class="parsed-table perf-table"><thead><tr><th>月份</th><th>台股(NT$)</th><th>美股當月(US$/NT$)</th><th>總實現(NT$)</th><th>我的支出</th><th>總支出</th><th>淨額</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody></table></div>`
+    : `<p class="muted-text">尚無月績效資料，請於上方輸入。</p>`;
+
+  const chartRows = shown.map((r) => ({
+    month: r.monthNum,
+    realized: r.totalTwd,
+    expense: state.monthlyExpense?.[expKey(r.monthNum)]?.sinShare || 0,
+    hasExp: !!state.monthlyExpense?.[expKey(r.monthNum)],
+  }));
+
+  return `${yearBar}${inputCard}
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>總實現損益 vs 我的支出</h3>
+        <span>${YEAR} 年每月投資已實現損益（台幣）與你的個人支出（Sin 負擔）趨勢</span>
+      </div>
+      ${renderPerfExpenseChart(chartRows)}
+    </section>
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>${YEAR} 年各月明細</h3>
+        <span>淨額＝總實現損益 − 我的支出；支出讀自 BudgetAssistant（當月發票次月才齊，未齊時偏低）</span>
+      </div>
+      ${table}
+    </section>`;
+}
+
+// 每月折線雙線：總實現損益（綠）vs 我的支出（橘），月份等距 x 軸、負值 0 軸虛線
+function renderPerfExpenseChart(rows) {
+  if (!rows.length) return "<p class=\"muted-text\">尚無資料。</p>";
+  const W = 600, H = 200, PL = 52, PR = 8, PT = 12, PB = 26;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const vals = rows.flatMap((r) => [r.realized, ...(r.hasExp ? [r.expense] : [])]);
+  const maxV = (Math.max(0, ...vals) * 1.1) || 1;
+  const minV = Math.min(0, ...vals) * 1.1;
+  const n = rows.length;
+  const xPos = (i) => PL + (n === 1 ? cW / 2 : (i / (n - 1)) * cW);
+  const yPos = (v) => PT + (1 - (v - minV) / ((maxV - minV) || 1)) * cH;
+  const span = maxV - minV;
+  const step = span > 200000 ? 50000 : span > 100000 ? 20000 : span > 40000 ? 10000 : span > 10000 ? 5000 : 1000;
+  const yLines = [];
+  for (let v = Math.ceil(minV / step) * step; v <= maxV; v += step) {
+    const y = yPos(v);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : v}</text>`);
+  }
+  if (minV < 0) {
+    const y0 = yPos(0);
+    yLines.push(`<line x1="${PL}" y1="${y0}" x2="${W - PR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>`);
+  }
+  const xLabels = rows.map((r, i) => `<text x="${xPos(i)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--muted)">${r.month}月</text>`).join("");
+  const line = (getV, has, color, label) => {
+    const pts = rows.map((r, i) => (has(r) ? { i, v: getV(r) } : null)).filter(Boolean);
+    if (!pts.length) return "";
+    const poly = `<polyline points="${pts.map((p) => `${xPos(p.i)},${yPos(p.v)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+    const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${color}"><title>${rows[p.i].month}月 ${label} ${formatSignedMoney(p.v)}</title></circle>`).join("");
+    return poly + dots;
+  };
+  const realizedLine = line((r) => r.realized, () => true, "#22c55e", "總實現損益");
+  const expenseLine = line((r) => r.expense, (r) => r.hasExp, "#f59e0b", "我的支出");
+  const legend = `<div class="level-chart-legend"><span class="level-legend-dot" style="background:#22c55e"></span>總實現損益<span class="level-legend-dot" style="background:#f59e0b;margin-left:10px"></span>我的支出</div>`;
+  return `${legend}<div class="shares-chart-container"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${realizedLine}${expenseLine}</svg></div>`;
 }
 
 function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
@@ -6489,6 +6780,7 @@ function renderCloudSnapshot() {
         <button class="holdings-subtab${state.homeSubTab === "overview" ? " is-active" : ""}" data-home-subtab="overview" type="button">總覽</button>
         <button class="holdings-subtab${state.homeSubTab === "alerts" ? " is-active" : ""}" data-home-subtab="alerts" type="button">待關注</button>
         <button class="holdings-subtab${state.homeSubTab === "analysis" ? " is-active" : ""}" data-home-subtab="analysis" type="button">分析</button>
+        <button class="holdings-subtab${state.homeSubTab === "monthly" ? " is-active" : ""}" data-home-subtab="monthly" type="button">月績效</button>
       </div>
     </section>
     ${state.homeSubTab === "overview" ? `
@@ -6586,6 +6878,7 @@ function renderCloudSnapshot() {
       </div>
       ${renderRateHistogram(filteredPositions, state.quotes)}
     </section>` : ""}
+    ${state.homeSubTab === "monthly" ? renderMonthlyPerf() : ""}
   `;
   const _dateMarketsMap = {};
   for (const snap of (state.cloudHistory.snapshots || [])) {
@@ -7295,6 +7588,57 @@ function renderCloudSnapshot() {
   });
   els.cloudSnapshot.querySelector("#holdings-date-select")?.addEventListener("change", (e) => {
     state.selectedSnapshotDate = e.target.value;
+    renderCloudSnapshot();
+  });
+  // 月績效：切換月份（帶入該月已存值供編輯）
+  els.cloudSnapshot.querySelector("#perf-month")?.addEventListener("change", (e) => {
+    state.perfInput = { month: Number(e.target.value) };
+    renderCloudSnapshot();
+  });
+  // 月績效：儲存 → 只寫回 B/D/F（C·E·G 公式保留）→ 重讀
+  els.cloudSnapshot.querySelector("#perf-save-btn")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const month = Number(els.cloudSnapshot.querySelector("#perf-month")?.value);
+    if (!month) return;
+    const twRaw = (els.cloudSnapshot.querySelector("#perf-tw")?.value || "").trim();
+    const usRaw = (els.cloudSnapshot.querySelector("#perf-uscum")?.value || "").trim();
+    const note = els.cloudSnapshot.querySelector("#perf-note")?.value ?? "";
+    btn.disabled = true;
+    btn.textContent = "儲存中…";
+    try {
+      await saveMonthlyPerf(state.perfYear, month, twRaw === "" ? "" : Number(twRaw), usRaw === "" ? "" : Number(usRaw), note);
+      await loadMonthlyPerf(state.perfYear);
+      state.perfInput = { month };
+    } catch (err) {
+      alert("儲存失敗：" + (err?.message || err));
+    }
+    btn.disabled = false;
+    btn.textContent = `儲存到 ${state.perfYear} 年績效表`;
+    renderCloudSnapshot();
+  });
+  // 月績效：切換檢視年度
+  els.cloudSnapshot.querySelector("#perf-year")?.addEventListener("change", async (e) => {
+    state.perfYear = Number(e.target.value);
+    await loadMonthlyPerf(state.perfYear).catch(() => {});
+    renderCloudSnapshot();
+  });
+  // 月績效：建立某年的空白績效表
+  els.cloudSnapshot.querySelector("#perf-create-btn")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const year = Number(btn.dataset.createYear);
+    if (!year) return;
+    btn.disabled = true;
+    btn.textContent = "建立中…";
+    try {
+      await createPerfYearTab(year);
+      await loadPerfYears().catch(() => {});
+      await loadMonthlyPerf(year);
+    } catch (err) {
+      alert("建立失敗：" + (err?.message || err));
+      btn.disabled = false;
+      btn.textContent = `建立 ${year} 年績效表`;
+      return;
+    }
     renderCloudSnapshot();
   });
   // B tab：查看截圖連結
