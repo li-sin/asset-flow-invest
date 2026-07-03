@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.32.0";
-const APP_VERSION_NOTE = "月績效子分頁：接既有「投資績效紀錄」tab（台股填當月/美股填今年累積，C·E·匯率由 Sheet 公式自動算），跨 Sheet 讀 BudgetAssistant 當月支出（我的負擔＋總支出），總實現損益 vs 我的支出折線對比＋年度總結列；多年支援：每年一張 tab（現有=2026、其他年「投資績效紀錄YYYY」），下拉切年、選未建年份可一鍵建表";
+const APP_VERSION = "v0.32.1";
+const APP_VERSION_NOTE = "修復月績效子分頁 PERF_BASE_YEAR/PERF_HEADER 未宣告導致 2026 各月明細空白的 bug";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -18,6 +18,8 @@ const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const DEFAULT_SPREADSHEET_ID = "1adzBH3WaQ_pUgXeSKb2AeGkQE5pXejhHBxQ6MV8XtSI";
 // 月績效：接既有「投資績效紀錄」tab（B 台股當月手填、D 美股今年累積手填；C·E·G 為 Sheet 公式，不可覆蓋）
 const PERF_TAB = "投資績效紀錄";
+const PERF_BASE_YEAR = 2026; // 現有無年份後綴的「投資績效紀錄」tab 對應年度
+const PERF_HEADER = ["月份", "台股已實現損益", "美股已實現收入", "總損益", "總實現損益", "附註", "匯率"];
 // 跨 Sheet 讀 BudgetAssistant 當月支出（同帳號 scope=spreadsheets，現有 token 即可讀）
 const BUDGET_SHEET_ID = "1T2G8leVwJ8EES1GzEcL1bD_NLHe46ylmPPijc-VoKmo";
 const BUDGET_LEDGER_TAB = "月度帳本"; // A=日期 C=總金額 G=Sin負擔
