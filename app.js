@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.32.1";
-const APP_VERSION_NOTE = "修復月績效子分頁 PERF_BASE_YEAR/PERF_HEADER 未宣告導致 2026 各月明細空白的 bug";
+const APP_VERSION = "v0.32.2";
+const APP_VERSION_NOTE = "本機開發：dev token banner 加登出/清除鈕（修正登入後未刷新導致按鈕永遠隱藏）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -8274,16 +8274,33 @@ async function loadAppAfterAuth() {
   await loadLatestCloudSnapshot(false);
 }
 
-// 本機開發橘色 banner（切換模式時只更新文字，不重複插入）
+// 本機開發橘色 banner（切換模式時只更新文字，不重複插入）；有存 dev token 時額外顯示「清除」鈕
+// （dev token 一旦存進 localStorage，重整會自動略過貼 token 畫面；token 若只是 scope 不足但仍有效，
+//  不會被 applyDevToken 判失效，需要手動清掉才能重新貼，故加此按鈕避免每次要靠 console 清）
 function showDevBanner(text) {
   let banner = document.getElementById("dev-banner");
   if (!banner) {
     banner = document.createElement("div");
     banner.id = "dev-banner";
-    banner.style.cssText = "position:fixed;bottom:60px;left:0;right:0;background:#f59e0b;color:#fff;text-align:center;font-size:12px;padding:4px;z-index:9999;";
+    banner.style.cssText = "position:fixed;bottom:60px;left:0;right:0;background:#f59e0b;color:#fff;text-align:center;font-size:12px;padding:4px;z-index:9999;display:flex;align-items:center;justify-content:center;gap:8px;";
+    const textEl = document.createElement("span");
+    textEl.id = "dev-banner-text";
+    banner.appendChild(textEl);
+    const clearBtn = document.createElement("button");
+    clearBtn.id = "dev-banner-clear";
+    clearBtn.type = "button";
+    clearBtn.textContent = "登出/清除 token";
+    clearBtn.style.cssText = "font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid #fff;background:transparent;color:#fff;cursor:pointer;";
+    clearBtn.onclick = () => {
+      localStorage.removeItem("afi_dev_token");
+      window.location.reload();
+    };
+    banner.appendChild(clearBtn);
     document.body.appendChild(banner);
   }
-  banner.textContent = text;
+  document.getElementById("dev-banner-text").textContent = text;
+  const clearBtn = document.getElementById("dev-banner-clear");
+  if (clearBtn) clearBtn.hidden = !localStorage.getItem("afi_dev_token");
 }
 
 // 本機開發：套用手動貼上的 access token（繞過 OAuth origin 限制，讀真實 Sheet）
@@ -8297,6 +8314,8 @@ async function applyDevToken(rawToken) {
   googleAccessTokenExpiresAt = Date.now() + ((Number(info.expires_in) || 3000) * 1000) - 60000;
   authorizeGoogleProfile({ email: info.email }); // 驗白名單 + 設 state.auth（不符會 throw）
   localStorage.setItem("afi_dev_token", token);
+  const clearBtn = document.getElementById("dev-banner-clear");
+  if (clearBtn) clearBtn.hidden = false; // 剛存了 token，登出鈕要跟著顯示
   return info.email;
 }
 
