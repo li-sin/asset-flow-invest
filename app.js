@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.32.2";
-const APP_VERSION_NOTE = "本機開發：dev token banner 加登出/清除鈕（修正登入後未刷新導致按鈕永遠隱藏）";
+const APP_VERSION = "v0.33.0";
+const APP_VERSION_NOTE = "月績效 tab 新增現金需求試算：平均月支出（5000進位）× 6 緩衝 + 未來12個月計畫支出，計畫存 Sheet 現金計畫 tab";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -23,6 +23,7 @@ const PERF_HEADER = ["月份", "台股已實現損益", "美股已實現收入",
 // 跨 Sheet 讀 BudgetAssistant 當月支出（同帳號 scope=spreadsheets，現有 token 即可讀）
 const BUDGET_SHEET_ID = "1T2G8leVwJ8EES1GzEcL1bD_NLHe46ylmPPijc-VoKmo";
 const BUDGET_LEDGER_TAB = "月度帳本"; // A=日期 C=總金額 G=Sin負擔
+const CASH_PLAN_TAB = "現金計畫";    // A=說明 B=金額 C=預計年月
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com";
 const DEFAULT_AUTHORIZED_EMAIL = "lovelisa00000@gmail.com";
 const QUOTE_PROXY_URL = "https://script.google.com/macros/s/AKfycbznKVxtS6OhxfKO6E1PB21U-X__bSHHdlhUGt8Fj5vv7PRf3Pi_xzsByAHvu0sE8G4/exec";
@@ -33,6 +34,7 @@ const SHEET_NAMES = {
   layout: "AssetFlowLayout",
   firstBuy: "AssetFlowFirstBuy",
   refillState: "AssetFlowRefillState",
+  cashPlan: CASH_PLAN_TAB,
 };
 const SHEET_HEADERS = {
   snapshots: ["snapshot_id", "created_at", "date", "market", "source_entry_id", "source_title", "row_count", "app_version"],
@@ -40,6 +42,7 @@ const SHEET_HEADERS = {
   layout: ["date", "market", "symbol", "name", "shares", "prev_shares", "delta"],
   firstBuy: ["symbol", "first_buy_date", "market"],
   refillState: ["market", "symbol", "shares", "avg_cost", "updated_at"],
+  cashPlan: ["說明", "金額", "預計年月"],
 };
 const SYMBOL_NAMES = {
   // ── 台股 ──────────────────────────────────────────────────────────────────
@@ -97,6 +100,7 @@ const state = {
   homeSubTab: "overview", // 首頁子分頁：overview/alerts/analysis/monthly
   monthlyPerf: [],      // 各月績效（登入後從「投資績效紀錄」tab 讀）
   monthlyExpense: {},   // { "YYYY-MM": { total, sinShare, count } }（跨 Sheet 讀 BudgetAssistant）
+  cashPlan: [],         // [{ desc, amount, yearMonth }]（現金計畫 tab）
   perfRate: null,       // 「投資績效紀錄」G2 的 GOOGLEFINANCE USD/TWD 匯率
   perfInput: { month: new Date().getMonth() + 1 }, // 月績效輸入區選定月份
   perfYear: new Date().getFullYear(), // 月績效檢視的年份
@@ -3520,6 +3524,53 @@ async function loadMonthlyExpense() {
   state.monthlyExpense = map;
 }
 
+// 計算「完整月」的 Sin 平均月支出，進位到 5000 級距；若資料不足回傳 null
+// 完整月定義：若今日 >= 20，上個月已完整；否則上上個月才算完整
+function calcAvgMonthlyExpense() {
+  const today = new Date();
+  const day = today.getDate();
+  let cutoffYear = today.getFullYear();
+  let cutoffMonth = today.getMonth() + 1; // 1-12
+  if (day >= 20) {
+    cutoffMonth -= 1;
+    if (cutoffMonth === 0) { cutoffMonth = 12; cutoffYear -= 1; }
+  } else {
+    cutoffMonth -= 2;
+    if (cutoffMonth <= 0) { cutoffMonth += 12; cutoffYear -= 1; }
+  }
+  const shares = [];
+  for (const [key, val] of Object.entries(state.monthlyExpense || {})) {
+    const m = key.match(/(\d{4})-(\d{2})/);
+    if (!m) continue;
+    const y = Number(m[1]), mo = Number(m[2]);
+    if (y < cutoffYear || (y === cutoffYear && mo <= cutoffMonth)) shares.push(val.sinShare);
+  }
+  if (!shares.length) return null;
+  const avg = shares.reduce((a, b) => a + b, 0) / shares.length;
+  return Math.ceil(avg / 5000) * 5000;
+}
+
+async function loadCashPlan() {
+  const rows = await readSheetValues(SHEET_NAMES.cashPlan, "A2:C").catch(() => []);
+  state.cashPlan = rows
+    .filter((r) => r[0] || r[1] || r[2])
+    .map((r) => ({
+      desc: String(r[0] || ""),
+      amount: Number(String(r[1] || "").replace(/[^\d.-]/g, "")) || 0,
+      yearMonth: String(r[2] || ""),
+    }));
+}
+
+async function saveCashPlan(items) {
+  await clearSheetValues(SHEET_NAMES.cashPlan, "A2:C");
+  const valid = items.filter((it) => it.desc || it.amount || it.yearMonth);
+  if (valid.length) {
+    await updateSheetValues(SHEET_NAMES.cashPlan, `A2:C${valid.length + 1}`,
+      valid.map((it) => [it.desc, it.amount || 0, it.yearMonth]));
+  }
+  state.cashPlan = valid;
+}
+
 // 寫回「投資績效紀錄」：更新手填欄 B(台股)/D(美股累積)/F(附註)，並補 C 欄公式
 // （C 的「=D本月-D前月」公式只在 1-6 月存在，7-12 月原本空白 → 新月份要補上才會算當月差額）
 // E(=B+C*$G$2) 每列本就有公式、G2 為 GOOGLEFINANCE，兩者不碰。
@@ -3567,6 +3618,7 @@ async function ensureSheetTables() {
   await updateSheetValues(SHEET_NAMES.layout, "A1:G1", [SHEET_HEADERS.layout]);
   await updateSheetValues(SHEET_NAMES.firstBuy, "A1:C1", [SHEET_HEADERS.firstBuy]);
   await updateSheetValues(SHEET_NAMES.refillState, "A1:E1", [SHEET_HEADERS.refillState]);
+  await updateSheetValues(SHEET_NAMES.cashPlan, "A1:C1", [SHEET_HEADERS.cashPlan]);
 }
 
 async function ensureCloudSheetTables() {
@@ -4622,6 +4674,7 @@ async function loadLatestCloudSnapshot(showAlert = true) {
       loadPerfYears().catch(() => {}),
       loadMonthlyPerf(state.perfYear).catch(() => {}),
       loadMonthlyExpense().catch(() => {}),
+      loadCashPlan().catch(() => {}),
     ]);
     const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G").catch(() => []);
     const layout = parseLayoutRows(stripHeaderRow(layoutValues, SHEET_HEADERS.layout));
@@ -5168,6 +5221,76 @@ function buildSharesTimeline(cloudHistory) {
   return { snapshots, allPositions, dates };
 }
 
+// 現金需求試算區：平均月支出（5000進位）× 6 + 未來12個月計畫支出
+function renderCashPlan() {
+  const avg = calcAvgMonthlyExpense();
+  const buffer6 = avg != null ? avg * 6 : null;
+
+  const now = new Date();
+  const cutoffDate = new Date(now.getFullYear(), now.getMonth() + 12, 1);
+  let planned12Total = 0, planned12Count = 0;
+  for (const it of (state.cashPlan || [])) {
+    if (!it.yearMonth || !it.amount) continue;
+    const d = new Date(it.yearMonth + "-01");
+    if (d >= new Date(now.getFullYear(), now.getMonth(), 1) && d < cutoffDate) {
+      planned12Total += it.amount;
+      planned12Count++;
+    }
+  }
+  const totalNeeded = (buffer6 || 0) + planned12Total;
+
+  const summaryHtml = `
+    <div class="cash-summary-grid">
+      <div class="cash-summary-item">
+        <span class="cash-label">平均月支出</span>
+        <span class="cash-value">${avg != null ? formatMoney(avg) : "—"}</span>
+        <span class="cash-sub">完整月均值，5000 級距進位</span>
+      </div>
+      <div class="cash-summary-item">
+        <span class="cash-label">6 個月緩衝</span>
+        <span class="cash-value">${buffer6 != null ? formatMoney(buffer6) : "—"}</span>
+      </div>
+      <div class="cash-summary-item">
+        <span class="cash-label">未來 12 個月計畫</span>
+        <span class="cash-value">${formatMoney(planned12Total)}</span>
+        <span class="cash-sub">${planned12Count} 筆</span>
+      </div>
+      <div class="cash-summary-item cash-total-item">
+        <span class="cash-label">建議持現</span>
+        <span class="cash-value cash-total-value">${buffer6 != null ? formatMoney(totalNeeded) : "—"}</span>
+      </div>
+    </div>`;
+
+  const rowsHtml = (state.cashPlan || []).map((it, i) => `
+    <tr>
+      <td><input class="cash-plan-desc" data-idx="${i}" placeholder="說明（如：換車）" value="${it.desc.replace(/"/g, "&quot;")}"></td>
+      <td><input class="cash-plan-amount" data-idx="${i}" type="number" inputmode="numeric" value="${it.amount || ""}"></td>
+      <td><input class="cash-plan-month" data-idx="${i}" type="month" value="${it.yearMonth}"></td>
+      <td><button class="cash-plan-del" data-idx="${i}" type="button">✕</button></td>
+    </tr>`).join("");
+
+  return `
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>現金需求試算</h3>
+        <span>建議持現 = 6 個月均支出緩衝 + 未來 12 個月計畫支出</span>
+      </div>
+      ${summaryHtml}
+      <div style="margin-top:1rem">
+        <div class="compact-table">
+          <table class="parsed-table">
+            <thead><tr><th>說明</th><th>金額 (NT$)</th><th>預計年月</th><th></th></tr></thead>
+            <tbody id="cash-plan-body">${rowsHtml}</tbody>
+          </table>
+        </div>
+        <div class="perf-input-actions">
+          <button id="cash-plan-add" class="button" type="button">+ 新增支出計畫</button>
+          <button id="cash-plan-save" class="button primary" type="button">儲存計畫</button>
+        </div>
+      </div>
+    </section>`;
+}
+
 // 月績效子分頁：輸入區（寫回投資績效紀錄）＋各月表格（含 BudgetAssistant 支出）＋雙柱對比
 function renderMonthlyPerf() {
   const YEAR = state.perfYear;
@@ -5195,7 +5318,8 @@ function renderMonthlyPerf() {
         <div class="perf-input-actions">
           <button id="perf-create-btn" class="button primary" type="button" data-create-year="${YEAR}">建立 ${YEAR} 年績效表</button>
         </div>
-      </section>`;
+      </section>
+      ${renderCashPlan()}`;
   }
 
   const curMonth = state.perfInput?.month || (new Date().getMonth() + 1);
@@ -5279,7 +5403,8 @@ function renderMonthlyPerf() {
         <span>淨額＝總實現損益 − 我的支出；支出讀自 BudgetAssistant（當月發票次月才齊，未齊時偏低）</span>
       </div>
       ${table}
-    </section>`;
+    </section>
+    ${renderCashPlan()}`;
 }
 
 // 每月折線雙線：總實現損益（綠）vs 我的支出（橘），月份等距 x 軸、負值 0 軸虛線
@@ -7641,6 +7766,41 @@ function renderCloudSnapshot() {
       btn.textContent = `建立 ${year} 年績效表`;
       return;
     }
+    renderCloudSnapshot();
+  });
+  // 現金計畫：從 DOM 讀出現有輸入列（新增/刪除前先同步）
+  function readCashPlanInputs() {
+    return Array.from(els.cloudSnapshot.querySelectorAll("#cash-plan-body tr")).map((tr) => ({
+      desc: tr.querySelector(".cash-plan-desc")?.value || "",
+      amount: Number(tr.querySelector(".cash-plan-amount")?.value || 0) || 0,
+      yearMonth: tr.querySelector(".cash-plan-month")?.value || "",
+    }));
+  }
+  // 現金計畫：新增一列空白
+  els.cloudSnapshot.querySelector("#cash-plan-add")?.addEventListener("click", () => {
+    state.cashPlan = [...readCashPlanInputs(), { desc: "", amount: 0, yearMonth: "" }];
+    renderCloudSnapshot();
+  });
+  // 現金計畫：刪除某列
+  els.cloudSnapshot.querySelectorAll(".cash-plan-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.idx);
+      state.cashPlan = readCashPlanInputs().filter((_, j) => j !== idx);
+      renderCloudSnapshot();
+    });
+  });
+  // 現金計畫：儲存到 Sheet
+  els.cloudSnapshot.querySelector("#cash-plan-save")?.addEventListener("click", async (e) => {
+    const saveBtn = e.currentTarget;
+    saveBtn.disabled = true;
+    saveBtn.textContent = "儲存中…";
+    try {
+      await saveCashPlan(readCashPlanInputs());
+    } catch (err) {
+      alert("儲存計畫失敗：" + (err?.message || err));
+    }
+    saveBtn.disabled = false;
+    saveBtn.textContent = "儲存計畫";
     renderCloudSnapshot();
   });
   // B tab：查看截圖連結

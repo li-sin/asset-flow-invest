@@ -418,6 +418,57 @@ textarea {
   font-size: 16px;
 }
 
+/* 現金需求試算 */
+.cash-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.cash-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+.cash-total-item {
+  border: 2px solid var(--accent);
+}
+.cash-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cash-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cash-total-value {
+  color: var(--accent);
+}
+.cash-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+#cash-plan-body input {
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.cash-plan-del {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 14px;
+}
+.cash-plan-del:hover {
+  color: #c0392b;
+}
+
 .quote-loading {
   margin-bottom: 8px;
 }
