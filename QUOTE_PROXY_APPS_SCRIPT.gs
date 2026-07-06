@@ -1,5 +1,5 @@
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
-const PROXY_VERSION = "3";
+const PROXY_VERSION = "4";
 
 function doGet(e) {
   const params = e && e.parameter ? e.parameter : {};
@@ -35,32 +35,49 @@ function fetchCurrentQuotes_(symbols) {
   const period2 = Math.floor(today.getTime() / 1000) + 86400;
 
   symbols.forEach((symbol) => {
-    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
-    try {
-      const payload = fetchJson_(url);
-      const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
-      const meta = result && result.meta ? result.meta : {};
-      const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
-      const closes = quote && quote.close
-        ? quote.close.filter((v) => v !== null && v !== undefined)
-        : [];
-      const price = numberOrNull_(meta.regularMarketPrice)
-        || (closes.length ? numberOrNull_(closes[closes.length - 1]) : null);
-      const prevClose = closes.length > 1
-        ? numberOrNull_(closes[closes.length - 2])
-        : numberOrNull_(meta.chartPreviousClose);
-      quotes[symbol] = {
-        price,
-        prevClose,
-        currency: meta.currency || "",
-        yahooSymbol: meta.symbol || symbol,
-      };
-    } catch (err) {
-      quotes[symbol] = { price: null, prevClose: null, currency: "", yahooSymbol: symbol };
-    }
+    quotes[symbol] = fetchQuoteWithOtcFallback_(symbol, period1, period2);
   });
 
   return quotes;
+}
+
+// 上市(.TW) 查無價格時，改試上櫃(.TWO)，例如 5274 信驊
+function fetchQuoteWithOtcFallback_(symbol, period1, period2) {
+  const primary = fetchOneQuote_(symbol, period1, period2);
+  if (primary.price !== null) return primary;
+  if (/\.TW$/i.test(symbol)) {
+    const otcSymbol = symbol.replace(/\.TW$/i, ".TWO");
+    const fallback = fetchOneQuote_(otcSymbol, period1, period2);
+    if (fallback.price !== null) return fallback;
+  }
+  return primary;
+}
+
+function fetchOneQuote_(symbol, period1, period2) {
+  const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
+  try {
+    const payload = fetchJson_(url);
+    const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+    const meta = result && result.meta ? result.meta : {};
+    const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
+    const closes = quote && quote.close
+      ? quote.close.filter((v) => v !== null && v !== undefined)
+      : [];
+    const price = numberOrNull_(meta.regularMarketPrice)
+      || (closes.length ? numberOrNull_(closes[closes.length - 1]) : null);
+    const prevClose = closes.length > 1
+      ? numberOrNull_(closes[closes.length - 2])
+      : numberOrNull_(meta.chartPreviousClose);
+    return {
+      price,
+      prevClose,
+      currency: meta.currency || "",
+      yahooSymbol: meta.symbol || symbol,
+      name: meta.longName || meta.shortName || "",
+    };
+  } catch (err) {
+    return { price: null, prevClose: null, currency: "", yahooSymbol: symbol, name: "" };
+  }
 }
 
 function fetchHistoricalCloses_(symbols, start, end) {
@@ -73,26 +90,36 @@ function fetchHistoricalCloses_(symbols, start, end) {
   const history = {};
 
   symbols.forEach((symbol) => {
-    const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`;
-    try {
-      const payload = fetchJson_(url);
-      const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
-      const timestamps = result && result.timestamp ? result.timestamp : [];
-      const quotes = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
-      const closes = quotes && quotes.close ? quotes.close : [];
-      history[symbol] = {};
-      timestamps.forEach((ts, index) => {
-        const close = numberOrNull_(closes[index]);
-        if (close === null || close <= 0) return;
-        const date = Utilities.formatDate(new Date(ts * 1000), "GMT", "yyyy-MM-dd");
-        history[symbol][date] = close;
-      });
-    } catch (err) {
-      history[symbol] = history[symbol] || {};
+    let closesByDate = fetchOneHistory_(symbol, period1, period2);
+    // 上市(.TW) 查無資料時，改試上櫃(.TWO)，例如 5274 信驊
+    if (!Object.keys(closesByDate).length && /\.TW$/i.test(symbol)) {
+      closesByDate = fetchOneHistory_(symbol.replace(/\.TW$/i, ".TWO"), period1, period2);
     }
+    history[symbol] = closesByDate;
   });
 
   return history;
+}
+
+function fetchOneHistory_(symbol, period1, period2) {
+  const url = `${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&events=history`;
+  const closesByDate = {};
+  try {
+    const payload = fetchJson_(url);
+    const result = payload && payload.chart && payload.chart.result && payload.chart.result[0];
+    const timestamps = result && result.timestamp ? result.timestamp : [];
+    const quotes = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
+    const closes = quotes && quotes.close ? quotes.close : [];
+    timestamps.forEach((ts, index) => {
+      const close = numberOrNull_(closes[index]);
+      if (close === null || close <= 0) return;
+      const date = Utilities.formatDate(new Date(ts * 1000), "GMT", "yyyy-MM-dd");
+      closesByDate[date] = close;
+    });
+  } catch (err) {
+    // 保留空物件，讓外層決定是否 fallback
+  }
+  return closesByDate;
 }
 
 function fetchJson_(url) {

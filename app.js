@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.2";
-const APP_VERSION_NOTE = "授權白名單移除 ashleyzhanya，恢復僅本人；保留多帳號陣列架構";
+const APP_VERSION = "v0.33.3";
+const APP_VERSION_NOTE = "上櫃(.TWO)報價 fallback + Yahoo 自動抓公司名稱補全；SYMBOL_NAMES 補 KLAC/MRVL 等";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -2800,6 +2800,9 @@ function resolveSymbolName(symbol) {
     const name = String(positions[i]?.name || "").trim();
     if (name && String(positions[i].symbol || "").toUpperCase().trim() === s) return name;
   }
+  // 前兩者都沒有 → 用 quote proxy 從 Yahoo Finance 抓到的官方英文名稱（自動、無需手動輸入）
+  const autoName = String(state.quotes?.[s]?.name || "").trim();
+  if (autoName) return autoName;
   return "";
 }
 
