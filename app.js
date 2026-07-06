@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.6";
-const APP_VERSION_NOTE = "修復貼上表格/手動輸入/券商檔匯入/合併存雲端 未寫入 AssetFlowLayout 導致布局總覽卡住不更新";
+const APP_VERSION = "v0.33.7";
+const APP_VERSION_NOTE = "saveLayoutDeltaToSheet 補上「前一份持倉消失＝已全數調節」偵測，自動補記賣光 delta";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3983,12 +3983,20 @@ async function saveLayoutDeltaToSheet(newPayloads) {
       const prevPositions = prevSnapshot
         ? allPositions.filter((p) => p.snapshotId === prevSnapshot.snapshotId)
         : [];
+      const newSymbols = new Set(newRows.map((r) => r.symbol));
       for (const newRow of newRows) {
         const prev = prevPositions.find((p) => p.symbol === newRow.symbol);
         const prevShares = prev ? Number(prev.shares ?? 0) : 0;
         const delta = newRow.shares - prevShares;
         if (delta !== 0 || !prev) {
           rows.push([date, market, newRow.symbol, newRow.name, newRow.shares, prevShares, delta]);
+        }
+      }
+      // 前一份快照有、這次完整持倉清單裡消失的標的，視為已全數調節（賣光）
+      for (const prev of prevPositions) {
+        const prevShares = Number(prev.shares ?? 0);
+        if (prevShares !== 0 && !newSymbols.has(prev.symbol)) {
+          rows.push([date, market, prev.symbol, prev.name, 0, prevShares, -prevShares]);
         }
       }
     }
