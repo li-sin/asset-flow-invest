@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.8";
-const APP_VERSION_NOTE = "刪除/清理快照時同步清理 AssetFlowLayout（移除孤兒 delta + 重算後續快照），修復刪除不完整";
+const APP_VERSION = "v0.33.9";
+const APP_VERSION_NOTE = "修復 saveLayoutDeltaToSheet 誤取 payload.date（undefined）導致新增庫存只寫出空白日期列、layout 不更新的根本 bug";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3972,7 +3972,11 @@ async function saveLayoutDeltaToSheet(newPayloads) {
     const allSnapshots = state.cloudHistory?.snapshots || [];
     const rows = [];
     for (const payload of newPayloads) {
-      const { date, market } = payload;
+      // date/market 在 snapshotRow[2]/[3]，payload 沒有 top-level date/market
+      // （舊版誤取 payload.date/market → undefined → 寫出空白日期列、prev 找不到）
+      const date = payload.snapshotRow?.[2];
+      const market = payload.snapshotRow?.[3];
+      if (!date || !market) continue; // 防呆：日期/市場缺失就跳過，不寫出空白列
       const newRows = payload.positionRows.map((r) => ({
         symbol: r[3], name: r[4], shares: Number(r[6] ?? 0),
       }));
