@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.0";
-const APP_VERSION_NOTE = "月績效 tab 新增現金需求試算：平均月支出（5000進位）× 6 緩衝 + 未來12個月計畫支出，計畫存 Sheet 現金計畫 tab";
+const APP_VERSION = "v0.33.1";
+const APP_VERSION_NOTE = "授權白名單改為多帳號，新增 ashleyzhanya 帳號";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -25,7 +25,7 @@ const BUDGET_SHEET_ID = "1T2G8leVwJ8EES1GzEcL1bD_NLHe46ylmPPijc-VoKmo";
 const BUDGET_LEDGER_TAB = "月度帳本"; // A=日期 C=總金額 G=Sin負擔
 const CASH_PLAN_TAB = "現金計畫";    // A=說明 B=金額 C=預計年月
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com";
-const DEFAULT_AUTHORIZED_EMAIL = "lovelisa00000@gmail.com";
+const DEFAULT_AUTHORIZED_EMAILS = ["lovelisa00000@gmail.com", "ashleyzhanya@gmail.com"];
 const QUOTE_PROXY_URL = "https://script.google.com/macros/s/AKfycbznKVxtS6OhxfKO6E1PB21U-X__bSHHdlhUGt8Fj5vv7PRf3Pi_xzsByAHvu0sE8G4/exec";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
@@ -3192,7 +3192,7 @@ function getSheetSyncConfig() {
   return {
     spreadsheetId: DEFAULT_SPREADSHEET_ID,
     clientId: DEFAULT_GOOGLE_CLIENT_ID,
-    authorizedEmail: DEFAULT_AUTHORIZED_EMAIL,
+    authorizedEmails: DEFAULT_AUTHORIZED_EMAILS,
   };
 }
 
@@ -3220,10 +3220,10 @@ function renderAuthGate(message = "") {
   const config = getSheetSyncConfig();
   const status = message || state.auth.message || "請使用授權的 Google 帳號登入。";
   els.authStatus.textContent = status;
-  els.authEmail.textContent = config.authorizedEmail
-    ? `允許帳號：${config.authorizedEmail}`
+  els.authEmail.textContent = config.authorizedEmails?.length
+    ? `允許帳號：${config.authorizedEmails.join("、")}`
     : "允許帳號未設定";
-  els.authSignIn.disabled = !config.clientId || !config.authorizedEmail;
+  els.authSignIn.disabled = !config.clientId || !config.authorizedEmails?.length;
   els.authSignIn.textContent = state.auth.authorized ? "已登入" : "使用 Google 登入";
 }
 
@@ -3246,10 +3246,10 @@ async function fetchGoogleProfile(token) {
 
 function authorizeGoogleProfile(profile, config = getSheetSyncConfig()) {
   const email = normalizeEmail(profile.email || "");
-  const allowed = normalizeEmail(config.authorizedEmail || "");
+  const allowed = (config.authorizedEmails || []).map(normalizeEmail).filter(Boolean);
   if (!email) throw new Error("Google 帳號沒有回傳 email，請重新登入。");
-  if (!allowed) throw new Error("允許登入的 Google Email 尚未設定");
-  if (email !== allowed) {
+  if (!allowed.length) throw new Error("允許登入的 Google Email 尚未設定");
+  if (!allowed.includes(email)) {
     state.auth = {
       signedIn: true,
       authorized: false,
