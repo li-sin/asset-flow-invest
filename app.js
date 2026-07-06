@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.7";
-const APP_VERSION_NOTE = "saveLayoutDeltaToSheet 補上「前一份持倉消失＝已全數調節」偵測，自動補記賣光 delta";
+const APP_VERSION = "v0.33.8";
+const APP_VERSION_NOTE = "刪除/清理快照時同步清理 AssetFlowLayout（移除孤兒 delta + 重算後續快照），修復刪除不完整";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4008,6 +4008,83 @@ async function saveLayoutDeltaToSheet(newPayloads) {
   }
 }
 
+// 刪除/清理快照後同步 AssetFlowLayout：
+// - 已無任何保留快照的 (日期,市場) → 移除該組 delta 列
+// - 被刪日期之後第一份保留快照 → prev 改變，需重算該日 delta（含賣光偵測）
+// - 其餘日期的列（含 session 17 手動校正）原樣保留不動
+async function syncLayoutAfterSnapshotChange(deletedSnapshots, keptSnapshots, keptPositions) {
+  if (!deletedSnapshots?.length) return;
+  try {
+    const layoutValues = await readCloudSheetValues(SHEET_NAMES.layout, "A2:G").catch(() => []);
+    const layoutRows = (layoutValues || []).filter((r) => r && r.length && (r[0] || "").trim());
+
+    const keptByMarket = {};
+    for (const s of keptSnapshots) {
+      const mk = normalizeMarketKey(s.market);
+      (keptByMarket[mk] ||= []).push(s);
+    }
+    Object.values(keptByMarket).forEach((list) => list.sort((a, b) => String(a.date).localeCompare(String(b.date))));
+
+    const positionsBySnapshot = {};
+    for (const p of keptPositions) {
+      (positionsBySnapshot[p.snapshotId] ||= []).push(p);
+    }
+
+    // 受影響的日期（每市場）：被刪日期 + 其後第一個保留快照的日期
+    const affected = {}; // market -> Set(date)
+    for (const del of deletedSnapshots) {
+      const mk = normalizeMarketKey(del.market);
+      const delDate = del.date || "";
+      (affected[mk] ||= new Set()).add(delDate);
+      const next = (keptByMarket[mk] || []).find((s) => (s.date || "") > delDate);
+      if (next) affected[mk].add(next.date || "");
+    }
+
+    const isAffected = (date, market) => {
+      const set = affected[normalizeMarketKey(market)];
+      return set ? set.has(date || "") : false;
+    };
+    const keptLayout = layoutRows.filter((r) => !isAffected((r[0] || "").trim(), r[1]));
+
+    const rebuilt = [];
+    for (const [market, dates] of Object.entries(affected)) {
+      const marketSnaps = keptByMarket[market] || [];
+      for (const date of dates) {
+        const snap = marketSnaps.find((s) => (s.date || "") === date);
+        if (!snap) continue; // 該日期已無保留快照 → 整組移除（不加回）
+        const curPos = (positionsBySnapshot[snap.snapshotId] || []).filter((p) => Number(p.shares ?? 0) !== 0);
+        const prevSnap = [...marketSnaps].reverse().find((s) => (s.date || "") < date);
+        const prevPos = prevSnap ? (positionsBySnapshot[prevSnap.snapshotId] || []) : [];
+        const prevMap = new Map(prevPos.map((p) => [p.symbol, Number(p.shares ?? 0)]));
+        const curSymbols = new Set(curPos.map((p) => p.symbol));
+        for (const c of curPos) {
+          const shares = Number(c.shares ?? 0);
+          const hasPrev = prevMap.has(c.symbol);
+          const prevShares = hasPrev ? prevMap.get(c.symbol) : 0;
+          const delta = shares - prevShares;
+          if (delta !== 0 || !hasPrev) {
+            rebuilt.push([date, market, c.symbol, c.name || "", shares, prevShares, delta]);
+          }
+        }
+        for (const [sym, prevShares] of prevMap.entries()) {
+          if (prevShares !== 0 && !curSymbols.has(sym)) {
+            const name = prevPos.find((p) => p.symbol === sym)?.name || "";
+            rebuilt.push([date, market, sym, name, 0, prevShares, -prevShares]);
+          }
+        }
+      }
+    }
+
+    const finalLayout = [...keptLayout, ...rebuilt];
+    await clearSheetValues(SHEET_NAMES.layout, "A2:G");
+    if (finalLayout.length) {
+      await updateSheetValues(SHEET_NAMES.layout, `A2:G${finalLayout.length + 1}`, finalLayout);
+    }
+  } catch (error) {
+    console.warn("syncLayoutAfterSnapshotChange", error);
+  }
+}
+
 // Apple Live Text 從方舟截圖複製的文字（每欄位各一行）
 // 格式：名稱(1-3行) → 代號 → 現股 → 股數 → 均價（噪音字元）
 function parseLiveTextArk(text) {
@@ -7992,6 +8069,7 @@ async function deleteCloudSnapshotById(snapshotId, button) {
     if (keptPositions.length) {
       await updateSheetValues(SHEET_NAMES.positions, "A2:J", keptPositions.map(positionToSheetRow));
     }
+    await syncLayoutAfterSnapshotChange([target], keptSnapshots, keptPositions);
 
     await loadLatestCloudSnapshot(false);
     alert("已刪除雲端快照。");
@@ -8062,6 +8140,7 @@ async function deleteSelectedCloudSnapshots({ buttonId = "delete-cloud-snapshot"
     if (keptPositions.length) {
       await updateSheetValues(SHEET_NAMES.positions, "A2:J", keptPositions.map(positionToSheetRow));
     }
+    await syncLayoutAfterSnapshotChange(targets, keptSnapshots, keptPositions);
 
     await loadLatestCloudSnapshot(false);
     alert(`已刪除 ${targets.length} 筆雲端快照。`);
@@ -8100,6 +8179,7 @@ async function cleanupDuplicateCloudSnapshots() {
     if (!confirmed) return;
 
     if (button) button.textContent = "清理中...";
+    const deletedDuplicates = snapshots.filter((snapshot) => duplicateIds.has(snapshot.snapshotId));
     const keptSnapshots = snapshots.filter((snapshot) => !duplicateIds.has(snapshot.snapshotId));
     const keptPositions = positions.filter((row) => !duplicateIds.has(row.snapshotId));
 
@@ -8111,6 +8191,7 @@ async function cleanupDuplicateCloudSnapshots() {
     if (keptPositions.length) {
       await updateSheetValues(SHEET_NAMES.positions, "A2:J", keptPositions.map(positionToSheetRow));
     }
+    await syncLayoutAfterSnapshotChange(deletedDuplicates, keptSnapshots, keptPositions);
 
     await loadLatestCloudSnapshot(false);
     alert(`已清理 ${duplicateIds.size} 筆重複快照。`);
