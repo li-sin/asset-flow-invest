@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.9";
-const APP_VERSION_NOTE = "修復 saveLayoutDeltaToSheet 誤取 payload.date（undefined）導致新增庫存只寫出空白日期列、layout 不更新的根本 bug";
+const APP_VERSION = "v0.34.0";
+const APP_VERSION_NOTE = "layout 寫入名稱空時用 resolveSymbolName 補（賣光/新股列不再缺名稱）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3993,14 +3993,14 @@ async function saveLayoutDeltaToSheet(newPayloads) {
         const prevShares = prev ? Number(prev.shares ?? 0) : 0;
         const delta = newRow.shares - prevShares;
         if (delta !== 0 || !prev) {
-          rows.push([date, market, newRow.symbol, newRow.name, newRow.shares, prevShares, delta]);
+          rows.push([date, market, newRow.symbol, newRow.name || resolveSymbolName(newRow.symbol), newRow.shares, prevShares, delta]);
         }
       }
       // 前一份快照有、這次完整持倉清單裡消失的標的，視為已全數調節（賣光）
       for (const prev of prevPositions) {
         const prevShares = Number(prev.shares ?? 0);
         if (prevShares !== 0 && !newSymbols.has(prev.symbol)) {
-          rows.push([date, market, prev.symbol, prev.name, 0, prevShares, -prevShares]);
+          rows.push([date, market, prev.symbol, prev.name || resolveSymbolName(prev.symbol), 0, prevShares, -prevShares]);
         }
       }
     }
@@ -4067,12 +4067,12 @@ async function syncLayoutAfterSnapshotChange(deletedSnapshots, keptSnapshots, ke
           const prevShares = hasPrev ? prevMap.get(c.symbol) : 0;
           const delta = shares - prevShares;
           if (delta !== 0 || !hasPrev) {
-            rebuilt.push([date, market, c.symbol, c.name || "", shares, prevShares, delta]);
+            rebuilt.push([date, market, c.symbol, c.name || resolveSymbolName(c.symbol), shares, prevShares, delta]);
           }
         }
         for (const [sym, prevShares] of prevMap.entries()) {
           if (prevShares !== 0 && !curSymbols.has(sym)) {
-            const name = prevPos.find((p) => p.symbol === sym)?.name || "";
+            const name = prevPos.find((p) => p.symbol === sym)?.name || resolveSymbolName(sym);
             rebuilt.push([date, market, sym, name, 0, prevShares, -prevShares]);
           }
         }
