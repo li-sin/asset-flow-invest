@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.5";
-const APP_VERSION_NOTE = "待關注調節/損益排名/股數矩陣/布局明細/個股貢獻圖 補齊名稱 fallback（同 v0.33.4 病根）";
+const APP_VERSION = "v0.33.6";
+const APP_VERSION_NOTE = "修復貼上表格/手動輸入/券商檔匯入/合併存雲端 未寫入 AssetFlowLayout 導致布局總覽卡住不更新";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4302,6 +4302,7 @@ async function savePasteSnapshot() {
   const payloads = buildMarketSnapshotPayloadsFromRows({ createdAt: new Date().toISOString(), date, market, sourceEntryId: "", sourceTitle: "貼上表格", rows });
   const result = await writeMarketSnapshotPayloads(payloads);
   if (result.cancelled) return;
+  if (result.written.length) await saveLayoutDeltaToSheet(result.written);
   const written = result.written?.length ?? 0;
   const skipped = result.skipped?.length ?? 0;
   alert(`已儲存 ${written} 筆快照${skipped ? `，跳過 ${skipped} 筆（重複）` : ""}。`);
@@ -4534,6 +4535,7 @@ async function saveMergedSnapshotToGoogleSheet() {
     await loadLatestCloudSnapshot(false);
     const result = await writeMarketSnapshotPayloads(payloads);
     if (result.cancelled) return;
+    if (result.written.length) await saveLayoutDeltaToSheet(result.written);
     const sheetSnapshotIds = [...result.written.map((payload) => payload.snapshotId), ...result.skipped.map((item) => item.existingSnapshot.snapshotId)];
     if (!result.written.length && result.skipped.length) {
       for (const item of candidates) {
