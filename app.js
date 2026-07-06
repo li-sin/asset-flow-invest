@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.4";
-const APP_VERSION_NOTE = "修復庫存明細名稱欄未套用自動抓名稱 fallback（KLAC/MRVL 等未手動命名美股）";
+const APP_VERSION = "v0.33.5";
+const APP_VERSION_NOTE = "待關注調節/損益排名/股數矩陣/布局明細/個股貢獻圖 補齊名稱 fallback（同 v0.33.4 病根）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5051,7 +5051,7 @@ function renderDailyShareMatrix(points) {
       for (const row of point.rows) {
         const item = symbols.get(row.symbol) || {
           symbol: row.symbol,
-          name: row.name || "",
+          name: row.name || resolveSymbolName(row.symbol) || "",
           score: 0,
         };
         item.score = Math.max(item.score, estimatedCost(row));
@@ -5208,7 +5208,7 @@ function renderLayoutDeltaTable(points) {
               <tr>
                 <td>${escapeHtml(row.date)}</td>
                 <td>${escapeHtml(row.symbol)}</td>
-                <td>${escapeHtml(row.name)}</td>
+                <td>${escapeHtml(row.name || resolveSymbolName(row.symbol))}</td>
                 <td>${formatSignedNumber(row.deltaShares, 3)}</td>
                 <td>${formatSignedMoney(row.layoutCost)}</td>
               </tr>
@@ -5807,7 +5807,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
       }
       alerts.push({
         market, symbol,
-        name: latestPos?.name || symbol,
+        name: latestPos?.name || resolveSymbolName(symbol) || symbol,
         trendDown, relWeak, retSlope, idxSlope,
         // 損益率（顯示用，無有效均價點時為 null）
         firstRate: ratePts.length ? ratePts[0].y : null,
@@ -5970,7 +5970,7 @@ function renderPLContributionChart(positions, quotes) {
     if (price === null || price <= 0 || !(p.avgCost > 0)) return null;
     const plUsd = (price - p.avgCost) * Number(p.shares || 0);
     const pl = marketForPosition(p) === "US" ? plUsd * getUsdTwdRate() : plUsd;
-    return { symbol: p.symbol, name: p.name || p.symbol, pl };
+    return { symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol) || p.symbol, pl };
   }).filter(Boolean).sort((a, b) => b.pl - a.pl);
   if (!items.length) return "<p class=\"muted-text\">尚無報價資料。</p>";
   // 取前 8 獲利 + 後 5 虧損（若有）
@@ -6895,7 +6895,7 @@ function renderCloudSnapshot() {
       const q = state.quotes[p.symbol];
       const price = typeof q === 'number' ? q : (q?.price ?? 0);
       const rate = (price - p.avgCost) / p.avgCost * 100;
-      return { symbol: p.symbol, name: p.name, rate };
+      return { symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol), rate };
     })
     .sort((a, b) => b.rate - a.rate);
   const top3 = performanceRows.slice(0, 3);
