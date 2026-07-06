@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.1";
-const APP_VERSION_NOTE = "授權白名單改為多帳號，新增 ashleyzhanya 帳號";
+const APP_VERSION = "v0.33.2";
+const APP_VERSION_NOTE = "授權白名單移除 ashleyzhanya，恢復僅本人；保留多帳號陣列架構";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -25,7 +25,7 @@ const BUDGET_SHEET_ID = "1T2G8leVwJ8EES1GzEcL1bD_NLHe46ylmPPijc-VoKmo";
 const BUDGET_LEDGER_TAB = "月度帳本"; // A=日期 C=總金額 G=Sin負擔
 const CASH_PLAN_TAB = "現金計畫";    // A=說明 B=金額 C=預計年月
 const DEFAULT_GOOGLE_CLIENT_ID = "320535010458-m89v1jjn7fkoeu5o9lj3mt5fsn6odp0v.apps.googleusercontent.com";
-const DEFAULT_AUTHORIZED_EMAILS = ["lovelisa00000@gmail.com", "ashleyzhanya@gmail.com"];
+const DEFAULT_AUTHORIZED_EMAILS = ["lovelisa00000@gmail.com"];
 const QUOTE_PROXY_URL = "https://script.google.com/macros/s/AKfycbznKVxtS6OhxfKO6E1PB21U-X__bSHHdlhUGt8Fj5vv7PRf3Pi_xzsByAHvu0sE8G4/exec";
 const SHEET_NAMES = {
   snapshots: "AssetFlowSnapshots",
@@ -63,6 +63,7 @@ const SYMBOL_NAMES = {
   "2327": "國巨",
   "2330": "台積電",
   // ── 美股 ──────────────────────────────────────────────────────────────────
+  "AAPL": "蘋果",
   "AMAT": "應用材料",
   "AMD": "超微半導體",
   "AVGO": "博通",
@@ -72,10 +73,13 @@ const SYMBOL_NAMES = {
   "FLY": "Firefly Aerospace",
   "GEV": "GE Vernova",
   "INTC": "英特爾",
+  "KLAC": "科磊",
   "LRCX": "科林研發",
+  "MRVL": "邁威爾科技",
   "MU": "美光科技",
   "NVDA": "輝達",
   "PL": "Planet Labs",
+  "RDW": "Redwire",
   "SATL": "Satellogic",
   "SNDK": "SanDisk",
   "TSM": "台積電 ADR",
