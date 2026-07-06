@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.33.3";
-const APP_VERSION_NOTE = "上櫃(.TWO)報價 fallback + Yahoo 自動抓公司名稱補全；SYMBOL_NAMES 補 KLAC/MRVL 等";
+const APP_VERSION = "v0.33.4";
+const APP_VERSION_NOTE = "修復庫存明細名稱欄未套用自動抓名稱 fallback（KLAC/MRVL 等未手動命名美股）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6800,9 +6800,10 @@ function renderCloudSnapshot() {
       const symbolCell = editMode
         ? `<input class="cell-input edit-symbol-input" type="text" value="${escapeHtml(row.symbol)}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
         : escapeHtml(row.symbol);
+      const displayName = row.name || resolveSymbolName(row.symbol);
       const nameCell = editMode
         ? `<input class="cell-input edit-name-input" type="text" value="${escapeHtml(row.name)}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
-        : escapeHtml(row.name);
+        : escapeHtml(displayName);
       const sharesCell = editMode
         ? `<input class="cell-input edit-shares-input" type="number" step="0.001" value="${row.shares || 0}" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">`
         : escapeHtml(displayValue(row.shares));
@@ -6816,7 +6817,7 @@ function renderCloudSnapshot() {
            <button class="button compact primary edit-row-save-btn" data-market="${escapeHtml(item.market)}" data-symbol="${escapeHtml(row.symbol)}">儲存</button>`
         : holdDaysDisplay;
       return `
-        <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(row.name)}" tabindex="0"${editMode ? '' : ' style="cursor:pointer"'}>
+        <tr class="symbol-row" data-symbol-row="${escapeHtml(row.symbol)}" data-symbol-name="${escapeHtml(displayName)}" tabindex="0"${editMode ? '' : ' style="cursor:pointer"'}>
           <td data-label="代號">${symbolCell}</td>
           <td data-label="名稱">${nameCell}</td>
           <td data-label="股數">${sharesCell}</td>
