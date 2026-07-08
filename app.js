@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.34.0";
-const APP_VERSION_NOTE = "layout 寫入名稱空時用 resolveSymbolName 補（賣光/新股列不再缺名稱）";
+const APP_VERSION = "v0.34.1";
+const APP_VERSION_NOTE = "水位卡大字改顯示最新水位；token 過期存水位改明確報錯不再靜默";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -766,7 +766,8 @@ function updateTargetLevel(market, value) {
 }
 
 async function saveTargetLevelToSheet(market, level) {
-  if (!googleAccessToken || !state.auth.authorized) return;
+  // 不可靜默 return：token 過期時要讓使用者看得到失敗，而不是看起來像有存
+  if (!googleAccessToken || !state.auth.authorized) throw new Error("登入已過期，請重新登入後再更新水位");
   try {
     const tabName = market === "TW" ? "台股" : "美股";
     const values = await readSheetValues(tabName, "A:B");
@@ -6716,7 +6717,8 @@ function renderCloudSnapshot() {
       stockCount: marketRows.length,
       totalShares: marketShares,
       totalCost: marketCost,
-      targetLevel: targetLevelForMarket(market, cloud.snapshot.date),
+      // 首頁水位卡顯示最新記錄；不釘快照日期，否則剛更新的今日水位不會反映在大字上
+      targetLevel: targetLevelForMarket(market),
     };
   });
   const history = (state.cloudHistory.snapshots || [])
@@ -7543,8 +7545,8 @@ function renderCloudSnapshot() {
       try {
         await saveTargetLevelToSheet(market, state.targetLevels[market]);
         renderCloudSnapshot();
-      } catch {
-        if (feedback) feedback.textContent = "儲存失敗，請重試";
+      } catch (error) {
+        if (feedback) feedback.textContent = String(error?.message || "").includes("登入已過期") ? error.message : "儲存失敗，請重試";
         btn.disabled = false;
       }
     });
