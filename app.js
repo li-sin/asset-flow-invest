@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.34.1";
-const APP_VERSION_NOTE = "水位卡大字改顯示最新水位；token 過期存水位改明確報錯不再靜默";
+const APP_VERSION = "v0.34.2";
+const APP_VERSION_NOTE = "清倉自動清除首次布局日；新進場（含買回）自動帶快照日起算持有天數";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3972,18 +3972,20 @@ async function saveLayoutDeltaToSheet(newPayloads) {
     const allPositions = state.cloudHistory?.positions || [];
     const allSnapshots = state.cloudHistory?.snapshots || [];
     const rows = [];
+    let firstBuyDirty = false;
     for (const payload of newPayloads) {
       // date/market 在 snapshotRow[2]/[3]，payload 沒有 top-level date/market
       // （舊版誤取 payload.date/market → undefined → 寫出空白日期列、prev 找不到）
       const date = payload.snapshotRow?.[2];
       const market = payload.snapshotRow?.[3];
       if (!date || !market) continue; // 防呆：日期/市場缺失就跳過，不寫出空白列
+      const marketKey = normalizeMarketKey(market);
       const newRows = payload.positionRows.map((r) => ({
         symbol: r[3], name: r[4], shares: Number(r[6] ?? 0),
       }));
       // find previous snapshot for this market (before this date)
       const prevSnapshot = allSnapshots
-        .filter((s) => normalizeMarketKey(s.market) === normalizeMarketKey(market) && (s.date || "") < date)
+        .filter((s) => normalizeMarketKey(s.market) === marketKey && (s.date || "") < date)
         .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
       const prevPositions = prevSnapshot
         ? allPositions.filter((p) => p.snapshotId === prevSnapshot.snapshotId)
@@ -3996,17 +3998,36 @@ async function saveLayoutDeltaToSheet(newPayloads) {
         if (delta !== 0 || !prev) {
           rows.push([date, market, newRow.symbol, newRow.name || resolveSymbolName(newRow.symbol), newRow.shares, prevShares, delta]);
         }
+        // 首次布局日連動：新進場（含清倉後買回）自動帶快照日；快照內股數歸 0 視同清倉
+        const fbKey = `${marketKey}_${newRow.symbol}`;
+        if (newRow.shares > 0 && prevShares === 0 && !state.firstBuyDates[fbKey]) {
+          state.firstBuyDates[fbKey] = date;
+          firstBuyDirty = true;
+        } else if (newRow.shares === 0 && prevShares > 0 && state.firstBuyDates[fbKey]) {
+          delete state.firstBuyDates[fbKey];
+          firstBuyDirty = true;
+        }
       }
       // 前一份快照有、這次完整持倉清單裡消失的標的，視為已全數調節（賣光）
       for (const prev of prevPositions) {
         const prevShares = Number(prev.shares ?? 0);
         if (prevShares !== 0 && !newSymbols.has(prev.symbol)) {
           rows.push([date, market, prev.symbol, prev.name || resolveSymbolName(prev.symbol), 0, prevShares, -prevShares]);
+          // 清倉 → 首次布局日一併清除，之後買回從新日期重新起算持有天數
+          const fbKey = `${marketKey}_${prev.symbol}`;
+          if (state.firstBuyDates[fbKey]) {
+            delete state.firstBuyDates[fbKey];
+            firstBuyDirty = true;
+          }
         }
       }
     }
     if (rows.length) {
       await appendSheetValues(SHEET_NAMES.layout, "A:G", rows);
+    }
+    if (firstBuyDirty) {
+      localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(state.firstBuyDates));
+      await writeFirstBuyDatesToSheet().catch(() => {});
     }
   } catch (error) {
     console.warn("saveLayoutDeltaToSheet", error);
