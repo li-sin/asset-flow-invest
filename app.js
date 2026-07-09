@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.34.2";
-const APP_VERSION_NOTE = "清倉自動清除首次布局日；新進場（含買回）自動帶快照日起算持有天數";
+const APP_VERSION = "v0.35.0";
+const APP_VERSION_NOTE = "深色改版：全站深色化＋架構對齊 BudgetAssistant（圓角12px/扁平無邊框卡片/亮底黑字按鈕/輸入內凹/字級 base 15px），主色天藍區分";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5224,7 +5224,7 @@ function renderTargetLevelChart(history) {
   const allDates = [...new Set(filtered.map((item) => item.date))].sort();
   if (!allDates.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
   const markets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
-  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const colors = { TW: "var(--green)", US: "var(--blue)" };
   const allVals = filtered.map((i) => i.targetLevel);
   const minVal = Math.max(0, Math.floor(Math.min(...allVals) / 10) * 10 - 5);
   const maxVal = Math.min(100, Math.ceil(Math.max(...allVals) / 10) * 10 + 5);
@@ -5623,7 +5623,7 @@ function renderSnapshotTrendChart(cloudHistory, _quotes, marketKey) {
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
-  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const colors = { TW: "var(--green)", US: "var(--blue)" };
   const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
   const series = activeMarkets.map((market) => {
     const pts = dates.map((d) => {
@@ -5750,7 +5750,7 @@ function renderPerfRateTrendChart(cloudHistory, _quotes, marketKey) {
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
-  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const colors = { TW: "var(--green)", US: "var(--blue)" };
   const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
   const series = activeMarkets.map((market) => {
     const pts = dates.map((d, i) => {
@@ -6376,7 +6376,7 @@ function renderSnapCalendar(year, month, selectedDate, snapshotDates, dateSymbol
 function renderLayoutSharesChart(cloudHistory) {
   const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
-  const colors = { TW: "var(--green)", US: "#4f8ef7" };
+  const colors = { TW: "var(--green)", US: "var(--blue)" };
   const series = ["TW", "US"].map((market) => {
     const pts = dates.map((d, i) => {
       const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
@@ -6424,7 +6424,7 @@ function renderAllSymbolsChart(cloudHistory) {
   if (!layout.length) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(layout.map((r) => r.date))].sort();
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
-  const palette = ["#2f7d5b", "#4f8ef7", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
+  const palette = ["#34D399", "#4DA3FF", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
   const symbols = [...new Set(layout.map((r) => r.symbol))].sort();
   const series = symbols.map((symbol, si) => {
     const pts = dates.map((d, i) => {
