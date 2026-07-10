@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.36.1";
-const APP_VERSION_NOTE = "水位卡日期改膠囊樣式（07/10＋日曆圖示，疊透明原生 date input 保留選擇器）；水位卡重設計（大字水位＋較上次漲跌膠囊＋市場色點＋手機友善更新列）；回填助手台/美股按鈕切換＋顯示上次回填日；新增庫存頁自動帶入應更新日期＋市場；水位可選特定日期回填";
+const APP_VERSION = "v0.37.0";
+const APP_VERSION_NOTE = "美學重構 Phase 1：首頁頂部統計改 tiles（庫存/總股數/成本/快照，eyebrow＋大數字）；延續水位卡設計語言。Phase 2/3 見美學重構計畫";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7085,11 +7085,11 @@ function renderCloudSnapshot() {
   const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
     ${pendingAvgCostRows.length ? `<div class="pending-banner" data-go-pending>⚠️ ${pendingAvgCostRows.length} 支均價待補，點此到「庫存」補填</div>` : ""}
-    <div class="metric-bar">
-      <span>庫存 <b>${formatNumber(positions.length)}</b> 檔</span>
-      <span>總股數 <b>${formatNumber(totalShares, 3)}</b></span>
-      <span>估算成本 <b>${formatMoney(totalCost)}</b></span>
-      <span>雲端快照 <b>${formatNumber(state.cloudHistory.snapshots.length)}</b></span>
+    <div class="metric-grid home-metric-grid">
+      <div class="metric"><span>庫存</span><strong>${formatNumber(positions.length)}<small class="metric-unit">檔</small></strong></div>
+      <div class="metric"><span>總股數</span><strong>${formatNumber(totalShares, 3)}</strong></div>
+      <div class="metric"><span>估算成本</span><strong>${formatMoney(totalCost)}</strong></div>
+      <div class="metric"><span>雲端快照</span><strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong></div>
     </div>
     <section class="dashboard-card holdings-nav-card">
       <div class="holdings-subtabs">

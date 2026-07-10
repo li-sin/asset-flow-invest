@@ -534,6 +534,26 @@ textarea {
   font-weight: 700;
 }
 
+.home-metric-grid {
+  margin-bottom: 2px;
+}
+
+.home-metric-grid .metric strong {
+  display: block;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-unit {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
