@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.36.0";
-const APP_VERSION_NOTE = "水位卡重設計（大字水位＋較上次漲跌膠囊＋市場色點＋手機友善更新列）；回填助手台/美股按鈕切換＋顯示上次回填日；新增庫存頁自動帶入應更新日期＋市場（週末退週五）；水位可選特定日期回填";
+const APP_VERSION = "v0.36.1";
+const APP_VERSION_NOTE = "水位卡日期改膠囊樣式（07/10＋日曆圖示，疊透明原生 date input 保留選擇器）；水位卡重設計（大字水位＋較上次漲跌膠囊＋市場色點＋手機友善更新列）；回填助手台/美股按鈕切換＋顯示上次回填日；新增庫存頁自動帶入應更新日期＋市場；水位可選特定日期回填";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6836,7 +6836,11 @@ function renderCloudSnapshot() {
       </div>
       <div class="mw-sub">${escapeHtml(subText)}</div>
       <div class="level-update-panel">
-        <input class="level-date-input" data-level-date-market="${escapeHtml(item.market)}" type="date" max="${escapeHtml(todayStr)}" value="${escapeHtml(selDate)}">
+        <label class="level-date-chip">
+          <svg class="ldc-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+          <span class="ldc-text">${escapeHtml(selDate.slice(5).replace("-", "/"))}</span>
+          <input class="level-date-input" data-level-date-market="${escapeHtml(item.market)}" type="date" max="${escapeHtml(todayStr)}" value="${escapeHtml(selDate)}" aria-label="更新日期">
+        </label>
         <input class="target-level-input" data-target-level-market="${escapeHtml(item.market)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="水位%" value="${escapeHtml(String(inputVal))}">
         <span class="level-unit">%</span>
         <button class="level-update-btn" title="更新水位" data-target-level-market="${escapeHtml(item.market)}">更新</button>
