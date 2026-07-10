@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.35.0";
-const APP_VERSION_NOTE = "深色改版：全站深色化＋架構對齊 BudgetAssistant（圓角12px/扁平無邊框卡片/亮底黑字按鈕/輸入內凹/字級 base 15px），主色天藍區分";
+const APP_VERSION = "v0.36.0";
+const APP_VERSION_NOTE = "水位卡重設計（大字水位＋較上次漲跌膠囊＋市場色點＋手機友善更新列）；回填助手台/美股按鈕切換＋顯示上次回填日；新增庫存頁自動帶入應更新日期＋市場（週末退週五）；水位可選特定日期回填";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -131,7 +131,8 @@ const state = {
   editingDateSnapshotId: null,
   captureMode: "ocr",
   pasteParsed: null,
-  pasteMeta: { date: "", market: "TW" },
+  pasteMeta: { date: "", market: "TW", userTouched: false },
+  levelUpdateDate: {}, // 1a：水位卡各市場選定的更新日期（預設今天）
   quotesLoading: false,
   quotesFailed: false,
   homeCalendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selectedDate: "" },
@@ -765,19 +766,19 @@ function updateTargetLevel(market, value) {
   return true;
 }
 
-async function saveTargetLevelToSheet(market, level) {
+async function saveTargetLevelToSheet(market, level, dateStr) {
   // 不可靜默 return：token 過期時要讓使用者看得到失敗，而不是看起來像有存
   if (!googleAccessToken || !state.auth.authorized) throw new Error("登入已過期，請重新登入後再更新水位");
   try {
     const tabName = market === "TW" ? "台股" : "美股";
     const values = await readSheetValues(tabName, "A:B");
-    const todayStr = today();
+    const targetDate = normalizeDateText(dateStr) || today(); // 1a：可指定日期，預設今天
     const levelStr = `${level}%`;
     // only consider rows where A col has a non-empty value
     const dataRows = values.map((row, i) => ({ row, sheetRow: i + 1 })).filter(({ row }) => row[0]);
-    const existing = dataRows.find(({ row }) => normalizeDateText(row[0]) === todayStr);
+    const existing = dataRows.find(({ row }) => normalizeDateText(row[0]) === targetDate);
     if (existing) {
-      // 更新今天既有列：只改水位欄（B）
+      // 更新該日既有列：只改水位欄（B）
       await sheetsFetch(`/values/${sheetRange(tabName, `B${existing.sheetRow}`)}?valueInputOption=USER_ENTERED`, {
         method: "PUT",
         body: JSON.stringify({ majorDimension: "ROWS", values: [[levelStr]] }),
@@ -789,13 +790,13 @@ async function saveTargetLevelToSheet(market, level) {
         `/values/${sheetRange(tabName, "A:B")}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
         {
           method: "POST",
-          body: JSON.stringify({ majorDimension: "ROWS", values: [[todayStr, levelStr]] }),
+          body: JSON.stringify({ majorDimension: "ROWS", values: [[targetDate, levelStr]] }),
         },
       );
     }
     state.targetLevelHistory = [
-      { date: todayStr, market, targetLevel: level, source: "水位" },
-      ...state.targetLevelHistory.filter((item) => !(item.date === todayStr && item.market === market)),
+      { date: targetDate, market, targetLevel: level, source: "水位" },
+      ...state.targetLevelHistory.filter((item) => !(item.date === targetDate && item.market === market)),
     ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   } catch (error) {
     console.warn("saveTargetLevelToSheet", error);
@@ -4751,6 +4752,36 @@ function parseSnapshotRows(values) {
   })).filter((row) => row.snapshotId);
 }
 
+// ===== 1b：新增庫存頁自動帶入「應更新的日期＋市場」（Sin 2026-07-10 定案）=====
+// 目標日＝平日今天／週末退到最近的週五（國定假日不特判，維持當天）。
+// 台股該日未有快照 → 台股；台股有了、美股沒有 → 美股；兩者都做完 → 今天＋台股。
+// 只在使用者本次未手動改過市場/日期時套用（改過就尊重手動）。
+function snapshotExistsFor(market, date) {
+  const mkt = normalizeMarketKey(market);
+  return (state.cloudHistory.snapshots || []).some(
+    (s) => normalizeMarketKey(s.market) === mkt && s.date === date,
+  );
+}
+function suggestSnapshotTarget() {
+  const todayStr = today();
+  const base = new Date(`${todayStr}T00:00:00`);
+  const dow = base.getDay(); // 0=週日 6=週六
+  let targetDate = todayStr;
+  if (dow === 6 || dow === 0) {
+    base.setDate(base.getDate() - (dow === 6 ? 1 : 2)); // 週六退1、週日退2 → 週五
+    targetDate = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
+  }
+  if (!snapshotExistsFor("TW", targetDate)) return { date: targetDate, market: "TW" };
+  if (!snapshotExistsFor("US", targetDate)) return { date: targetDate, market: "US" };
+  return { date: todayStr, market: "TW" };
+}
+function maybeApplySnapshotSuggestion() {
+  if (state.pasteMeta.userTouched) return;
+  const sug = suggestSnapshotTarget();
+  state.pasteMeta.date = sug.date;
+  state.pasteMeta.market = sug.market;
+}
+
 function parsePositionRows(values) {
   return (values || []).map((row) => ({
     snapshotId: row[0] || "",
@@ -6481,9 +6512,10 @@ function loadArkRefillState() {
       phase: s && typeof s.phase === "object" && s.phase ? s.phase : {},
       order: s && s.order === "avgcost-first" ? "avgcost-first" : "shares-first",
       showAll: !!(s && s.showAll),
+      market: s && s.market === "US" ? "US" : "TW",
     };
   } catch (_) {
-    return { phase: {}, order: "shares-first", showAll: false };
+    return { phase: {}, order: "shares-first", showAll: false, market: "TW" };
   }
 }
 function saveArkRefillState() {
@@ -6507,7 +6539,7 @@ async function loadRefillStateFromSheet() {
     for (const row of values) {
       const market = row[0]; const symbol = row[1];
       if (!market || !symbol) continue;
-      map[arkRefillKey(market, symbol)] = { shares: Number(row[2]), avgCost: Number(row[3]) };
+      map[arkRefillKey(market, symbol)] = { shares: Number(row[2]), avgCost: Number(row[3]), ts: row[4] || "" };
     }
     state.arkRefillLast = map;
     try { localStorage.setItem("afi_ark_refill_last_v1", JSON.stringify(map)); } catch (_) {}
@@ -6540,6 +6572,13 @@ async function writeRefillEntryToSheet(market, symbol, shares, avgCost) {
 function arkRefillKey(market, symbol) {
   return `${normalizeMarketKey(market)}_${String(symbol || "").toUpperCase().trim()}`;
 }
+// 上次回填時間戳 →「上次回填 M/D」；沒回填過 → 「尚未回填過」（2a：讓「為什麼冒出來」一目了然）
+function arkLastRefillLabel(key) {
+  const ts = loadArkRefillLast()[key]?.ts;
+  if (!ts) return "尚未回填過";
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? "尚未回填過" : `上次回填 ${d.getMonth() + 1}/${d.getDate()}`;
+}
 // 是否「跟上次回填值有變動」（或從未回填過 → 視為待回填）
 function arkRefillChanged(market, symbol, shares, avgCost) {
   const last = loadArkRefillLast()[arkRefillKey(market, symbol)];
@@ -6555,20 +6594,24 @@ function renderArkRefill(marketSummaries, dataDate) {
   const refill = state.arkRefill;
   const firstLabel = refill.order === "avgcost-first" ? "均價" : "股數";
   const secondLabel = refill.order === "avgcost-first" ? "股數" : "均價";
-  let totalShown = 0;
-  const sections = ["TW", "US"].map((market) => {
+  const activeMarket = refill.market === "US" ? "US" : "TW";
+  // 逐市場算出 section HTML 與待回填數（供切換鈕徽章 + 只渲染當前市場）
+  const perMarket = {};
+  ["TW", "US"].forEach((market) => {
     const summary = (marketSummaries || []).find((s) => s.market === market);
     const allRows = (summary?.rows || []).filter((r) => Number(r.shares || 0) > 0);
-    if (!allRows.length) return "";
+    if (!allRows.length) { perMarket[market] = { html: "", pending: 0 }; return; }
     const shown = allRows.filter((r) => {
       const key = arkRefillKey(market, r.symbol);
       if (refill.phase[key] === "done") return true; // 剛完成的留著顯示 ✓
       return refill.showAll || arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
     }).sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
+    // 待回填數＝顯示中但尚未 done（徽章只提示還要做幾支）
+    const pending = shown.filter((r) => refill.phase[arkRefillKey(market, r.symbol)] !== "done").length;
     if (!shown.length) {
-      return `<div class="ark-refill-market"><h4 class="market-section-heading">${marketLabel(market)}</h4><p class="muted-text">沒有需要回填的變動 ✓</p></div>`;
+      perMarket[market] = { html: `<p class="muted-text">沒有需要回填的變動 ✓</p>`, pending: 0 };
+      return;
     }
-    totalShown += shown.length;
     const items = shown.map((r) => {
       const key = arkRefillKey(market, r.symbol);
       const phase = refill.phase[key] || "idle";
@@ -6588,13 +6631,20 @@ function renderArkRefill(marketSummaries, dataDate) {
       }
       return `
         <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}" data-ark-item="${escapeHtml(key)}">
-          <div class="ark-refill-id"><strong>${sym}</strong> <span class="muted-text">${name}</span></div>
+          <div class="ark-refill-id"><strong>${sym}</strong> <span class="muted-text">${name}</span> <span class="ark-refill-lastfill">${escapeHtml(arkLastRefillLabel(key))}</span></div>
           <div class="ark-refill-vals"><span>股數 <b>${formatNumber(r.shares, 4)}</b></span><span>均價 <b>${formatNumber(r.avgCost, 4)}</b></span></div>
           <div class="ark-refill-action">${action}</div>
         </div>`;
     }).join("");
-    return `<div class="ark-refill-market"><h4 class="market-section-heading">${marketLabel(market)}</h4>${items}</div>`;
+    perMarket[market] = { html: `<div class="ark-refill-market">${items}</div>`, pending };
+  });
+  // 台/美股切換鈕（含待回填數徽章），一次只顯示一個市場的清單，避免整頁太長
+  const marketTabs = ["TW", "US"].map((market) => {
+    const badge = perMarket[market].pending ? `<span class="ark-market-badge">${perMarket[market].pending}</span>` : "";
+    return `<button class="ark-market-tab${market === activeMarket ? " is-active" : ""}" data-ark-market="${market}" type="button">${marketLabel(market)}${badge}</button>`;
   }).join("");
+  const activeBody = perMarket[activeMarket].html
+    || `<p class="muted-text">${marketLabel(activeMarket)}目前沒有需要回填的變動。有交易或更新持倉後，這裡會列出要同步回方舟的標的。</p>`;
   return `
     <section class="dashboard-card ark-refill-card">
       <div class="ark-refill-header">
@@ -6606,8 +6656,9 @@ function renderArkRefill(marketSummaries, dataDate) {
           <button class="ark-ctrl-btn" data-ark-reset title="清除回填進度（已回填標記）">清除進度</button>
         </div>
       </div>
+      <div class="ark-market-tabs">${marketTabs}</div>
       <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。預設只列出跟上次回填後有變動的標的。</p>
-      ${totalShown === 0 ? `<p class="muted-text">目前沒有需要回填的變動。有交易或更新持倉後，這裡會列出要同步回方舟的標的。</p>` : sections}
+      ${activeBody}
     </section>`;
 }
 function scrollToNextArkRefill() {
@@ -6646,7 +6697,7 @@ async function handleArkCopy(btn, segment) {
     const shares = Number(btn.dataset.arkShares);
     const avgCost = Number(btn.dataset.arkAvg);
     const lastMap = loadArkRefillLast();
-    lastMap[key] = { shares, avgCost };
+    lastMap[key] = { shares, avgCost, ts: new Date().toISOString() };
     saveArkRefillLast(lastMap);
     saveArkRefillState();
     renderCloudSnapshot();
@@ -6750,37 +6801,49 @@ function renderCloudSnapshot() {
   const maxHistoryShares = Math.max(...history.map((item) => item.totalShares), 0);
   const maxMarketCost = Math.max(...marketSummaries.map((item) => item.totalCost), 0);
   const layoutAnalysis = buildLayoutAnalysis();
+  const mmddText = (d) => { const p = String(d || "").split("-"); return p.length === 3 ? `${+p[1]}/${+p[2]}` : d; };
   const marketCards = marketSummaries.map((item) => {
     const todayStr = today();
     const mktHistory = state.targetLevelHistory.filter((h) => h.market === item.market);
-    const todayRecord = mktHistory.find((h) => h.date === todayStr);
-    const lastRecord = mktHistory[0];
-    const inputVal = todayRecord ? todayRecord.targetLevel : (item.targetLevel ?? "");
-    const lastRecordText = lastRecord
-      ? `上次更新：${lastRecord.date}`
-      : "尚未記錄";
+    const selDate = state.levelUpdateDate[item.market] || todayStr; // 1a：選定日期，預設今天
+    const selRecord = mktHistory.find((h) => h.date === selDate);
+    const latest = mktHistory[0];
+    const prev = mktHistory[1];
+    // 輸入框反映「選定日期」已記錄的水位；該日尚無紀錄則留空（不拿最新值誤導）
+    const inputVal = selRecord ? selRecord.targetLevel : "";
+    const lastRecordText = latest ? `上次更新：${latest.date}` : "尚未記錄";
+    const heroNum = item.targetLevel === null ? "—" : String(Math.round(item.targetLevel * 10) / 10);
+    // 較上次水位變化（漲綠跌紅），只有一筆或缺值時不顯示
+    const change = (latest && prev && Number.isFinite(latest.targetLevel) && Number.isFinite(prev.targetLevel))
+      ? latest.targetLevel - prev.targetLevel : null;
+    let changeChip = "";
+    if (change !== null) {
+      const amt = Math.abs(Math.round(change * 10) / 10);
+      changeChip = change > 0 ? `<span class="mw-change mw-up">↑${amt}</span>`
+        : change < 0 ? `<span class="mw-change mw-down">↓${amt}</span>`
+        : `<span class="mw-change mw-flat">±0</span>`;
+    }
+    const subText = `方舟建議總水位${prev ? ` · 較 ${mmddText(prev.date)}` : ""}`;
     return `
     <section class="market-water-card">
-      <div class="card-heading">
-        <h3>${marketLabel(item.market)}</h3>
-        <span>${item.stockCount} 檔庫存</span>
+      <div class="mw-head">
+        <span class="mw-market"><span class="mw-dot mw-dot-${escapeHtml(item.market)}"></span>${marketLabel(item.market)}</span>
+        <span class="mw-count">${item.stockCount} 檔庫存</span>
       </div>
-      <div class="market-water-main">
-        <div>
-          <span>方舟建議總水位</span>
-          <strong>${item.targetLevel === null ? "未設定" : formatPercent(item.targetLevel)}</strong>
-        </div>
-        <div class="level-update-panel">
-          <div class="level-update-row">
-            <input class="target-level-input cell-input" data-target-level-market="${escapeHtml(item.market)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="水位%" value="${escapeHtml(String(inputVal))}">
-            <span class="level-unit">%</span>
-            <button class="button compact icon-btn level-update-btn" title="更新水位" data-target-level-market="${escapeHtml(item.market)}">↺</button>
-          </div>
-          <div class="level-last-record" data-level-last="${escapeHtml(item.market)}">${escapeHtml(lastRecordText)}</div>
-        </div>
+      <div class="mw-hero">
+        <span class="mw-value">${escapeHtml(heroNum)}${item.targetLevel === null ? "" : '<span class="mw-pct">%</span>'}</span>
+        ${changeChip}
+      </div>
+      <div class="mw-sub">${escapeHtml(subText)}</div>
+      <div class="level-update-panel">
+        <input class="level-date-input" data-level-date-market="${escapeHtml(item.market)}" type="date" max="${escapeHtml(todayStr)}" value="${escapeHtml(selDate)}">
+        <input class="target-level-input" data-target-level-market="${escapeHtml(item.market)}" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="水位%" value="${escapeHtml(String(inputVal))}">
+        <span class="level-unit">%</span>
+        <button class="level-update-btn" title="更新水位" data-target-level-market="${escapeHtml(item.market)}">更新</button>
+        <div class="level-last-record" data-level-last="${escapeHtml(item.market)}">${escapeHtml(lastRecordText)}</div>
       </div>
       <div class="market-stats">
-        <span>估算投入成本 <b>${formatMoney(item.totalCost)}</b></span>
+        <span>投入成本 <b>${formatMoney(item.totalCost)}</b></span>
         <span>總股數 <b>${formatNumber(item.totalShares, 3)}</b></span>
       </div>
     </section>
@@ -7247,6 +7310,7 @@ function renderCloudSnapshot() {
         }).join('')}
       </div>`
     : '<p class="muted-text">尚無已儲存截圖。</p>';
+  maybeApplySnapshotSuggestion(); // 1b：未手動改過時，帶入應更新的日期＋市場
   const pastePreviewHtml = (() => {
     const p = state.pasteParsed;
     if (!p) return "";
@@ -7401,8 +7465,8 @@ function renderCloudSnapshot() {
       if (dateInput) { dateInput.focus(); try { dateInput.showPicker(); } catch (_) {} }
     }, 50);
   });
-  els.cloudSnapshot.querySelector("#paste-market-select")?.addEventListener("change", (e) => { state.pasteMeta.market = e.target.value; });
-  els.cloudSnapshot.querySelector("#paste-date-input")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; });
+  els.cloudSnapshot.querySelector("#paste-market-select")?.addEventListener("change", (e) => { state.pasteMeta.market = e.target.value; state.pasteMeta.userTouched = true; });
+  els.cloudSnapshot.querySelector("#paste-date-input")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; state.pasteMeta.userTouched = true; });
   els.cloudSnapshot.querySelector("#paste-save-btn")?.addEventListener("click", savePasteSnapshot);
   els.cloudSnapshot.querySelector("#paste-clear-btn")?.addEventListener("click", () => { state.pasteParsed = null; renderCloudSnapshot(); });
   els.cloudSnapshot.querySelector("#broker-file-input")?.addEventListener("change", (e) => {
@@ -7447,10 +7511,11 @@ function renderCloudSnapshot() {
   });
   els.cloudSnapshot.querySelector("#manual-market")?.addEventListener("change", (e) => {
     state.pasteMeta.market = e.target.value;
+    state.pasteMeta.userTouched = true;
     prefillManualFromLatest(state.pasteMeta.market);
     renderCloudSnapshot();
   });
-  els.cloudSnapshot.querySelector("#manual-date")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; });
+  els.cloudSnapshot.querySelector("#manual-date")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; state.pasteMeta.userTouched = true; });
   els.cloudSnapshot.querySelector("#manual-save")?.addEventListener("click", saveManualSnapshot);
   els.cloudSnapshot.querySelectorAll("[data-ark-copy]").forEach((btn) => {
     btn.addEventListener("click", () => handleArkCopy(btn, btn.dataset.arkCopy));
@@ -7476,6 +7541,13 @@ function renderCloudSnapshot() {
     state.arkRefill.phase = {};
     saveArkRefillState();
     renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelectorAll("[data-ark-market]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.arkRefill.market = btn.dataset.arkMarket === "US" ? "US" : "TW";
+      saveArkRefillState();
+      renderCloudSnapshot();
+    });
   });
   els.cloudSnapshot.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -7553,6 +7625,13 @@ function renderCloudSnapshot() {
       }
     });
   });
+  els.cloudSnapshot.querySelectorAll(".level-date-input").forEach((inp) => {
+    inp.addEventListener("change", (e) => {
+      const market = e.target.dataset.levelDateMarket;
+      state.levelUpdateDate[market] = e.target.value || today();
+      renderCloudSnapshot(); // 重繪讓 % 輸入框反映該日已記錄的水位
+    });
+  });
   els.cloudSnapshot.querySelectorAll(".level-update-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const market = btn.dataset.targetLevelMarket;
@@ -7560,11 +7639,12 @@ function renderCloudSnapshot() {
       const input = panel?.querySelector("input[data-target-level-market]");
       if (!input) return;
       if (!updateTargetLevel(market, input.value)) return;
+      const dateStr = panel?.querySelector("input[data-level-date-market]")?.value || today();
       const feedback = panel?.querySelector(".level-last-record");
       if (feedback) feedback.textContent = "同步中…";
       btn.disabled = true;
       try {
-        await saveTargetLevelToSheet(market, state.targetLevels[market]);
+        await saveTargetLevelToSheet(market, state.targetLevels[market], dateStr);
         renderCloudSnapshot();
       } catch (error) {
         if (feedback) feedback.textContent = String(error?.message || "").includes("登入已過期") ? error.message : "儲存失敗，請重試";
