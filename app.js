@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.38.1";
-const APP_VERSION_NOTE = "美學重構 Phase 1.5 第二批：尺度 token 套用——styles.css font-size 113 處收斂成 6 級（caption=12）、border-radius 61 處收斂成 chip8/控制12/卡片16、首頁 tile padding→16；例外保留（16px iOS 輸入、9/10px 密集圖表、20px tile 防爆框、30px 大數、999 藥丸）";
+const APP_VERSION = "v0.38.0";
+const APP_VERSION_NOTE = "美學重構 Phase 1.5 第一批：漲跌色翻成台股慣例紅漲綠跌（語意 token --up/--down，13 處漲跌損益色一次翻齊，排除領先大盤/趨勢線上下等好壞語意）；:root 加尺度系統 token（字級/間距/圓角，套用待第二批）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
