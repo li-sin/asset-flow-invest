@@ -31,8 +31,8 @@
   --danger-soft: rgba(255, 107, 107, 0.14);
 
   /* ── Phase 1.5 尺度系統 token（收斂魔術數字）── */
-  /* 字級 6 級（iOS 輸入框 ≥16px 鐵律另外處理，不歸級） */
-  --fs-caption: 11px;
+  /* 字級 6 級（caption=12 貼近現況；iOS 輸入框 16px、密集圖表 9/10px、首頁 tile 20px、單一大數 30px 為例外不歸級） */
+  --fs-caption: 12px;
   --fs-small: 13px;
   --fs-body: 15px;
   --fs-title: 17px;
@@ -70,7 +70,7 @@ body {
   overflow-x: hidden;
   max-width: 100vw;
   font-family: var(--font);
-  font-size: 15px;
+  font-size: var(--fs-body);
   background: var(--bg);
   color: var(--ink);
 }
@@ -105,7 +105,7 @@ textarea {
 
 .auth-card {
   width: min(460px, 100%);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   box-shadow: var(--shadow);
   padding: 24px;
@@ -114,14 +114,14 @@ textarea {
 .auth-eyebrow {
   margin: 0 0 8px;
   color: var(--green-dark);
-  font-size: 13px;
+  font-size: var(--fs-small);
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .auth-card h2 {
   margin: 0 0 10px;
-  font-size: 22px;
+  font-size: var(--fs-metric);
   line-height: 1.25;
 }
 
@@ -138,7 +138,7 @@ textarea {
 .auth-version {
   margin: 12px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 
 .auth-actions {
@@ -171,14 +171,14 @@ textarea {
 
 .topbar h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--fs-metric);
   line-height: 1.2;
 }
 
 .topbar p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-small);
 }
 
 .topbar-actions,
@@ -215,7 +215,7 @@ textarea {
   padding: 10px;
   background: var(--surface, #fff);
   border: 1px solid var(--border, #d4d4d4);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   z-index: 30;
   min-width: 150px;
@@ -228,7 +228,7 @@ textarea {
 
 .button {
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   min-height: 40px;
   padding: 0 16px;
   display: inline-flex;
@@ -273,18 +273,18 @@ textarea {
 
 .notice {
   border: 1px solid rgba(52, 211, 153, 0.3);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: rgba(52, 211, 153, 0.12);
   color: var(--green);
   padding: 10px 12px;
-  font-size: 14px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   margin-bottom: 12px;
 }
 
 .ocr-panel {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: rgba(255, 255, 255, 0.04);
   padding: 10px;
   display: flex;
@@ -299,13 +299,13 @@ textarea {
 }
 
 .ocr-panel strong {
-  font-size: 14px;
+  font-size: var(--fs-small);
 }
 
 .ocr-panel span,
 .parsed-card > span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .parse-preview {
@@ -318,7 +318,7 @@ textarea {
 }
 
 .parsed-card {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   padding: 10px;
   max-width: 100%;
@@ -363,7 +363,7 @@ textarea {
 .section-heading p,
 .card-heading span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   margin: 0;
 }
 
@@ -375,7 +375,7 @@ textarea {
 .section-eyebrow {
   margin: 0 0 4px;
   color: var(--green-dark);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -384,14 +384,14 @@ textarea {
 .cloud-snapshot h2,
 .section-heading h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--fs-metric);
 }
 
 .cloud-snapshot p,
 .muted-text {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 
 .perf-positive {
@@ -415,7 +415,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 .perf-input-grid input,
@@ -478,17 +478,17 @@ textarea {
   gap: 2px;
   padding: 10px 12px;
   background: var(--surface-2);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 .cash-total-item {
   border: 2px solid var(--accent);
 }
 .cash-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
 }
 .cash-value {
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -496,11 +496,11 @@ textarea {
   color: var(--accent);
 }
 .cash-sub {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
 }
 #cash-plan-body input {
-  font-size: 14px;
+  font-size: var(--fs-small);
   width: 100%;
   box-sizing: border-box;
 }
@@ -510,7 +510,7 @@ textarea {
   color: var(--muted);
   cursor: pointer;
   padding: 2px 6px;
-  font-size: 14px;
+  font-size: var(--fs-small);
 }
 .cash-plan-del:hover {
   color: var(--red);
@@ -522,7 +522,7 @@ textarea {
 
 .dashboard-empty {
   border: 1px dashed var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   padding: 22px;
 }
@@ -539,7 +539,7 @@ textarea {
 
 .metric,
 .dashboard-card {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   min-width: 0;
   overflow: hidden;
@@ -547,17 +547,17 @@ textarea {
 
 .metric {
   display: grid;
-  gap: 5px;
-  padding: 14px;
+  gap: var(--sp-1);
+  padding: var(--sp-4);
 }
 
 .metric span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .metric strong {
-  font-size: 24px;
+  font-size: var(--fs-metric);
   line-height: 1.15;
   font-weight: 700;
 }
@@ -576,7 +576,7 @@ textarea {
 }
 
 .metric-unit {
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
   font-weight: 600;
   margin-left: 2px;
@@ -625,7 +625,7 @@ textarea {
 
 .dashboard-tab {
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   min-height: 40px;
   background: transparent;
   color: var(--muted);
@@ -663,7 +663,7 @@ textarea {
 .level-chart-legend {
   display: flex;
   gap: 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   align-items: center;
 }
@@ -681,7 +681,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   transition: opacity 0.12s, background 0.12s;
 }
 .adjust-trend-legend-item.is-active {
@@ -698,10 +698,10 @@ textarea {
 
 .level-range-btn {
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: var(--radius-chip);
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   padding: 2px 10px;
   cursor: pointer;
@@ -740,7 +740,7 @@ textarea {
   gap: 8px;
 }
 .scatter-slider-label {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   white-space: nowrap;
   min-width: 88px;
@@ -755,7 +755,7 @@ textarea {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-chip);
   background: var(--line, #333);
   outline: none;
   cursor: pointer;
@@ -808,13 +808,13 @@ textarea {
 }
 
 .market-detail-section {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   padding: 12px;
 }
 
 .market-water-card {
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   background: var(--panel);
   padding: 16px;
 }
@@ -830,7 +830,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
@@ -845,7 +845,7 @@ textarea {
 .mw-dot-US { background: var(--amber); }
 
 .mw-count {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
 }
 
@@ -857,14 +857,14 @@ textarea {
 }
 
 .mw-value {
-  font-size: 40px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .mw-pct {
-  font-size: 22px;
+  font-size: var(--fs-metric);
   font-weight: 600;
   color: var(--muted);
   margin-left: 1px;
@@ -874,7 +874,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   padding: 3px 8px;
   border-radius: 999px;
@@ -886,7 +886,7 @@ textarea {
 .mw-flat { color: var(--flat); background: var(--flat-bg); }
 
 .mw-sub {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   margin-top: 5px;
 }
@@ -897,7 +897,7 @@ textarea {
   gap: 8px;
   flex-wrap: wrap;
   background: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 10px;
   margin-top: 14px;
 }
@@ -913,9 +913,9 @@ textarea {
   padding: 6px 10px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-chip);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
@@ -949,7 +949,7 @@ textarea {
   text-align: right;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-chip);
   padding: 6px 8px;
   font-size: 16px; /* ≥16px 防 iOS 點選放大 */
   font-variant-numeric: tabular-nums;
@@ -959,10 +959,10 @@ textarea {
   min-height: 40px;
   padding: 8px 16px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-chip);
   background: var(--blue);
   color: #0A1A2A;
-  font-size: 14px;
+  font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
 }
@@ -971,13 +971,13 @@ textarea {
 
 .level-last-record {
   flex-basis: 100%;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   margin-top: 2px;
 }
 
 .level-unit {
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 
@@ -988,7 +988,7 @@ textarea {
   border-top: 1px solid var(--line);
   margin-top: 14px;
   padding-top: 10px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
 }
 
@@ -1024,12 +1024,12 @@ textarea {
 
 .water-cost-row span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .water-cost-row b {
   text-align: right;
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 
 .layout-cost-meter {
@@ -1057,7 +1057,7 @@ textarea {
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .share-matrix th,
@@ -1097,7 +1097,7 @@ textarea {
 .share-cell b {
   position: relative;
   z-index: 1;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 
@@ -1123,12 +1123,12 @@ textarea {
 
 .allocation-row span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .allocation-row b {
   color: var(--green-dark);
-  font-size: 13px;
+  font-size: var(--fs-small);
   text-align: right;
 }
 
@@ -1136,7 +1136,7 @@ textarea {
   display: grid;
   gap: 3px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .target-level-input {
@@ -1150,7 +1150,7 @@ textarea {
   justify-content: center;
   min-width: 58px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-style: normal;
   white-space: nowrap;
 }
@@ -1181,13 +1181,13 @@ textarea {
 }
 
 .ocr-completeness strong {
-  font-size: 15px;
+  font-size: var(--fs-body);
 }
 
 .ocr-completeness p {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
   line-height: 1.45;
 }
 
@@ -1215,7 +1215,7 @@ textarea {
   position: relative;
   width: min(360px, 100%);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: #111;
   overflow: hidden;
 }
@@ -1259,7 +1259,7 @@ textarea {
   display: grid;
   gap: 5px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .row-line-global-actions {
@@ -1307,12 +1307,12 @@ textarea {
   margin-top: 12px;
   padding: 12px;
   background: var(--bg-soft, #f9fafb);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--line);
 }
 
 .symbol-chart-heading {
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
   margin-bottom: 8px;
 }
@@ -1324,7 +1324,7 @@ textarea {
 
 .layout-shares-market h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 
@@ -1349,7 +1349,7 @@ textarea {
 .layout-shares-col span {
   width: 18px;
   min-height: 3px;
-  border-radius: 3px 3px 0 0;
+  border-radius: var(--radius-chip) 3px 0 0;
   background: var(--green);
 }
 
@@ -1382,7 +1382,7 @@ textarea {
 }
 .compact-table .parsed-table .add-position-hint {
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .snapshot-admin-card {
@@ -1401,7 +1401,7 @@ textarea {
   display: grid;
   gap: 5px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .snapshot-delete-form select {
@@ -1411,7 +1411,7 @@ textarea {
 
 .snapshot-delete-preview {
   border: 1px solid rgba(255, 107, 107, 0.3);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: rgba(255, 107, 107, 0.1);
   color: var(--red);
   padding: 10px 12px;
@@ -1425,9 +1425,9 @@ textarea {
 }
 
 .quotes-status {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   padding: 2px 7px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1458,7 +1458,7 @@ textarea {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: rgba(255, 107, 107, 0.18);
   touch-action: pan-y;
 }
@@ -1493,7 +1493,7 @@ textarea {
 .swipe-row-content span,
 .swipe-row-content small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .snap-row-actions {
@@ -1548,11 +1548,11 @@ textarea {
 
 .capture-mode-btn {
   padding: 4px 12px;
-  border-radius: 20px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1566,10 +1566,10 @@ textarea {
 .paste-table-textarea {
   width: 100%;
   box-sizing: border-box;
-  font-size: 13px;
+  font-size: var(--fs-small);
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   resize: vertical;
   font-family: monospace;
   background: var(--card-bg, #fff);
@@ -1586,13 +1586,13 @@ textarea {
   max-height: 200px;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
 }
 
 .paste-preview-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .paste-preview-table th,
@@ -1620,7 +1620,7 @@ textarea {
 .paste-meta-row label {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   gap: 4px;
 }
@@ -1655,7 +1655,7 @@ textarea {
 .batch-firstbuy-panel {
   background: var(--surface2, #1a1a1a);
   border: 1px solid var(--line, #2a2a2a);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 12px 14px;
   margin-bottom: 10px;
 }
@@ -1675,9 +1675,9 @@ textarea {
   border-bottom: 1px solid var(--line, #2a2a2a);
 }
 .batch-firstbuy-row:last-child { border-bottom: none; }
-.batch-firstbuy-symbol { font-weight: 700; font-size: 13px; }
-.batch-firstbuy-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.batch-firstbuy-input { font-size: 12px; padding: 3px 6px; }
+.batch-firstbuy-symbol { font-weight: 700; font-size: var(--fs-small); }
+.batch-firstbuy-name { font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-firstbuy-input { font-size: var(--fs-caption); padding: 3px 6px; }
 @media (max-width: 480px) {
   .batch-firstbuy-row { grid-template-columns: 64px 1fr; }
   .batch-firstbuy-input { grid-column: 1 / -1; }
@@ -1695,7 +1695,7 @@ textarea {
 
 .column-crop {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   margin: 0;
   overflow: hidden;
@@ -1712,7 +1712,7 @@ textarea {
 .column-crop figcaption {
   border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   padding: 6px 8px;
 }
 
@@ -1720,7 +1720,7 @@ textarea {
   width: 100%;
   border-collapse: collapse;
   min-width: 1040px;
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 
 .draft-parsed-table {
@@ -1814,7 +1814,7 @@ textarea {
 
 .diagnostic-crop {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   margin: 0;
   overflow: hidden;
   background: #151515;
@@ -1848,13 +1848,13 @@ textarea {
 }
 
 .diagnostic-crop figcaption strong {
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .diagnostic-crop figcaption span,
 .diagnostic-crop figcaption small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   line-height: 1.35;
 }
 
@@ -1879,7 +1879,7 @@ textarea {
 }
 
 .first-buy-cell .first-buy-date {
-  font-size: 13px;
+  font-size: var(--fs-small);
   margin-right: 6px;
 }
 
@@ -1891,7 +1891,7 @@ textarea {
 .skipped-rows-section {
   margin-top: 16px;
   border: 1.5px solid var(--yellow, #f0a500);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 12px;
   background: rgba(240, 165, 0, 0.07);
   overflow: hidden;
@@ -1972,7 +1972,7 @@ textarea {
   border: none;
   color: var(--red, #e74c3c);
   cursor: pointer;
-  font-size: 18px;
+  font-size: var(--fs-title);
   padding: 0 4px;
   flex-shrink: 0;
 }
@@ -1981,7 +1981,7 @@ textarea {
   width: 220px;
   margin: 0;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: #151515;
 }
@@ -1997,7 +1997,7 @@ textarea {
   background: var(--panel);
   border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   padding: 4px 6px;
 }
 
@@ -2017,7 +2017,7 @@ textarea {
   display: grid;
   gap: 3px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .row-fix input {
@@ -2044,7 +2044,7 @@ textarea {
 .capture-panel,
 .library-panel {
   background: var(--panel);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   min-width: 0;
   max-width: 100%;
 }
@@ -2072,7 +2072,7 @@ textarea {
   position: relative;
   min-height: 152px;
   border: 2px dashed var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   display: flex;
   align-items: center;
   gap: 16px;
@@ -2089,14 +2089,14 @@ textarea {
 .drop-zone h2,
 .empty-state h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--fs-title);
 }
 
 .drop-zone p,
 .empty-state p {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-small);
 }
 
 .drop-mark {
@@ -2127,7 +2127,7 @@ textarea {
 
 .draft-shot {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   overflow: hidden;
 }
@@ -2143,7 +2143,7 @@ textarea {
   display: block;
   padding: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2169,7 +2169,7 @@ label {
   display: grid;
   gap: 6px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 
 input,
@@ -2178,7 +2178,7 @@ textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--bg);
   color: var(--ink);
   padding: 10px 11px;
@@ -2232,7 +2232,7 @@ textarea {
   display: inline-grid;
   grid-template-columns: repeat(4, minmax(64px, auto));
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: rgba(255, 255, 255, 0.06);
 }
@@ -2263,7 +2263,7 @@ textarea {
 }
 
 .entry-card {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   overflow: hidden;
   cursor: pointer;
@@ -2304,7 +2304,7 @@ textarea {
 .entry-meta p {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -2323,7 +2323,7 @@ textarea {
   background: rgba(255, 255, 255, 0.08);
   color: var(--ink);
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .chip.new {
@@ -2347,7 +2347,7 @@ textarea {
   place-content: center;
   text-align: center;
   border: 1px dashed var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 
 .empty-state.is-hidden {
@@ -2360,7 +2360,7 @@ textarea {
   width: auto;
   max-width: calc(100vw - 24px);
   background: var(--panel);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
   z-index: 20;
   opacity: 0;
@@ -2382,7 +2382,7 @@ textarea {
 .app-footer {
   border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   padding: 10px 18px 14px;
   text-align: center;
 }
@@ -2390,7 +2390,7 @@ textarea {
 .dashboard-version-footer {
   text-align: center;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   padding: 4px 0 2px;
   opacity: 0.7;
 }
@@ -2405,7 +2405,7 @@ textarea {
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--panel);
-  font-size: 24px;
+  font-size: var(--fs-metric);
   cursor: pointer;
   z-index: 1;
 }
@@ -2421,7 +2421,7 @@ textarea {
   max-height: 42vh;
   object-fit: contain;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--line);
 }
 
@@ -2432,7 +2432,7 @@ textarea {
 }
 
 .detail-field {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 10px;
   background: var(--panel);
 }
@@ -2440,7 +2440,7 @@ textarea {
 .detail-field span {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   margin-bottom: 5px;
 }
 
@@ -2605,7 +2605,7 @@ textarea {
   }
 
   .metric strong {
-    font-size: 24px;
+    font-size: var(--fs-metric);
   }
 
   .share-matrix table {
@@ -2689,7 +2689,7 @@ textarea {
     width: 100%;
     max-width: 100%;
     border: 1px solid var(--border, #333);
-    border-radius: 12px;
+    border-radius: var(--radius-control);
     padding: 8px;
     margin-bottom: 8px;
     max-width: 100%;
@@ -2791,7 +2791,7 @@ textarea {
     font-weight: 700;
     color: var(--ink);
     background: var(--surface-2, rgba(127, 127, 127, 0.15));
-    border-radius: 4px 4px 0 0;
+    border-radius: var(--radius-chip) 4px 0 0;
     padding: 6px 8px;
   }
   .compact-table .parsed-table td::before {
@@ -2831,7 +2831,7 @@ textarea {
   flex: 1;
   text-align: center;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-small);
 }
 
 .snap-cal-grid {
@@ -2842,7 +2842,7 @@ textarea {
 
 .snap-cal-weekday {
   text-align: center;
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   padding: 2px 0;
 }
@@ -2855,9 +2855,9 @@ textarea {
   position: relative;
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   padding: 5px 2px 3px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   cursor: pointer;
   text-align: center;
   color: var(--ink);
@@ -2903,9 +2903,9 @@ textarea {
   background: var(--panel, #fffefa);
   color: var(--ink, #1f2623);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   pointer-events: none;
   display: none;
   z-index: 10;
@@ -2949,7 +2949,7 @@ textarea {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--red);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--card-2, rgba(127, 127, 127, 0.04));
 }
 .adjust-alert-row:hover { background: rgba(255, 255, 255, 0.06); }
@@ -2965,10 +2965,10 @@ textarea {
   gap: 4px;
   min-width: 0;
 }
-.adjust-alert-title { font-size: 14px; }
+.adjust-alert-title { font-size: var(--fs-small); }
 .adjust-badges { display: flex; gap: 6px; flex-wrap: wrap; }
 .adjust-badge {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   padding: 1px 7px;
   border-radius: 999px;
@@ -2986,9 +2986,9 @@ textarea {
   gap: 4px;
   margin: 8px 0;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: rgba(127, 127, 127, 0.06);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .adjust-market-trend {
   display: flex;
@@ -3011,15 +3011,15 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   white-space: nowrap; /* 「排序」兩字維持橫排，不被擠成直行 */
   flex-shrink: 0;      /* label 不被壓縮，空間不足時改讓 chips 換行 */
 }
 .adjust-sort-select {
-  font-size: 13px;
+  font-size: var(--fs-small);
   padding: 4px 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: var(--card-bg, transparent);
   color: inherit;
@@ -3030,7 +3030,7 @@ textarea {
   flex-wrap: wrap;
 }
 .adjust-chip {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -3054,7 +3054,7 @@ textarea {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -3073,7 +3073,7 @@ textarea {
 
 /* A1: 水位更新圖案按鈕 */
 .icon-btn {
-  font-size: 17px;
+  font-size: var(--fs-title);
   line-height: 1;
   padding: 2px 8px;
 }
@@ -3084,11 +3084,11 @@ textarea {
   border: none;
   padding: 2px 5px;
   margin-left: 3px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   cursor: pointer;
   opacity: 0.45;
   vertical-align: middle;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   transition: opacity 0.15s, background 0.15s;
 }
 .detail-edit-toggle:hover {
@@ -3121,8 +3121,8 @@ textarea {
   gap: 10px;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  font-size: 13px;
+  border-radius: var(--radius-control);
+  font-size: var(--fs-small);
   cursor: pointer;
   transition: background 0.12s;
 }
@@ -3130,10 +3130,10 @@ textarea {
   background: rgba(255, 255, 255, 0.05);
 }
 .capture-entry-row .entry-status {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   background: var(--line);
   color: var(--muted);
   white-space: nowrap;
@@ -3160,7 +3160,7 @@ textarea {
   display: flex;
   gap: 8px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   font-weight: 600;
 }
@@ -3171,7 +3171,7 @@ textarea {
 .manual-row {
   margin-bottom: 6px;
   border: 1px solid var(--border, #e2e2e2);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 .manual-row-content {
   display: flex;
@@ -3179,12 +3179,12 @@ textarea {
   align-items: center;
   padding: 6px 8px;
   background: var(--surface, #fff);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 .manual-symbol { flex: 0 0 70px; }
 .manual-name {
   flex: 1 1 70px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3196,7 +3196,7 @@ textarea {
   background: var(--danger-soft, rgba(201, 42, 42, 0.1));
   color: var(--danger, #c92a2a);
   border: 1px solid var(--danger, #c92a2a);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 10px 14px;
   font-weight: 600;
   cursor: pointer;
@@ -3204,13 +3204,13 @@ textarea {
 }
 .pending-list {
   border: 1px solid var(--danger, #c92a2a);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 12px;
   margin-bottom: 12px;
   background: var(--danger-soft, rgba(201, 42, 42, 0.06));
 }
 .pending-title {
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--danger, #c92a2a);
   font-weight: 600;
   margin: 0 0 8px;
@@ -3224,7 +3224,7 @@ textarea {
 }
 .pending-id {
   flex: 1 1 160px;
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 .pending-avg-input {
   width: 110px;
@@ -3234,7 +3234,7 @@ textarea {
   flex-wrap: wrap;
   gap: 6px 18px;
   padding: 8px 4px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 .metric-bar b {
@@ -3250,10 +3250,10 @@ textarea {
 .holdings-subtab {
   padding: 8px 18px;
   border: 1px solid var(--border, #d4d4d4);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--surface, #fff);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--fs-small);
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
@@ -3269,7 +3269,7 @@ textarea {
 }
 .holdings-date-bar {
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 .ark-refill-header {
@@ -3290,10 +3290,10 @@ textarea {
 .ark-ctrl-btn {
   padding: 6px 12px;
   border: 1px solid var(--border, #d4d4d4);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--surface, #fff);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--fs-small);
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
@@ -3313,7 +3313,7 @@ textarea {
   border-radius: 999px;
   background: var(--accent-soft, rgba(76, 110, 245, 0.14));
   color: var(--accent, #4c6ef5);
-  font-size: 13px;
+  font-size: var(--fs-small);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -3333,10 +3333,10 @@ textarea {
   gap: 6px;
   padding: 7px 18px;
   border: 1px solid var(--border, #d4d4d4);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--surface, #fff);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--fs-small);
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
@@ -3356,7 +3356,7 @@ textarea {
   border-radius: 999px;
   background: var(--danger, #e03131);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   line-height: 18px;
   text-align: center;
@@ -3367,14 +3367,14 @@ textarea {
 }
 .ark-refill-desc {
   margin: 4px 0 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.5;
 }
 .ark-refill-market + .ark-refill-market {
   margin-top: 16px;
 }
 .ark-refill-lastfill {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   color: var(--muted);
   white-space: nowrap;
 }
@@ -3385,7 +3385,7 @@ textarea {
   flex-wrap: wrap;
   padding: 10px 12px;
   border: 1px solid var(--border, #e2e2e2);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   margin-bottom: 8px;
   transition: background 0.3s, border-color 0.3s;
 }
@@ -3403,7 +3403,7 @@ textarea {
 .ark-refill-id {
   min-width: 0;
   flex: 1 1 120px;
-  font-size: 14px;
+  font-size: var(--fs-small);
 }
 .ark-refill-id strong {
   font-variant-numeric: tabular-nums;
@@ -3411,7 +3411,7 @@ textarea {
 .ark-refill-vals {
   display: flex;
   gap: 12px;
-  font-size: 13px;
+  font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
@@ -3427,21 +3427,21 @@ textarea {
 }
 .ark-refill-btn {
   padding: 5px 12px;
-  font-size: 13px;
+  font-size: var(--fs-small);
 }
 .ark-refill-hint {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--accent, #4c6ef5);
   white-space: nowrap;
 }
 .ark-refill-done {
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--green-dark, #2d6a4f);
   font-weight: 600;
   white-space: nowrap;
 }
 .ark-refill-pending {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--danger, #c92a2a);
   white-space: nowrap;
 }
