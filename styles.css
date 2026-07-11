@@ -35,6 +35,13 @@
   box-sizing: border-box;
 }
 
+/* 全站預設縮到 90%（Sin 偏好 90% 瀏覽器縮放的緊湊比例）。
+   放在根元素 html 才能正確處理 fixed 底部導覽（非根元素 zoom 會讓 fixed 錯位）。
+   iOS 輸入框 CSS font-size 仍算 16px，不會觸發點選放大。 */
+html {
+  zoom: 0.9;
+}
+
 html,
 body {
   margin: 0;
