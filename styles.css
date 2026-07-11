@@ -29,6 +29,34 @@
   --green-light: rgba(52, 211, 153, 0.15);
   --danger: #FF6B6B;
   --danger-soft: rgba(255, 107, 107, 0.14);
+
+  /* ── Phase 1.5 尺度系統 token（收斂魔術數字）── */
+  /* 字級 6 級（iOS 輸入框 ≥16px 鐵律另外處理，不歸級） */
+  --fs-caption: 11px;
+  --fs-small: 13px;
+  --fs-body: 15px;
+  --fs-title: 17px;
+  --fs-metric: 22px;
+  --fs-hero: 40px;
+  /* 間距 4px 格線 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  /* 圓角 3 級：chip / 控制項 / 卡片 */
+  --radius-chip: 8px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+
+  /* ── 漲跌語意色（台股慣例：紅漲綠跌，2026-07-11 Sin 定案）── */
+  /* --green/--red 降為純色票；漲跌一律走 --up/--down，不再硬寫 rgba */
+  --up: var(--red);
+  --up-bg: rgba(255, 107, 107, 0.15);
+  --down: var(--green);
+  --down-bg: rgba(52, 211, 153, 0.15);
+  --flat: var(--muted);
+  --flat-bg: var(--surface-2);
 }
 
 * {
@@ -367,12 +395,12 @@ textarea {
 }
 
 .perf-positive {
-  color: var(--green);
+  color: var(--up);
   font-weight: 600;
 }
 
 .perf-negative {
-  color: var(--red);
+  color: var(--down);
   font-weight: 600;
 }
 
@@ -853,9 +881,9 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-.mw-up { color: var(--green); background: rgba(52, 211, 153, 0.15); }
-.mw-down { color: var(--red); background: rgba(255, 107, 107, 0.14); }
-.mw-flat { color: var(--muted); background: var(--surface-2); }
+.mw-up { color: var(--up); background: var(--up-bg); }
+.mw-down { color: var(--down); background: var(--down-bg); }
+.mw-flat { color: var(--flat); background: var(--flat-bg); }
 
 .mw-sub {
   font-size: 12px;

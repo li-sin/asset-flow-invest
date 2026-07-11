@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.37.0";
-const APP_VERSION_NOTE = "美學重構 Phase 1：首頁頂部統計改 tiles（庫存/總股數/成本/快照，eyebrow＋大數字）；延續水位卡設計語言。Phase 2/3 見美學重構計畫";
+const APP_VERSION = "v0.38.0";
+const APP_VERSION_NOTE = "美學重構 Phase 1.5 第一批：漲跌色翻成台股慣例紅漲綠跌（語意 token --up/--down，13 處漲跌損益色一次翻齊，排除領先大盤/趨勢線上下等好壞語意）；:root 加尺度系統 token（字級/間距/圓角，套用待第二批）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5836,7 +5836,7 @@ function renderSparkline(pts, down) {
   const spanX = maxX - minX || 1, spanY = maxY - minY || 1;
   const px = (x) => pad + (x - minX) / spanX * (W - 2 * pad);
   const py = (y) => H - pad - (y - minY) / spanY * (H - 2 * pad);
-  const color = down ? "var(--red)" : "var(--green)";
+  const color = down ? "var(--down)" : "var(--up)";
   const poly = pts.map((p) => `${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join(" ");
   const last = pts[pts.length - 1];
   return `<svg class="adjust-spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">`
@@ -6005,17 +6005,17 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     ].join('');
     // 報酬率斜率（主訊號）：價格趨勢，與成本無關
     const retText = a.retSlope !== null
-      ? `<span title="價格報酬率斜率（汰出訊號，不受加碼影響）">報酬率 <strong style="color:${a.retSlope >= 0 ? 'var(--green)' : 'var(--red)'}">${a.retSlope >= 0 ? '▲' : '▼'}${Math.abs(a.retSlope).toFixed(2)}%/快照</strong></span>`
+      ? `<span title="價格報酬率斜率（汰出訊號，不受加碼影響）">報酬率 <strong style="color:${a.retSlope >= 0 ? 'var(--up)' : 'var(--down)'}">${a.retSlope >= 0 ? '▲' : '▼'}${Math.abs(a.retSlope).toFixed(2)}%/快照</strong></span>`
       : '';
     // 損益率（顯示用，可能無均價資料）
     const hasRate = a.curRate !== null;
-    const curColor = (a.curRate ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const curColor = (a.curRate ?? 0) >= 0 ? 'var(--up)' : 'var(--down)';
     const rateMove = hasRate
       ? `${a.firstRate >= 0 ? '+' : ''}${a.firstRate.toFixed(1)}% → <strong style="color:${curColor}">${a.curRate >= 0 ? '+' : ''}${a.curRate.toFixed(1)}%</strong>`
       : '<span class="muted-text">—</span>';
     // 今日預估損益率（依現價，非快照）：虛線底線快速區別
     const estChip = a.todayEstRate !== null
-      ? ` <span class="adjust-est" title="依今日現價預估，非快照資料">⇢ 今日 <strong style="color:${a.todayEstRate >= 0 ? 'var(--green)' : 'var(--red)'}">${a.todayEstRate >= 0 ? '+' : ''}${a.todayEstRate.toFixed(1)}%</strong></span>`
+      ? ` <span class="adjust-est" title="依今日現價預估，非快照資料">⇢ 今日 <strong style="color:${a.todayEstRate >= 0 ? 'var(--up)' : 'var(--down)'}">${a.todayEstRate >= 0 ? '+' : ''}${a.todayEstRate.toFixed(1)}%</strong></span>`
       : '';
     const heldText = a.heldDays !== null ? `${a.heldDays} 天` : '—';
     return `
@@ -6040,7 +6040,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     if (!info || info.slope === null || info.slope === undefined) return '';
     const idxS = info.slope;
     const idxName = INDEX_LABELS[info.symbol] || info.symbol;
-    const fmtSlope = (s) => `<strong style="color:${s < 0 ? 'var(--red)' : 'var(--green)'}">${s < 0 ? '▼' : '▲'} ${s >= 0 ? '+' : ''}${s.toFixed(2)}%/快照</strong>`;
+    const fmtSlope = (s) => `<strong style="color:${s < 0 ? 'var(--down)' : 'var(--up)'}">${s < 0 ? '▼' : '▲'} ${s >= 0 ? '+' : ''}${s.toFixed(2)}%/快照</strong>`;
     let portPart = '';
     const portS = marketPortReturn[m];
     if (portS !== null && portS !== undefined) {
@@ -6124,7 +6124,7 @@ function renderPLContributionChart(positions, quotes) {
   const maxAbs = Math.max(...shown.map((i) => Math.abs(i.pl)), 1);
   const rows = shown.map((item) => {
     const pct = (Math.abs(item.pl) / maxAbs * 100).toFixed(1);
-    const color = item.pl >= 0 ? "var(--green)" : "var(--red)";
+    const color = item.pl >= 0 ? "var(--up)" : "var(--down)";
     const lbl = item.pl >= 0 ? `+${Math.round(item.pl).toLocaleString()}` : `${Math.round(item.pl).toLocaleString()}`;
     return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
       <span style="min-width:52px;font-size:12px;font-weight:600;text-align:right">${escapeHtml(item.symbol)}</span>
@@ -6285,7 +6285,7 @@ function renderScatterChart(positions, quotes, firstBuyDates) {
     items, maxX: maxDays, capKey: "scatterRateCap", capOptions, unitLabel: "%",
     dayCapKey: "scatterRateDaysCap", dayCapOptions,
     getX: (i) => i.days, getY: (i) => i.rate,
-    getColor: (i) => i.rate >= 0 ? "var(--green)" : "var(--red)",
+    getColor: (i) => i.rate >= 0 ? "var(--up)" : "var(--down)",
     getTip: (i) => `${i.symbol} ${i.days}天 ${i.rate>=0?'+':''}${i.rate.toFixed(1)}%`,
   });
 }
@@ -6321,7 +6321,7 @@ function renderPLAmountScatterChart(positions, quotes, firstBuyDates) {
     items, maxX: maxDays, capKey: "scatterAmountCap", capOptions, unitLabel: "",
     dayCapKey: "scatterAmountDaysCap", dayCapOptions, refLineKey: "scatterAmountRef",
     getX: (i) => i.days, getY: (i) => i.pl,
-    getColor: (i) => i.pl >= 0 ? "var(--green)" : "var(--red)",
+    getColor: (i) => i.pl >= 0 ? "var(--up)" : "var(--down)",
     getTip: (i) => `${i.symbol} ${i.days}天 ${i.pl>=0?'+':''}${Math.round(i.pl).toLocaleString()}`,
     PL: 52,
   });
@@ -6964,16 +6964,16 @@ function renderCloudSnapshot() {
         ? `${escapeHtml(formatNumber(price, 2))}${priceIsHistorical ? '<small class="historical-price-tag">昨</small>' : ''}`
         : "<span class=\"muted-text\">—</span>";
       const deltaSpan = rateDelta !== null
-        ? `<small style="color:${rateDelta >= 0 ? 'var(--green)' : 'var(--red)'};display:block">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
+        ? `<small style="color:${rateDelta >= 0 ? 'var(--up)' : 'var(--down)'};display:block">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
         : '';
       const rateDisplay = returnRate !== null
-        ? `<span style="color:${returnRate >= 0 ? 'var(--green)' : 'var(--red)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%</span>${deltaSpan}`
+        ? `<span style="color:${returnRate >= 0 ? 'var(--up)' : 'var(--down)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%</span>${deltaSpan}`
         : "<span class=\"muted-text\">—</span>";
-      const perfColor = perfRate !== null ? (perfRate >= 0 ? 'var(--green)' : 'var(--red)') : '';
+      const perfColor = perfRate !== null ? (perfRate >= 0 ? 'var(--up)' : 'var(--down)') : '';
       const perfDisplay = perfRate !== null
         ? `<span style="color:${perfColor};font-variant-numeric:tabular-nums">${perfRate >= 0 ? '+' : ''}${perfRate.toFixed(2)}</span>`
         : "<span class=\"muted-text\">—</span>";
-      const gainColor = dailyGain !== null ? (dailyGain >= 0 ? 'var(--green)' : 'var(--red)') : '';
+      const gainColor = dailyGain !== null ? (dailyGain >= 0 ? 'var(--up)' : 'var(--down)') : '';
       const dailyGainDisplay = dailyGain !== null
         ? `<span style="color:${gainColor};font-variant-numeric:tabular-nums">${dailyGain >= 0 ? '+' : ''}${formatNumber(Math.round(dailyGain))}</span>`
         : "<span class=\"muted-text\">—</span>";
@@ -7081,7 +7081,7 @@ function renderCloudSnapshot() {
     .sort((a, b) => b.rate - a.rate);
   const top3 = performanceRows.slice(0, 3);
   const bottom3 = performanceRows.slice(-3).reverse();
-  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
+  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--up)' : 'var(--down)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
   const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
   const homeContent = `
     ${pendingAvgCostRows.length ? `<div class="pending-banner" data-go-pending>⚠️ ${pendingAvgCostRows.length} 支均價待補，點此到「庫存」補填</div>` : ""}
