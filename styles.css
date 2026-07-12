@@ -1882,6 +1882,26 @@ textarea {
   overflow: hidden;
 }
 
+/* Phase 2 方案 B：庫存明細表格視覺鬆綁（只換皮膚，互動全保留） */
+.market-detail-section .parsed-table th {
+  background: transparent;
+  font-weight: 400;
+  font-size: var(--fs-caption);
+}
+
+.market-detail-section .parsed-table td {
+  padding: 9px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-detail-section .parsed-table td:first-child {
+  font-weight: 600;
+}
+
+.market-detail-section .parsed-table td:nth-child(2) {
+  color: var(--muted);
+}
+
 .sortable-th {
   cursor: pointer;
   user-select: none;

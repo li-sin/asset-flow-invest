@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.0";
-const APP_VERSION_NOTE = "美學 Phase 2 第一步：損益率排名表格改清單列（市場色點＋代號/名稱＋持有天數小灰字＋右側紅漲綠跌膠囊），抽共用 .list-row/.list-dot/.pill class 供後續庫存明細/待關注沿用；窄螢幕前三/倒數改上下疊。基於 v0.38.4（Phase 1.5 完成）";
+const APP_VERSION = "v0.39.1";
+const APP_VERSION_NOTE = "美學 Phase 2 第二步：庫存明細表格視覺鬆綁（方案 B，Sin 定案「先 B、全面清單列 A 之後再議」）——損益率改紅漲綠跌 .pill 膠囊、表頭去底色弱化、代號欄加粗、名稱欄轉灰、數字 tabular；10 欄/排序/編輯模式/批次布局日互動全保留。基於 v0.39.0";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6965,7 +6965,7 @@ function renderCloudSnapshot() {
         ? `<small style="color:${rateDelta >= 0 ? 'var(--up)' : 'var(--down)'};display:block">${rateDelta >= 0 ? '▲' : '▼'}${Math.abs(rateDelta).toFixed(1)}%</small>`
         : '';
       const rateDisplay = returnRate !== null
-        ? `<span style="color:${returnRate >= 0 ? 'var(--up)' : 'var(--down)'}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%</span>${deltaSpan}`
+        ? `<span class="pill ${returnRate >= 0 ? "pill-up" : "pill-down"}">${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(1)}%</span>${deltaSpan}`
         : "<span class=\"muted-text\">—</span>";
       const perfColor = perfRate !== null ? (perfRate >= 0 ? 'var(--up)' : 'var(--down)') : '';
       const perfDisplay = perfRate !== null
