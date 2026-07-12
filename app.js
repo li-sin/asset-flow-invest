@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.38.3";
-const APP_VERSION_NOTE = "美學 Phase 1.5 重做批次1（純顏色版）：漲跌翻台股慣例紅漲綠跌——:root 語意 token --up(紅)/--down(綠)/--flat＋bg，app.js 15 處＋CSS 3 組 class 一次翻齊；排除市場系列色/領先大盤好壞/趨勢線上下。尺度收斂留下一版。基於 v0.38.2";
+const APP_VERSION = "v0.38.4";
+const APP_VERSION_NOTE = "美學 Phase 1.5 重做批次2（尺度收斂，cherry-pick 自被 revert 的 v0.38.1）：font-size 收斂 6 級（caption=12）、border-radius 收斂 chip8/控制12/卡片16、首頁 tile padding→16；例外保留（16px iOS 輸入、9/10px 密集圖表、20px tile 防爆框、30px 大數、999 藥丸）。基於 v0.38.3（紅漲綠跌）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
