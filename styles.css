@@ -2931,7 +2931,7 @@ textarea {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
-/* 損益率排名 grid（前三名/倒數三名並排） */
+/* 損益率排名 grid（前三名/倒數三名並排；窄螢幕改上下疊） */
 .perf-rank-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2939,18 +2939,72 @@ textarea {
   margin-top: 8px;
 }
 
-/* perf rank 專用 table（不帶 min-width 1040px） */
-.perf-rank-table {
-  min-width: 0 !important;
+@media (max-width: 480px) {
+  .perf-rank-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
-/* 損益率欄右對齊 + 等寬數字 */
-.perf-rate-cell {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  min-width: 56px;
+/* ── Phase 2 清單列語言（共用：色點＋名稱＋右側膠囊，hairline 分隔）── */
+.list-group {
+  display: flex;
+  flex-direction: column;
 }
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 2px;
+}
+
+.list-row + .list-row {
+  border-top: 1px solid var(--line);
+}
+
+.list-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.list-dot-TW { background: var(--blue); }
+.list-dot-US { background: var(--amber); }
+
+.list-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.list-main strong {
+  font-size: var(--fs-small);
+  line-height: 1.2;
+}
+
+.list-main small {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill-up { color: var(--up); background: var(--up-bg); }
+.pill-down { color: var(--down); background: var(--down-bg); }
+.pill-neutral { color: var(--flat); background: var(--flat-bg); }
 
 /* ⚠️ 待關注調節清單 */
 .adjust-alert-list {

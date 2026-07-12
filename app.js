@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.38.4";
-const APP_VERSION_NOTE = "美學 Phase 1.5 重做批次2（尺度收斂，cherry-pick 自被 revert 的 v0.38.1）：font-size 收斂 6 級（caption=12）、border-radius 收斂 chip8/控制12/卡片16、首頁 tile padding→16；例外保留（16px iOS 輸入、9/10px 密集圖表、20px tile 防爆框、30px 大數、999 藥丸）。基於 v0.38.3（紅漲綠跌）";
+const APP_VERSION = "v0.39.0";
+const APP_VERSION_NOTE = "美學 Phase 2 第一步：損益率排名表格改清單列（市場色點＋代號/名稱＋持有天數小灰字＋右側紅漲綠跌膠囊），抽共用 .list-row/.list-dot/.pill class 供後續庫存明細/待關注沿用；窄螢幕前三/倒數改上下疊。基於 v0.38.4（Phase 1.5 完成）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7074,13 +7074,20 @@ function renderCloudSnapshot() {
       const q = state.quotes[p.symbol];
       const price = typeof q === 'number' ? q : (q?.price ?? 0);
       const rate = (price - p.avgCost) / p.avgCost * 100;
-      return { symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol), rate };
+      const firstBuy = state.firstBuyDates[`${p.market}_${p.symbol}`];
+      const days = firstBuy ? Math.max(0, Math.floor((Date.now() - new Date(firstBuy)) / 86400000)) : null;
+      return { symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol), rate, days, market: marketForPosition(p) };
     })
     .sort((a, b) => b.rate - a.rate);
   const top3 = performanceRows.slice(0, 3);
   const bottom3 = performanceRows.slice(-3).reverse();
-  const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--up)' : 'var(--down)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
-  const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
+  // Phase 2：表格改清單列（色點＋代號/名稱＋右側漲跌膠囊，持有天數小灰字）
+  const perfRow = (r) => `<div class="list-row">
+    <span class="list-dot list-dot-${escapeHtml(r.market)}"></span>
+    <span class="list-main"><strong>${escapeHtml(r.symbol)}</strong><small>${escapeHtml(r.name)}${r.days !== null ? ` · 持有 ${r.days} 天` : ""}</small></span>
+    <span class="pill ${r.rate >= 0 ? "pill-up" : "pill-down"}">${r.rate >= 0 ? "+" : ""}${r.rate.toFixed(1)}%</span>
+  </div>`;
+  const perfTable = (rows) => rows.length ? `<div class="list-group">${rows.map(perfRow).join('')}</div>` : '<p class="muted-text">尚無報價資料。</p>';
   // 頂部 tiles：全部台幣（美股 × USD/TWD 即時匯率），成本/市值/未實現/本月已實現
   const usdTwd = getUsdTwdRate();
   const fxOf = (r) => (r.marketKey === "US" ? usdTwd : 1);
