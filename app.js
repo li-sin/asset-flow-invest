@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.37.2";
-const APP_VERSION_NOTE = "修 zoom:0.9 跑版：100vw 不隨 zoom 放大（只畫視窗 90%）→ body/app-shell/panel 的 max-width 全改 100%，內容不再偏左、右緣不再被裁。基於 v0.37.1（全站 90% zoom）";
+const APP_VERSION = "v0.37.3";
+const APP_VERSION_NOTE = "水位卡副標字眼「較 M/D」→「比較 M/D」（標註 ↑↓ 膠囊的比較基準日）。基於 v0.37.2（zoom 跑版修復）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6823,7 +6823,7 @@ function renderCloudSnapshot() {
         : change < 0 ? `<span class="mw-change mw-down">↓${amt}</span>`
         : `<span class="mw-change mw-flat">±0</span>`;
     }
-    const subText = `方舟建議總水位${prev ? ` · 較 ${mmddText(prev.date)}` : ""}`;
+    const subText = `方舟建議總水位${prev ? ` · 比較 ${mmddText(prev.date)}` : ""}`;
     return `
     <section class="market-water-card">
       <div class="mw-head">
