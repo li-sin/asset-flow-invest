@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.37.3";
-const APP_VERSION_NOTE = "水位卡副標字眼「較 M/D」→「比較 M/D」（標註 ↑↓ 膠囊的比較基準日）。基於 v0.37.2（zoom 跑版修復）";
+const APP_VERSION = "v0.38.2";
+const APP_VERSION_NOTE = "首頁 tiles 重組（Sin 選定四格，全台幣、美股×USDTWD 即時匯率）：估算成本（修台美幣別混加 bug）/總市值/未實現損益＋%/本月已實現（月績效）。版號跳過被 revert 的 v0.38.0/0.38.1。基於 v0.37.3";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6775,8 +6775,6 @@ function renderCloudSnapshot() {
     marketKey: marketForPosition(row),
     cost: estimatedCost(row),
   }));
-  const totalShares = positionsWithMarket.reduce((sum, row) => sum + Number(row.shares || 0), 0);
-  const totalCost = positionsWithMarket.reduce((sum, row) => sum + row.cost, 0);
   const marketSummaries = ["TW", "US"].map((market) => {
     const marketRows = positionsWithMarket
       .filter((row) => row.marketKey === market)
@@ -7083,13 +7081,36 @@ function renderCloudSnapshot() {
   const bottom3 = performanceRows.slice(-3).reverse();
   const perfRow = (r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td class="perf-rate-cell" style="color:${r.rate >= 0 ? 'var(--green)' : 'var(--red)'}">${r.rate >= 0 ? '+' : ''}${r.rate.toFixed(1)}%</td></tr>`;
   const perfTable = (rows) => rows.length ? `<div class="compact-table"><table class="parsed-table perf-rank-table"><thead><tr><th>代號</th><th>名稱</th><th class="perf-rate-cell">損益率</th></tr></thead><tbody>${rows.map(perfRow).join('')}</tbody></table></div>` : '<p class="muted-text">尚無報價資料。</p>';
+  // 頂部 tiles：全部台幣（美股 × USD/TWD 即時匯率），成本/市值/未實現/本月已實現
+  const usdTwd = getUsdTwdRate();
+  const fxOf = (r) => (r.marketKey === "US" ? usdTwd : 1);
+  const costTwd = positionsWithMarket.reduce((sum, r) => sum + r.cost * fxOf(r), 0);
+  let mvTwd = 0, noQuoteCount = 0, plTwd = 0, plCostBase = 0;
+  for (const r of positionsWithMarket) {
+    const q = state.quotes[r.symbol];
+    const price = typeof q === "number" ? q : (q?.price ?? null);
+    const shares = Number(r.shares || 0);
+    if (price !== null && price > 0) {
+      mvTwd += price * shares * fxOf(r);
+      if (r.cost > 0) { plTwd += (price * shares - r.cost) * fxOf(r); plCostBase += r.cost * fxOf(r); }
+    } else {
+      mvTwd += r.cost * fxOf(r); // 無報價以成本替代，避免市值憑空少一塊
+      noQuoteCount += 1;
+    }
+  }
+  const plPct = plCostBase > 0 ? (plTwd / plCostBase) * 100 : null;
+  const plColor = plTwd >= 0 ? "var(--green)" : "var(--red)";
+  // 本月已實現（月績效 E 欄台幣總計）；當月沒填退最近有資料的月份
+  const realizedRows = (state.monthlyPerf || []).filter((r) => r.hasData);
+  const nowMonth = new Date().getMonth() + 1;
+  const realizedRow = realizedRows.find((r) => r.monthNum === nowMonth) || realizedRows[realizedRows.length - 1] || null;
   const homeContent = `
     ${pendingAvgCostRows.length ? `<div class="pending-banner" data-go-pending>⚠️ ${pendingAvgCostRows.length} 支均價待補，點此到「庫存」補填</div>` : ""}
     <div class="metric-grid home-metric-grid">
-      <div class="metric"><span>庫存</span><strong>${formatNumber(positions.length)}<small class="metric-unit">檔</small></strong></div>
-      <div class="metric"><span>總股數</span><strong>${formatNumber(totalShares, 3)}</strong></div>
-      <div class="metric"><span>估算成本</span><strong>${formatMoney(totalCost)}</strong></div>
-      <div class="metric"><span>雲端快照</span><strong>${formatNumber(state.cloudHistory.snapshots.length)}</strong></div>
+      <div class="metric"><span>估算成本</span><strong>${formatMoney(costTwd)}</strong><small class="metric-sub">台幣 · 美股 @${usdTwd.toFixed(2)}</small></div>
+      <div class="metric"><span>總市值</span><strong>${formatMoney(mvTwd)}</strong><small class="metric-sub">${noQuoteCount ? `${noQuoteCount} 檔無報價以成本計` : "依即時報價"}</small></div>
+      <div class="metric"><span>未實現損益</span><strong style="color:${plColor}">${plCostBase > 0 ? formatSignedMoney(plTwd) : "—"}</strong><small class="metric-sub"${plPct !== null ? ` style="color:${plColor}"` : ""}>${plPct !== null ? `${plPct >= 0 ? "+" : ""}${plPct.toFixed(1)}%` : "等報價載入"}</small></div>
+      <div class="metric"><span>${realizedRow ? `${realizedRow.monthNum}月已實現` : "本月已實現"}</span><strong${realizedRow ? ` style="color:${realizedRow.totalTwd >= 0 ? "var(--green)" : "var(--red)"}"` : ""}>${realizedRow ? formatSignedMoney(realizedRow.totalTwd) : "—"}</strong><small class="metric-sub">月績效（台幣）</small></div>
     </div>
     <section class="dashboard-card holdings-nav-card">
       <div class="holdings-subtabs">

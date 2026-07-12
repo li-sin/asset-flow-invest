@@ -563,6 +563,16 @@ textarea {
   margin-left: 2px;
 }
 
+/* 首頁 tiles 副標（匯率、%、資料來源等小字） */
+.metric-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
