@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.37.1";
-const APP_VERSION_NOTE = "全站預設縮到 90%（html zoom:0.9，Sin 偏好 90% 縮放的緊湊比例；根層 zoom 讓 fixed 底欄正確貼底、iOS 輸入仍算 16px 不放大）。基於 v0.37.0（首頁 tiles）";
+const APP_VERSION = "v0.37.2";
+const APP_VERSION_NOTE = "修 zoom:0.9 跑版：100vw 不隨 zoom 放大（只畫視窗 90%）→ body/app-shell/panel 的 max-width 全改 100%，內容不再偏左、右緣不再被裁。基於 v0.37.1（全站 90% zoom）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
