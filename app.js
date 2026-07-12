@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.2";
-const APP_VERSION_NOTE = "美學 Phase 2 收尾：①待關注列改清單列語言（紅框卡片→hairline 分隔＋市場色點，聚焦高亮/排序/篩選保留）②股數矩陣鬆綁（表頭去底色＋首欄凍結 sticky＋tabular 數字）。Phase 2 四項全完成。基於 v0.39.1";
+const APP_VERSION = "v0.39.3";
+const APP_VERSION_NOTE = "復活「個股每日股數」矩陣（Sin 選定）：renderDailyShareMatrix 自 v0.15.1 起是死碼，接回分析子分頁末尾（餵 buildLayoutAnalysis，同樣本來算了沒人用）；v0.39.2 的矩陣鬆綁（表頭弱化＋首欄 sticky）就此生效。基於 v0.39.2";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -7221,6 +7221,14 @@ function renderCloudSnapshot() {
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderRateHistogram(filteredPositions, state.quotes)}
+    </section>
+
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>個股每日股數</h3>
+        <span>最近 8 個快照的持股股數（依成本取前 16 大；橫條＝相對股數，橫向捲動看更早日期）</span>
+      </div>
+      ${renderDailyShareMatrix(layoutAnalysis)}
     </section>` : ""}
     ${state.homeSubTab === "monthly" ? renderMonthlyPerf() : ""}
   `;
