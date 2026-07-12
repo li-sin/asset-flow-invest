@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.1";
-const APP_VERSION_NOTE = "美學 Phase 2 第二步：庫存明細表格視覺鬆綁（方案 B，Sin 定案「先 B、全面清單列 A 之後再議」）——損益率改紅漲綠跌 .pill 膠囊、表頭去底色弱化、代號欄加粗、名稱欄轉灰、數字 tabular；10 欄/排序/編輯模式/批次布局日互動全保留。基於 v0.39.0";
+const APP_VERSION = "v0.39.2";
+const APP_VERSION_NOTE = "美學 Phase 2 收尾：①待關注列改清單列語言（紅框卡片→hairline 分隔＋市場色點，聚焦高亮/排序/篩選保留）②股數矩陣鬆綁（表頭去底色＋首欄凍結 sticky＋tabular 數字）。Phase 2 四項全完成。基於 v0.39.1";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6021,7 +6021,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
     return `
       <div class="adjust-alert-row${state.adjustTrendFocus === a.symbol ? ' is-focused' : ''}" data-symbol-row="${escapeHtml(a.symbol)}" data-symbol-name="${escapeHtml(a.name)}" tabindex="0" style="cursor:pointer">
         <div class="adjust-alert-main">
-          <div class="adjust-alert-title"><strong>${escapeHtml(a.symbol)}</strong> <span class="muted-text">${escapeHtml(a.name)}</span></div>
+          <div class="adjust-alert-title"><span class="list-dot list-dot-${escapeHtml(a.market)}"></span><strong>${escapeHtml(a.symbol)}</strong> <span class="muted-text">${escapeHtml(a.name)}</span></div>
           <div class="adjust-badges">${badges}</div>
         </div>
         <div class="adjust-alert-meta">
