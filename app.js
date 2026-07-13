@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.40.3";
-const APP_VERSION_NOTE = "每日布局矩陣加排序：點日期欄依該日布局差異排序（desc 大買在前 → asc → 第三下回預設布局金額排序），台/美股各自記憶（state.matrixSort），表頭顯示 ▲▼。基於 v0.40.2";
+const APP_VERSION = "v0.40.4";
+const APP_VERSION_NOTE = "每日布局矩陣「個股」欄也可排序：點代號欄 A→Z（asc 起手，localeCompare numeric）→ Z→A → 第三下回預設布局金額排序；與日期欄排序（desc 起手）共用 state.matrixSort 三段循環。基於 v0.40.3";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5218,10 +5218,12 @@ function renderDailyShareMatrix(points) {
     }
     if (!symbols.size) return `<h4 class="market-section-heading">${marketLabel(market)}</h4><p class="muted-text">最近 ${recent.length} 個快照沒有布局變動。</p>`;
     const selected = [...symbols.values()].sort((a, b) => b.score - a.score).slice(0, 16);
-    // 點日期欄排序：desc（大買在前）→ asc → 回預設（布局金額）；台/美股各自記憶
+    // 點欄頭排序：日期欄 desc（大買在前）→ asc、個股欄 asc（代號 A→Z）→ desc，第三下回預設（布局金額）；台/美股各自記憶
     const mSort = state.matrixSort?.[market];
     const sortPoint = mSort ? recent.find((point) => point.date === mSort.date) : null;
-    if (sortPoint) {
+    if (mSort?.date === "symbol") {
+      selected.sort((a, b) => (mSort.dir === "desc" ? -1 : 1) * a.symbol.localeCompare(b.symbol, "zh-Hant", { numeric: true }));
+    } else if (sortPoint) {
       const deltaOf = (sym) => {
         const d = sortPoint.deltas.find((item) => item.symbol === sym.symbol);
         return d ? d.deltaShares : 0;
@@ -5260,11 +5262,12 @@ function renderDailyShareMatrix(points) {
         </tr>
       `;
     }).join("");
+    const symArrow = mSort?.date === "symbol" ? (mSort.dir === "asc" ? " ▲" : " ▼") : "";
     return `
       <h4 class="market-section-heading">${marketLabel(market)}</h4>
       <div class="table-scroll share-matrix">
         <table>
-          <thead><tr><th>個股</th>${head}</tr></thead>
+          <thead><tr><th class="sortable-th" data-matrix-sort="${market}|symbol">個股${symArrow}</th>${head}</tr></thead>
           <tbody>${body}</tbody>
         </table>
       </div>
@@ -7983,11 +7986,12 @@ function renderCloudSnapshot() {
       const [market, date] = th.dataset.matrixSort.split("|");
       if (!state.matrixSort) state.matrixSort = {};
       const cur = state.matrixSort[market];
+      const startDir = date === "symbol" ? "asc" : "desc"; // 代號 A→Z 起手、日期大買在前起手
       if (cur && cur.date === date) {
-        if (cur.dir === "desc") cur.dir = "asc";
+        if (cur.dir === startDir) cur.dir = startDir === "asc" ? "desc" : "asc";
         else state.matrixSort[market] = null;
       } else {
-        state.matrixSort[market] = { date, dir: "desc" };
+        state.matrixSort[market] = { date, dir: startDir };
       }
       renderCloudSnapshot();
     });
