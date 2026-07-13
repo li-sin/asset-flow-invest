@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.3";
-const APP_VERSION_NOTE = "復活「個股每日股數」矩陣（Sin 選定）：renderDailyShareMatrix 自 v0.15.1 起是死碼，接回分析子分頁末尾（餵 buildLayoutAnalysis，同樣本來算了沒人用）；v0.39.2 的矩陣鬆綁（表頭弱化＋首欄 sticky）就此生效。基於 v0.39.2";
+const APP_VERSION = "v0.39.4";
+const APP_VERSION_NOTE = "布局矩陣改版（Sin 指定）：①格子改「與上一份快照的股數差異」（+加碼綠/−減碼琥珀，沿用 layout-cost-meter 布局語意；標的依單日布局金額取前 16）②從分析子分頁搬進庫存 tab 第四子分頁「每日布局」。基於 v0.39.3（矩陣復活）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5185,35 +5185,38 @@ function renderWaterCostAnalysis(points) {
   }).join("");
 }
 
+// 每日布局矩陣：格子＝與上一份同市場快照的股數差異（deltas），非絕對持股數（2026-07-12 Sin 指定）
 function renderDailyShareMatrix(points) {
-  if (!points.length) return "<p class=\"muted-text\">尚無個股股數時間序列。</p>";
+  if (!points.length) return "<p class=\"muted-text\">尚無布局資料。</p>";
   return ["TW", "US"].map((market) => {
-    const recent = points.filter((item) => item.market === market).slice(-8);
+    const recent = points.filter((item) => item.market === market && !item.isInitial).slice(-8);
     if (!recent.length) return "";
+    // 視窗內有變動的標的，依最大單日布局金額排序取前 16
     const symbols = new Map();
     for (const point of recent) {
-      for (const row of point.rows) {
-        const item = symbols.get(row.symbol) || {
-          symbol: row.symbol,
-          name: row.name || resolveSymbolName(row.symbol) || "",
+      for (const d of point.deltas) {
+        const item = symbols.get(d.symbol) || {
+          symbol: d.symbol,
+          name: d.name || resolveSymbolName(d.symbol) || "",
           score: 0,
         };
-        item.score = Math.max(item.score, estimatedCost(row));
-        symbols.set(row.symbol, item);
+        item.score = Math.max(item.score, Math.abs(d.layoutCost));
+        symbols.set(d.symbol, item);
       }
     }
+    if (!symbols.size) return `<h4 class="market-section-heading">${marketLabel(market)}</h4><p class="muted-text">最近 ${recent.length} 個快照沒有布局變動。</p>`;
     const selected = [...symbols.values()].sort((a, b) => b.score - a.score).slice(0, 16);
-    const maxShares = Math.max(...recent.flatMap((point) => point.rows.map((row) => Number(row.shares || 0))), 0);
+    const maxAbsDelta = Math.max(...recent.flatMap((point) => point.deltas.map((d) => Math.abs(d.deltaShares))), 0);
     const head = recent.map((point) => `<th>${escapeHtml(point.date.slice(5) || point.date)}</th>`).join("");
     const body = selected.map((symbol) => {
       const cells = recent.map((point) => {
-        const row = point.rows.find((item) => item.symbol === symbol.symbol);
-        const shares = Number(row?.shares || 0);
+        const d = point.deltas.find((item) => item.symbol === symbol.symbol);
+        if (!d) return `<td><div class="share-cell"><b class="muted-text">-</b></div></td>`;
         return `
           <td>
-            <div class="share-cell">
-              <span style="width: ${widthPercent(shares, maxShares)}%"></span>
-              <b>${shares ? formatNumber(shares, 3) : "-"}</b>
+            <div class="share-cell ${d.deltaShares > 0 ? "delta-buy" : "delta-sell"}">
+              <span style="width: ${widthPercent(Math.abs(d.deltaShares), maxAbsDelta)}%"></span>
+              <b>${d.deltaShares > 0 ? "+" : "−"}${formatNumber(Math.abs(d.deltaShares), 3)}</b>
             </div>
           </td>
         `;
@@ -7221,14 +7224,6 @@ function renderCloudSnapshot() {
         <div class="level-range-btns">${renderMarketBtns()}</div>
       </div>
       ${renderRateHistogram(filteredPositions, state.quotes)}
-    </section>
-
-    <section class="dashboard-card">
-      <div class="card-heading">
-        <h3>個股每日股數</h3>
-        <span>最近 8 個快照的持股股數（依成本取前 16 大；橫條＝相對股數，橫向捲動看更早日期）</span>
-      </div>
-      ${renderDailyShareMatrix(layoutAnalysis)}
     </section>` : ""}
     ${state.homeSubTab === "monthly" ? renderMonthlyPerf() : ""}
   `;
@@ -7315,14 +7310,24 @@ function renderCloudSnapshot() {
       <div class="market-detail-grid">${marketDetailSections}</div>
     </section>
   `;
+  const layoutMatrixContent = `
+    <section class="dashboard-card">
+      <div class="card-heading">
+        <h3>每日布局股數</h3>
+        <span>與上一份快照的股數差異（綠＝加碼、琥珀＝減碼；依單日布局金額取前 16 大，橫向捲動看更早日期）</span>
+      </div>
+      ${renderDailyShareMatrix(layoutAnalysis)}
+    </section>
+  `;
   const holdingsContent = `
     <section class="dashboard-card holdings-nav-card">
       <div class="holdings-subtabs">
         ${holdingsSubtabBtn("detail", "庫存明細")}
+        ${holdingsSubtabBtn("layout", "每日布局")}
         ${holdingsSubtabBtn("refill", "回填助手")}
         ${holdingsSubtabBtn("delete", "快照管理")}
       </div>
-      ${state.holdingsSubTab !== "delete" ? `
+      ${state.holdingsSubTab === "detail" || state.holdingsSubTab === "refill" ? `
       <div class="holdings-date-bar">
         <label>日期
           <select id="holdings-date-select" class="cell-input" style="width:auto">
@@ -7335,6 +7340,7 @@ function renderCloudSnapshot() {
     </section>
     ${state.holdingsSubTab === "refill" ? renderArkRefill(holdingsMarketSummaries, selectedDate)
       : state.holdingsSubTab === "delete" ? snapshotDeleteContent
+      : state.holdingsSubTab === "layout" ? layoutMatrixContent
       : holdingsDetailCard}
   `;
   const captureEntriesHtml = state.entries.length > 0

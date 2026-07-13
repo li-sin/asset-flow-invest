@@ -1123,6 +1123,10 @@ textarea {
   background: rgba(77, 163, 255, 0.22);
 }
 
+/* 每日布局矩陣：加碼綠 / 減碼琥珀（同 .layout-cost-meter 的布局語意，非漲跌色） */
+.share-cell.delta-buy span { background: rgba(52, 211, 153, 0.28); }
+.share-cell.delta-sell span { background: rgba(255, 180, 84, 0.30); }
+
 .share-cell b {
   position: relative;
   z-index: 1;
