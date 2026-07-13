@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.7";
-const APP_VERSION_NOTE = "Phase 2.5 topbar 減重：手機版快捷鈕改 1×4 一排（原 2×2）、「更多」縮成 40px 圓角 icon 鈕（⋯）。基於 v0.39.6";
+const APP_VERSION = "v0.39.8";
+const APP_VERSION_NOTE = "Phase 2.5 底部 tab 改 C 案（iOS 風）：icon＋小字、active 只變主色（拿掉填滿綠底藥丸）。基於 v0.39.7";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4535,9 +4535,16 @@ function renderCloudSnapshotSwipeList(filterDate) {
   `;
 }
 
+const DASHBOARD_TAB_ICONS = {
+  home: '<path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" />',
+  holdings: '<rect x="3" y="12" width="5" height="8" rx="1" /><rect x="9.5" y="8" width="5" height="12" rx="1" /><rect x="16" y="4" width="5" height="16" rx="1" />',
+  capture: '<path d="M12 5v14" /><path d="M5 12h14" />'
+};
+
 function dashboardTabButton(tab, label) {
   const selected = state.dashboardTab === tab;
-  return `<button class="dashboard-tab${selected ? " is-active" : ""}" type="button" data-dashboard-tab="${tab}" aria-selected="${selected ? "true" : "false"}">${label}</button>`;
+  const icon = DASHBOARD_TAB_ICONS[tab] || "";
+  return `<button class="dashboard-tab${selected ? " is-active" : ""}" type="button" data-dashboard-tab="${tab}" aria-selected="${selected ? "true" : "false"}"><svg class="dashboard-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg><span>${label}</span></button>`;
 }
 
 function snapshotToSheetRow(snapshot) {
