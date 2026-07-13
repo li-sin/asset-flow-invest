@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.40.2";
-const APP_VERSION_NOTE = "每日布局矩陣改版：①皮膚對齊庫存明細（字級 13px、代號欄粗體、日期表頭弱化 caption 級、padding 9px）②日期欄改左新右舊（recent reverse）。加碼綠/減碼琥珀色條與清倉標示不變。基於 v0.40.1";
+const APP_VERSION = "v0.40.3";
+const APP_VERSION_NOTE = "每日布局矩陣加排序：點日期欄依該日布局差異排序（desc 大買在前 → asc → 第三下回預設布局金額排序），台/美股各自記憶（state.matrixSort），表頭顯示 ▲▼。基於 v0.40.2";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5218,8 +5218,22 @@ function renderDailyShareMatrix(points) {
     }
     if (!symbols.size) return `<h4 class="market-section-heading">${marketLabel(market)}</h4><p class="muted-text">最近 ${recent.length} 個快照沒有布局變動。</p>`;
     const selected = [...symbols.values()].sort((a, b) => b.score - a.score).slice(0, 16);
+    // 點日期欄排序：desc（大買在前）→ asc → 回預設（布局金額）；台/美股各自記憶
+    const mSort = state.matrixSort?.[market];
+    const sortPoint = mSort ? recent.find((point) => point.date === mSort.date) : null;
+    if (sortPoint) {
+      const deltaOf = (sym) => {
+        const d = sortPoint.deltas.find((item) => item.symbol === sym.symbol);
+        return d ? d.deltaShares : 0;
+      };
+      selected.sort((a, b) => (mSort.dir === "asc" ? deltaOf(a) - deltaOf(b) : deltaOf(b) - deltaOf(a)));
+    }
     const maxAbsDelta = Math.max(...recent.flatMap((point) => point.deltas.map((d) => Math.abs(d.deltaShares))), 0);
-    const head = recent.map((point) => `<th>${escapeHtml(point.date.slice(5) || point.date)}</th>`).join("");
+    const head = recent.map((point) => {
+      const active = mSort?.date === point.date;
+      const arrow = active ? (mSort.dir === "asc" ? " ▲" : " ▼") : "";
+      return `<th class="sortable-th" data-matrix-sort="${market}|${escapeHtml(point.date)}">${escapeHtml(point.date.slice(5) || point.date)}${arrow}</th>`;
+    }).join("");
     const body = selected.map((symbol) => {
       const cells = recent.map((point) => {
         const d = point.deltas.find((item) => item.symbol === symbol.symbol);
@@ -7958,6 +7972,22 @@ function renderCloudSnapshot() {
         state.detailSort.dir = state.detailSort.dir === "asc" ? "desc" : "asc";
       } else {
         state.detailSort = { key, dir: "asc" };
+      }
+      renderCloudSnapshot();
+    });
+  });
+  // 每日布局矩陣：點日期欄排序（desc → asc → 回預設布局金額排序）
+  els.cloudSnapshot.querySelectorAll("[data-matrix-sort]").forEach((th) => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const [market, date] = th.dataset.matrixSort.split("|");
+      if (!state.matrixSort) state.matrixSort = {};
+      const cur = state.matrixSort[market];
+      if (cur && cur.date === date) {
+        if (cur.dir === "desc") cur.dir = "asc";
+        else state.matrixSort[market] = null;
+      } else {
+        state.matrixSort[market] = { date, dir: "desc" };
       }
       renderCloudSnapshot();
     });
