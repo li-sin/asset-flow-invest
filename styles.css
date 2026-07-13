@@ -1127,6 +1127,14 @@ textarea {
 .share-cell.delta-buy span { background: rgba(52, 211, 153, 0.28); }
 .share-cell.delta-sell span { background: rgba(255, 180, 84, 0.30); }
 
+/* 布局後股數歸零＝清倉標示 */
+.share-cleared {
+  margin-left: 4px;
+  color: var(--amber);
+  font-weight: 600;
+  font-size: var(--fs-caption);
+}
+
 .share-cell b {
   position: relative;
   z-index: 1;

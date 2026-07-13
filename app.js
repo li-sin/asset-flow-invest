@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.4";
-const APP_VERSION_NOTE = "布局矩陣改版（Sin 指定）：①格子改「與上一份快照的股數差異」（+加碼綠/−減碼琥珀，沿用 layout-cost-meter 布局語意；標的依單日布局金額取前 16）②從分析子分頁搬進庫存 tab 第四子分頁「每日布局」。基於 v0.39.3（矩陣復活）";
+const APP_VERSION = "v0.39.5";
+const APP_VERSION_NOTE = "每日布局矩陣格子語意補完（Sin 指定兩情境）：①當日該股沒布局→顯示維持中的持股數（灰字無條），不再顯示 -（- 只留給當日未持有）②當日布局後股數歸零→ −N 加「清倉」琥珀標示。基於 v0.39.4";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5211,12 +5211,18 @@ function renderDailyShareMatrix(points) {
     const body = selected.map((symbol) => {
       const cells = recent.map((point) => {
         const d = point.deltas.find((item) => item.symbol === symbol.symbol);
-        if (!d) return `<td><div class="share-cell"><b class="muted-text">-</b></div></td>`;
+        if (!d) {
+          // 當日該股沒布局：維持原股數（灰字無條）；當日未持有（清倉後/買進前）顯示 -
+          const held = Number(point.rows.find((item) => item.symbol === symbol.symbol)?.shares || 0);
+          return `<td><div class="share-cell"><b class="muted-text">${held ? formatNumber(held, 3) : "-"}</b></div></td>`;
+        }
+        // 布局後股數歸零＝清倉，額外標示
+        const cleared = Number(d.shares || 0) === 0;
         return `
           <td>
             <div class="share-cell ${d.deltaShares > 0 ? "delta-buy" : "delta-sell"}">
               <span style="width: ${widthPercent(Math.abs(d.deltaShares), maxAbsDelta)}%"></span>
-              <b>${d.deltaShares > 0 ? "+" : "−"}${formatNumber(Math.abs(d.deltaShares), 3)}</b>
+              <b>${d.deltaShares > 0 ? "+" : "−"}${formatNumber(Math.abs(d.deltaShares), 3)}${cleared ? '<small class="share-cleared">清倉</small>' : ""}</b>
             </div>
           </td>
         `;
