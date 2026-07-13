@@ -482,9 +482,21 @@ textarea {
   font-size: 0.85em;
 }
 .perf-total-row td {
-  border-top: 2px solid var(--line);
+  border-top: 1px solid var(--line);
   font-weight: 700;
-  background: var(--surface-2);
+  background: transparent;
+}
+
+/* Phase 3：月績效/現金計畫表格視覺鬆綁（同庫存明細方案 B 皮膚） */
+.perf-table th,
+.cash-plan-table th {
+  background: transparent;
+  font-weight: 400;
+  font-size: var(--fs-caption);
+}
+
+.perf-table td {
+  font-variant-numeric: tabular-nums;
 }
 .perf-year-bar {
   display: flex;

@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.9";
-const APP_VERSION_NOTE = "Phase 3 圖表 token 化：市場線色對齊台藍/美琥珀（Sin 定案）、損益率分布翻紅漲綠跌（Sin 定案）、系列色盤/分布桶色收斂 --chart-N/--dist-* token、格線統一 0.4/0.8、殘留寫死色碼歸零。基於 v0.39.8";
+const APP_VERSION = "v0.40.0";
+const APP_VERSION_NOTE = "Phase 3 收尾：月績效/現金計畫表頭鬆綁（同庫存明細方案 B 皮膚）、年度總計列去底色改 hairline。快照管理/截圖列表盤點已在卡片語言上、免改＝Phase 3 全完成。基於 v0.39.9";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5450,7 +5450,7 @@ function renderCashPlan() {
       ${summaryHtml}
       <div style="margin-top:1rem">
         <div class="compact-table">
-          <table class="parsed-table">
+          <table class="parsed-table cash-plan-table">
             <thead><tr><th>說明</th><th>金額 (NT$)</th><th>預計年月</th><th></th></tr></thead>
             <tbody id="cash-plan-body">${rowsHtml}</tbody>
           </table>
