@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.8";
-const APP_VERSION_NOTE = "Phase 2.5 底部 tab 改 C 案（iOS 風）：icon＋小字、active 只變主色（拿掉填滿綠底藥丸）。基於 v0.39.7";
+const APP_VERSION = "v0.39.9";
+const APP_VERSION_NOTE = "Phase 3 圖表 token 化：市場線色對齊台藍/美琥珀（Sin 定案）、損益率分布翻紅漲綠跌（Sin 定案）、系列色盤/分布桶色收斂 --chart-N/--dist-* token、格線統一 0.4/0.8、殘留寫死色碼歸零。基於 v0.39.8";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5276,7 +5276,7 @@ function renderTargetLevelChart(history) {
   const allDates = [...new Set(filtered.map((item) => item.date))].sort();
   if (!allDates.length) return "<p class=\"muted-text\">尚無歷史水位資料。</p>";
   const markets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
-  const colors = { TW: "var(--green)", US: "var(--blue)" };
+  const colors = { TW: "var(--blue)", US: "var(--amber)" };
   const allVals = filtered.map((i) => i.targetLevel);
   const minVal = Math.max(0, Math.floor(Math.min(...allVals) / 10) * 10 - 5);
   const maxVal = Math.min(100, Math.ceil(Math.max(...allVals) / 10) * 10 + 5);
@@ -5289,7 +5289,7 @@ function renderTargetLevelChart(history) {
   const yLines = [];
   for (let v = Math.ceil(minVal / 5) * 5; v <= maxVal; v += 5) {
     const y = yPos(v);
-    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="${v % 10 === 0 ? 0.8 : 0.3}"/>`);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="${v % 10 === 0 ? 0.8 : 0.4}"/>`);
     if (v % 10 === 0) yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${v}%</text>`);
   }
   const maxLabels = Math.min(allDates.length, rangeKey === "1Y" ? 12 : rangeKey === "6M" ? 6 : 4);
@@ -5595,7 +5595,7 @@ function renderPerfExpenseChart(rows) {
   const yLines = [];
   for (let v = Math.ceil(minV / step) * step; v <= maxV; v += step) {
     const y = yPos(v);
-    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
     yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : v}</text>`);
   }
   if (minV < 0) {
@@ -5610,9 +5610,9 @@ function renderPerfExpenseChart(rows) {
     const dots = pts.map((p) => `<circle cx="${xPos(p.i)}" cy="${yPos(p.v)}" r="2.5" fill="${color}"><title>${rows[p.i].month}月 ${label} ${formatSignedMoney(p.v)}</title></circle>`).join("");
     return poly + dots;
   };
-  const realizedLine = line((r) => r.realized, () => true, "#22c55e", "總實現損益");
-  const expenseLine = line((r) => r.expense, (r) => r.hasExp, "#f59e0b", "我的支出");
-  const legend = `<div class="level-chart-legend"><span class="level-legend-dot" style="background:#22c55e"></span>總實現損益<span class="level-legend-dot" style="background:#f59e0b;margin-left:10px"></span>我的支出</div>`;
+  const realizedLine = line((r) => r.realized, () => true, "var(--green)", "總實現損益");
+  const expenseLine = line((r) => r.expense, (r) => r.hasExp, "var(--amber)", "我的支出");
+  const legend = `<div class="level-chart-legend"><span class="level-legend-dot" style="background:var(--green)"></span>總實現損益<span class="level-legend-dot" style="background:var(--amber);margin-left:10px"></span>我的支出</div>`;
   return `${legend}<div class="shares-chart-container"><svg viewBox="0 0 ${W} ${H}" class="level-chart-svg">${yLines.join("")}${xLabels}${realizedLine}${expenseLine}</svg></div>`;
 }
 
@@ -5641,7 +5641,7 @@ function renderSharesSvg(series, dates, colors, W = 600, H = 140) {
   const yLines = [];
   for (let v = yStep; v <= maxV; v += yStep) {
     const y = yPos(v);
-    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
     yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${v >= 1000 ? `${v / 1000}k` : v}</text>`);
   }
   if (minV < 0) {
@@ -5675,7 +5675,7 @@ function renderSnapshotTrendChart(cloudHistory, _quotes, marketKey) {
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
-  const colors = { TW: "var(--green)", US: "var(--blue)" };
+  const colors = { TW: "var(--blue)", US: "var(--amber)" };
   const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
   const series = activeMarkets.map((market) => {
     const pts = dates.map((d) => {
@@ -5738,7 +5738,7 @@ function renderTimedSvg(series, dates, W = 600, H = 140, opts = {}) {
   const yLines = [];
   for (let v = Math.floor(minV / yStep) * yStep; v <= maxV + yStep; v += yStep) {
     const y = yPos(v); if (y < PT - 2 || y > H - PB + 2) continue;
-    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>`);
+    yLines.push(`<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="var(--line)" stroke-width="0.4"/>`);
     const lbl = Math.abs(v) >= 10000 ? `${Math.round(v / 1000)}k` : v;
     yLines.push(`<text x="${PL - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="var(--muted)">${lbl}</text>`);
   }
@@ -5802,7 +5802,7 @@ function renderPerfRateTrendChart(cloudHistory, _quotes, marketKey) {
   const positions = cloudHistory?.positions || [];
   if (snapshots.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(snapshots.map((s) => s.date || s.createdAt?.slice(0, 10) || ""))].sort();
-  const colors = { TW: "var(--green)", US: "var(--blue)" };
+  const colors = { TW: "var(--blue)", US: "var(--amber)" };
   const activeMarkets = marketKey === "ALL" ? ["TW", "US"] : [marketKey];
   const series = activeMarkets.map((market) => {
     const pts = dates.map((d, i) => {
@@ -6093,7 +6093,7 @@ function renderAdjustmentAlerts(cloudHistory, marketKey) {
 }
 
 // 待關注調節：所有上榜標的價格報酬率趨勢整合成一張多線圖（風格對齊其他趨勢圖，用 renderTimedSvg）
-const ADJUST_TREND_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#14b8a6"];
+const ADJUST_TREND_COLORS = Array.from({ length: 10 }, (_, i) => `var(--chart-${i + 1})`);
 function renderAdjustTrendChart(alerts) {
   const lines = alerts.filter((a) => a.retPtsDated && a.retPtsDated.length >= 2);
   if (!lines.length) return "";
@@ -6351,14 +6351,14 @@ function renderPLAmountScatterChart(positions, quotes, firstBuyDates) {
 // ── 損益率分布直方圖 ────────────────────────────────────────────────────────
 function renderRateHistogram(positions, quotes) {
   const buckets = [
-    { label: "<-15%", min: -Infinity, max: -15, color: "#c0392b" },
-    { label: "-15~-10", min: -15, max: -10, color: "#e74c3c" },
-    { label: "-10~-5", min: -10, max: -5, color: "#e67e22" },
-    { label: "-5~0", min: -5, max: 0, color: "#f39c12" },
-    { label: "0~5%", min: 0, max: 5, color: "#27ae60" },
-    { label: "5~10", min: 5, max: 10, color: "#2ecc71" },
-    { label: "10~20", min: 10, max: 20, color: "#1abc9c" },
-    { label: ">20%", min: 20, max: Infinity, color: "#16a085" },
+    { label: "<-15%", min: -Infinity, max: -15, color: "var(--dist-neg-4)" },
+    { label: "-15~-10", min: -15, max: -10, color: "var(--dist-neg-3)" },
+    { label: "-10~-5", min: -10, max: -5, color: "var(--dist-neg-2)" },
+    { label: "-5~0", min: -5, max: 0, color: "var(--dist-neg-1)" },
+    { label: "0~5%", min: 0, max: 5, color: "var(--dist-pos-1)" },
+    { label: "5~10", min: 5, max: 10, color: "var(--dist-pos-2)" },
+    { label: "10~20", min: 10, max: 20, color: "var(--dist-pos-3)" },
+    { label: ">20%", min: 20, max: Infinity, color: "var(--dist-pos-4)" },
   ];
   const rates = positions.map((p) => {
     const q = quotes[p.symbol];
@@ -6428,7 +6428,7 @@ function renderSnapCalendar(year, month, selectedDate, snapshotDates, dateSymbol
 function renderLayoutSharesChart(cloudHistory) {
   const { snapshots, allPositions, dates } = buildSharesTimeline(cloudHistory);
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
-  const colors = { TW: "var(--green)", US: "var(--blue)" };
+  const colors = { TW: "var(--blue)", US: "var(--amber)" };
   const series = ["TW", "US"].map((market) => {
     const pts = dates.map((d, i) => {
       const snap = snapshots.find((s) => (s.date || s.createdAt?.slice(0, 10)) === d && normalizeMarketKey(s.market) === market);
@@ -6476,7 +6476,7 @@ function renderAllSymbolsChart(cloudHistory) {
   if (!layout.length) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
   const dates = [...new Set(layout.map((r) => r.date))].sort();
   if (dates.length < 2) return "<p class=\"muted-text\">需要至少兩筆快照才能顯示趨勢。</p>";
-  const palette = ["#34D399", "#4DA3FF", "#e07b39", "#9b59b6", "#e74c3c", "#1abc9c", "#f39c12", "#2980b9"];
+  const palette = Array.from({ length: 10 }, (_, i) => `var(--chart-${i + 1})`);
   const symbols = [...new Set(layout.map((r) => r.symbol))].sort();
   const series = symbols.map((symbol, si) => {
     const pts = dates.map((d, i) => {
@@ -7253,7 +7253,7 @@ function renderCloudSnapshot() {
     if (!_dateMarketsMap[date]) _dateMarketsMap[date] = [];
     if (!_dateMarketsMap[date].includes(mkt)) _dateMarketsMap[date].push(mkt);
   }
-  const _marketColors = { TW: "#22c55e", US: "#3b82f6" };
+  const _marketColors = { TW: "var(--blue)", US: "var(--amber)" };
   const snapshotDeleteContent = `
     <section class="dashboard-card">
       <div class="card-heading">
@@ -7382,7 +7382,7 @@ function renderCloudSnapshot() {
     const rows = p.rows.map((r) => `<tr><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name)}</td><td>${r.shares}</td><td>${r.avgCost}</td></tr>`).join("");
     return `
       <div class="paste-preview">
-        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆（${p.source === "ark" ? "方舟文字格式" : "試算表格式"}），確認後儲存：${p._debug ? `<br><small style="color:#888">${escapeHtml(p._debug)}</small>` : ""}</p>
+        <p class="muted-text" style="margin-bottom:8px">解析到 <strong>${p.rows.length}</strong> 筆（${p.source === "ark" ? "方舟文字格式" : "試算表格式"}），確認後儲存：${p._debug ? `<br><small style="color:var(--muted)">${escapeHtml(p._debug)}</small>` : ""}</p>
         <div class="paste-preview-scroll">
           <table class="paste-preview-table">
             <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均成本</th></tr></thead>
@@ -7861,7 +7861,7 @@ function renderCloudSnapshot() {
       refLayer.dataset.activeSymbol = symbol;
       refLayer.innerHTML = `
         <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-              stroke="#999" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.8"
+              stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.8"
               clip-path="url(#scatter-ref-clip-${refKey})"/>
         <text x="${parseFloat(x2) - 4}" y="${ly}" text-anchor="end" font-size="9" font-weight="600"
               fill="var(--muted)" paint-order="stroke" stroke="var(--bg)" stroke-width="2.5">${escapeHtml(symbol)}</text>`;

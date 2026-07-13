@@ -49,6 +49,28 @@
   --radius-control: 12px;
   --radius-card: 16px;
 
+  /* ── Phase 3 圖表 token（app.js SVG 以 var() 讀取，改圖表色只動這裡）──
+     系列色盤（待關注趨勢線/全標的布局線共用） */
+  --chart-1: #ef4444;
+  --chart-2: #3b82f6;
+  --chart-3: #22c55e;
+  --chart-4: #f59e0b;
+  --chart-5: #a855f7;
+  --chart-6: #06b6d4;
+  --chart-7: #ec4899;
+  --chart-8: #84cc16;
+  --chart-9: #f97316;
+  --chart-10: #14b8a6;
+  /* 損益率分布桶色（紅漲綠跌：正值紅系、負值綠系，1→4 依幅度加深） */
+  --dist-pos-1: #f39c12;
+  --dist-pos-2: #e67e22;
+  --dist-pos-3: #e74c3c;
+  --dist-pos-4: #c0392b;
+  --dist-neg-1: #27ae60;
+  --dist-neg-2: #2ecc71;
+  --dist-neg-3: #1abc9c;
+  --dist-neg-4: #16a085;
+
   /* ── 漲跌語意色（台股慣例：紅漲綠跌，2026-07-11 Sin 定案）──
      --green/--red 降為純色票；漲跌語意一律走 --up/--down，不再硬寫 rgba */
   --up: var(--red);
