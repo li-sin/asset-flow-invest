@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.39.6";
-const APP_VERSION_NOTE = "修 buildLayoutAnalysis 跨市場假清倉：單一市場更新快照的日子，另一市場被誤判整批清倉＋下一份快照整批假買回（潛伏 bug，差異矩陣曝光）。改為快照只更新自己的市場（同 saveLayoutDeltaToSheet 語意）；Sheet 資料不受影響。基於 v0.39.5";
+const APP_VERSION = "v0.39.7";
+const APP_VERSION_NOTE = "Phase 2.5 topbar 減重：手機版快捷鈕改 1×4 一排（原 2×2）、「更多」縮成 40px 圓角 icon 鈕（⋯）。基於 v0.39.6";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
