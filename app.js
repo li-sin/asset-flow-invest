@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.40.0";
-const APP_VERSION_NOTE = "Phase 3 收尾：月績效/現金計畫表頭鬆綁（同庫存明細方案 B 皮膚）、年度總計列去底色改 hairline。快照管理/截圖列表盤點已在卡片語言上、免改＝Phase 3 全完成。基於 v0.39.9";
+const APP_VERSION = "v0.40.1";
+const APP_VERSION_NOTE = "Phase 2.5 微互動三件組：①按鈕/tab/子分頁 :active scale(0.98) press 回饋 ②主 tab 與首頁/庫存子分頁切換 120ms fade-in（tabFadePending 旗標，只在切換時播、re-render 不閃）③雲端載入中改 skeleton 骨架屏（tiles+卡+圖表 shimmer）。全部尊重 prefers-reduced-motion。基於 v0.40.0";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6733,15 +6733,22 @@ function renderCloudSnapshot() {
   if (!els.cloudSnapshot) return;
   const cloud = state.cloudSnapshot;
   if (!cloud?.snapshot) {
-    const title = state.cloudLoading ? "正在載入雲端庫存" : "登入後會自動載入目前庫存";
-    const body = state.cloudLoading
-      ? "正在讀取 Google Sheet 的最新快照與歷史資料。"
-      : "目前還沒有雲端快照。先把確認後的庫存截圖「合併存雲端」，這裡就會變成每天看庫存、水位和趨勢的首頁。";
+    if (state.cloudLoading) {
+      els.cloudSnapshot.innerHTML = `
+      <div class="dashboard-skeleton" role="status" aria-label="正在載入雲端庫存">
+        <div class="sk-tile-row"><div class="sk sk-tile"></div><div class="sk sk-tile"></div><div class="sk sk-tile"></div><div class="sk sk-tile"></div></div>
+        <div class="sk sk-card"></div>
+        <div class="sk sk-chart"></div>
+      </div>
+    `;
+      renderSummaryLine();
+      return;
+    }
     els.cloudSnapshot.innerHTML = `
       <div class="dashboard-empty">
         <p class="section-eyebrow">Dashboard</p>
-        <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(body)}</p>
+        <h2>登入後會自動載入目前庫存</h2>
+        <p>目前還沒有雲端快照。先把確認後的庫存截圖「合併存雲端」，這裡就會變成每天看庫存、水位和趨勢的首頁。</p>
       </div>
     `;
     renderSummaryLine();
@@ -7477,6 +7484,8 @@ function renderCloudSnapshot() {
     holdings: holdingsContent,
     capture: captureContent,
   }[state.dashboardTab];
+  const tabFadeClass = state.tabFadePending ? " tab-fade-in" : "";
+  state.tabFadePending = false;
   els.cloudSnapshot.innerHTML = `
     <header class="dashboard-header">
       <div>
@@ -7489,7 +7498,7 @@ function renderCloudSnapshot() {
       </div>
     </header>
 
-    <div class="dashboard-tab-content">${tabContent}</div>
+    <div class="dashboard-tab-content${tabFadeClass}">${tabContent}</div>
     <nav class="dashboard-tabs" role="tablist" aria-label="AssetFlow Invest">
       ${dashboardTabButton("home", "首頁")}
       ${dashboardTabButton("holdings", "庫存")}
@@ -7621,6 +7630,7 @@ function renderCloudSnapshot() {
         return;
       }
       state.dashboardTab = nextTab;
+      state.tabFadePending = true;
       renderCloudSnapshot();
       reloadCloudSnapshotSilently();
     });
@@ -7956,12 +7966,14 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-holdings-subtab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.holdingsSubTab = btn.dataset.holdingsSubtab || "detail";
+      state.tabFadePending = true;
       renderCloudSnapshot();
     });
   });
   els.cloudSnapshot.querySelectorAll("[data-home-subtab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.homeSubTab = btn.dataset.homeSubtab || "overview";
+      state.tabFadePending = true;
       renderCloudSnapshot();
     });
   });
