@@ -1127,23 +1127,30 @@ textarea {
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
 }
 
 .share-matrix th,
 .share-matrix td {
   border-bottom: 1px solid var(--line);
-  padding: 7px 8px;
+  padding: 9px 8px;
   text-align: left;
   vertical-align: middle;
 }
 
-/* Phase 2：矩陣表頭弱化 + 首欄（個股）凍結，橫向捲動時對得上列 */
-.share-matrix th {
+/* Phase 2：矩陣表頭弱化 + 首欄（個股）凍結，橫向捲動時對得上列
+   v0.40.2 對齊庫存明細皮膚：日期表頭弱化（灰/400/caption）、代號欄粗體、名稱小灰 */
+.share-matrix thead th {
   color: var(--muted);
   background: transparent;
   font-weight: 400;
+  font-size: var(--fs-caption);
+}
+
+.share-matrix tbody th {
+  background: transparent;
+  font-weight: 600;
 }
 
 .share-matrix th:first-child,

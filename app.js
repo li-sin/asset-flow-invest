@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.40.1";
-const APP_VERSION_NOTE = "Phase 2.5 微互動三件組：①按鈕/tab/子分頁 :active scale(0.98) press 回饋 ②主 tab 與首頁/庫存子分頁切換 120ms fade-in（tabFadePending 旗標，只在切換時播、re-render 不閃）③雲端載入中改 skeleton 骨架屏（tiles+卡+圖表 shimmer）。全部尊重 prefers-reduced-motion。基於 v0.40.0";
+const APP_VERSION = "v0.40.2";
+const APP_VERSION_NOTE = "每日布局矩陣改版：①皮膚對齊庫存明細（字級 13px、代號欄粗體、日期表頭弱化 caption 級、padding 9px）②日期欄改左新右舊（recent reverse）。加碼綠/減碼琥珀色條與清倉標示不變。基於 v0.40.1";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5201,7 +5201,7 @@ function renderWaterCostAnalysis(points) {
 function renderDailyShareMatrix(points) {
   if (!points.length) return "<p class=\"muted-text\">尚無布局資料。</p>";
   return ["TW", "US"].map((market) => {
-    const recent = points.filter((item) => item.market === market && !item.isInitial).slice(-8);
+    const recent = points.filter((item) => item.market === market && !item.isInitial).slice(-8).reverse();
     if (!recent.length) return "";
     // 視窗內有變動的標的，依最大單日布局金額排序取前 16
     const symbols = new Map();
