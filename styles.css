@@ -3573,6 +3573,9 @@ textarea {
 .ark-refill-item.is-done {
   opacity: 0.6;
 }
+.ark-refill-item.is-static {
+  opacity: 0.6;
+}
 .ark-refill-item.is-next {
   border-color: var(--accent, #4c6ef5);
   box-shadow: 0 0 0 3px var(--accent-soft, rgba(76, 110, 245, 0.25));
@@ -3615,6 +3618,11 @@ textarea {
   font-size: var(--fs-small);
   color: var(--green-dark, #2d6a4f);
   font-weight: 600;
+  white-space: nowrap;
+}
+.ark-refill-static {
+  font-size: var(--fs-small);
+  color: var(--muted);
   white-space: nowrap;
 }
 .ark-refill-pending {

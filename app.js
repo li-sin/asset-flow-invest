@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.40.5";
-const APP_VERSION_NOTE = "每日布局矩陣改版（修 7/13 買 10 檔只顯示 8 檔）：①拿掉前 16 檔上限，視窗內有變動的全顯示 ②已清倉（最新快照持股 0）預設隱藏，「顯示已清倉 N 檔」按鈕展開（台/美股各自記憶）③預設排序改「最新一天優先」（最近有動的在前、同日大單在前），取代舊的視窗內最大布局金額。基於 v0.40.4";
+const APP_VERSION = "v0.41.0";
+const APP_VERSION_NOTE = "回填助手全顯示改版：永遠顯示全部持倉，無變動標的自動變暗顯示「未布局」，徽章數只計有變動者，移除「只顯示變動」切換鈕。基於 v0.40.5";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6654,26 +6654,25 @@ function renderArkRefill(marketSummaries, dataDate) {
     const summary = (marketSummaries || []).find((s) => s.market === market);
     const allRows = (summary?.rows || []).filter((r) => Number(r.shares || 0) > 0);
     if (!allRows.length) { perMarket[market] = { html: "", pending: 0 }; return; }
-    const shown = allRows.filter((r) => {
+    const shown = allRows.slice().sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
+    // 待回填數＝有變動且尚未 done（徽章只提示還要做幾支，不計駐守中的靜止標的）
+    const pending = shown.filter((r) => {
       const key = arkRefillKey(market, r.symbol);
-      if (refill.phase[key] === "done") return true; // 剛完成的留著顯示 ✓
-      return refill.showAll || arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
-    }).sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
-    // 待回填數＝顯示中但尚未 done（徽章只提示還要做幾支）
-    const pending = shown.filter((r) => refill.phase[arkRefillKey(market, r.symbol)] !== "done").length;
-    if (!shown.length) {
-      perMarket[market] = { html: `<p class="muted-text">沒有需要回填的變動 ✓</p>`, pending: 0 };
-      return;
-    }
+      return refill.phase[key] !== "done" && arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
+    }).length;
     const items = shown.map((r) => {
       const key = arkRefillKey(market, r.symbol);
       const phase = refill.phase[key] || "idle";
-      const pending = Number(r.avgCost || 0) <= 0;
+      const changed = arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
+      const isStatic = !changed && phase === "idle"; // 持倉無變動、尚未開始回填流程
+      const avgPending = Number(r.avgCost || 0) <= 0;
       const name = escapeHtml(r.name || resolveSymbolName(r.symbol) || "");
       const sym = escapeHtml(r.symbol);
       const dataAttrs = `data-ark-key="${escapeHtml(key)}" data-ark-shares="${escapeHtml(arkRefillValue(r.shares))}" data-ark-avg="${escapeHtml(arkRefillValue(r.avgCost))}"`;
       let action;
-      if (pending) {
+      if (isStatic) {
+        action = `<span class="ark-refill-static">未布局</span>`;
+      } else if (avgPending) {
         action = `<span class="ark-refill-pending">⚠️ 均價待補，補上後才能回填</span>`;
       } else if (phase === "done") {
         action = `<span class="ark-refill-done">✓ 已回填</span><button class="button compact ghost ark-refill-btn" data-ark-redo ${dataAttrs}>重做</button>`;
@@ -6683,7 +6682,7 @@ function renderArkRefill(marketSummaries, dataDate) {
         action = `<button class="button compact primary ark-refill-btn" data-ark-copy="first" ${dataAttrs}>① 複製${firstLabel}</button>`;
       }
       return `
-        <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}" data-ark-item="${escapeHtml(key)}">
+        <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}${isStatic ? " is-static" : ""}" data-ark-item="${escapeHtml(key)}">
           <div class="ark-refill-id"><strong>${sym}</strong> <span class="muted-text">${name}</span> <span class="ark-refill-lastfill">${escapeHtml(arkLastRefillLabel(key))}</span></div>
           <div class="ark-refill-vals"><span>股數 <b>${formatNumber(r.shares, 4)}</b></span><span>均價 <b>${formatNumber(r.avgCost, 4)}</b></span></div>
           <div class="ark-refill-action">${action}</div>
@@ -6704,13 +6703,12 @@ function renderArkRefill(marketSummaries, dataDate) {
         <h3>方舟回填助手</h3>
         ${dataDate ? `<span class="ark-refill-date">${escapeHtml(dataDate)} 庫存</span>` : `<span class="ark-refill-date is-empty">尚無資料</span>`}
         <div class="ark-refill-controls">
-          <button class="ark-ctrl-btn${refill.showAll ? " is-on" : ""}" data-ark-toggle-showall>${refill.showAll ? "顯示全部" : "只顯示變動"}</button>
           <button class="ark-ctrl-btn" data-ark-toggle-order title="切換先複製股數或均價">順序：${firstLabel} → ${secondLabel} ⇄</button>
           <button class="ark-ctrl-btn" data-ark-reset title="清除回填進度（已回填標記）">清除進度</button>
         </div>
       </div>
       <div class="ark-market-tabs">${marketTabs}</div>
-      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。預設只列出跟上次回填後有變動的標的。</p>
+      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）。</p>
       ${activeBody}
     </section>`;
 }
@@ -6718,7 +6716,7 @@ function scrollToNextArkRefill() {
   setTimeout(() => {
     if (!els.cloudSnapshot) return;
     const items = [...els.cloudSnapshot.querySelectorAll(".ark-refill-item")];
-    const next = items.find((el) => state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
+    const next = items.find((el) => !el.classList.contains("is-static") && state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
     if (next) {
       next.scrollIntoView({ behavior: "smooth", block: "center" });
       next.classList.add("is-next");
