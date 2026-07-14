@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.40.4";
-const APP_VERSION_NOTE = "每日布局矩陣「個股」欄也可排序：點代號欄 A→Z（asc 起手，localeCompare numeric）→ Z→A → 第三下回預設布局金額排序；與日期欄排序（desc 起手）共用 state.matrixSort 三段循環。基於 v0.40.3";
+const APP_VERSION = "v0.40.5";
+const APP_VERSION_NOTE = "每日布局矩陣改版（修 7/13 買 10 檔只顯示 8 檔）：①拿掉前 16 檔上限，視窗內有變動的全顯示 ②已清倉（最新快照持股 0）預設隱藏，「顯示已清倉 N 檔」按鈕展開（台/美股各自記憶）③預設排序改「最新一天優先」（最近有動的在前、同日大單在前），取代舊的視窗內最大布局金額。基於 v0.40.4";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -5203,22 +5203,27 @@ function renderDailyShareMatrix(points) {
   return ["TW", "US"].map((market) => {
     const recent = points.filter((item) => item.market === market && !item.isInitial).slice(-8).reverse();
     if (!recent.length) return "";
-    // 視窗內有變動的標的，依最大單日布局金額排序取前 16
+    // 視窗內有變動的標的全收（v0.40.5 拿掉前 16 上限，10 檔買進不再被擠掉）
+    // 預設排序＝最新一天優先：最近有動的在前，同日內布局金額大的在前（recent 已是新→舊）
     const symbols = new Map();
-    for (const point of recent) {
+    recent.forEach((point, idx) => {
       for (const d of point.deltas) {
         const item = symbols.get(d.symbol) || {
           symbol: d.symbol,
           name: d.name || resolveSymbolName(d.symbol) || "",
-          score: 0,
+          recencyIdx: Infinity,
+          recencyMag: 0,
         };
-        item.score = Math.max(item.score, Math.abs(d.layoutCost));
+        if (idx < item.recencyIdx) {
+          item.recencyIdx = idx;
+          item.recencyMag = Math.abs(d.layoutCost);
+        }
         symbols.set(d.symbol, item);
       }
-    }
+    });
     if (!symbols.size) return `<h4 class="market-section-heading">${marketLabel(market)}</h4><p class="muted-text">最近 ${recent.length} 個快照沒有布局變動。</p>`;
-    const selected = [...symbols.values()].sort((a, b) => b.score - a.score).slice(0, 16);
-    // 點欄頭排序：日期欄 desc（大買在前）→ asc、個股欄 asc（代號 A→Z）→ desc，第三下回預設（布局金額）；台/美股各自記憶
+    const selected = [...symbols.values()].sort((a, b) => a.recencyIdx - b.recencyIdx || b.recencyMag - a.recencyMag);
+    // 點欄頭排序：日期欄 desc（大買在前）→ asc、個股欄 asc（代號 A→Z）→ desc，第三下回預設（最新一天優先）；台/美股各自記憶
     const mSort = state.matrixSort?.[market];
     const sortPoint = mSort ? recent.find((point) => point.date === mSort.date) : null;
     if (mSort?.date === "symbol") {
@@ -5230,13 +5235,19 @@ function renderDailyShareMatrix(points) {
       };
       selected.sort((a, b) => (mSort.dir === "asc" ? deltaOf(a) - deltaOf(b) : deltaOf(b) - deltaOf(a)));
     }
+    // 已清倉（最新快照持股 0）預設隱藏，按鈕展開（v0.40.5）
+    const latestPoint = recent[0];
+    const heldNow = (sym) => Number(latestPoint.rows.find((row) => row.symbol === sym.symbol)?.shares || 0);
+    const clearedCount = selected.filter((sym) => heldNow(sym) < 0.000001).length;
+    const showCleared = !!state.matrixShowCleared?.[market];
+    const visible = showCleared ? selected : selected.filter((sym) => heldNow(sym) >= 0.000001);
     const maxAbsDelta = Math.max(...recent.flatMap((point) => point.deltas.map((d) => Math.abs(d.deltaShares))), 0);
     const head = recent.map((point) => {
       const active = mSort?.date === point.date;
       const arrow = active ? (mSort.dir === "asc" ? " ▲" : " ▼") : "";
       return `<th class="sortable-th" data-matrix-sort="${market}|${escapeHtml(point.date)}">${escapeHtml(point.date.slice(5) || point.date)}${arrow}</th>`;
     }).join("");
-    const body = selected.map((symbol) => {
+    const body = visible.map((symbol) => {
       const cells = recent.map((point) => {
         const d = point.deltas.find((item) => item.symbol === symbol.symbol);
         if (!d) {
@@ -5263,6 +5274,9 @@ function renderDailyShareMatrix(points) {
       `;
     }).join("");
     const symArrow = mSort?.date === "symbol" ? (mSort.dir === "asc" ? " ▲" : " ▼") : "";
+    const clearedBtn = clearedCount
+      ? `<button class="button secondary compact" type="button" data-matrix-cleared="${market}" style="margin-top:6px">${showCleared ? "隱藏已清倉 ▴" : `顯示已清倉 ${clearedCount} 檔 ▾`}</button>`
+      : "";
     return `
       <h4 class="market-section-heading">${marketLabel(market)}</h4>
       <div class="table-scroll share-matrix">
@@ -5271,6 +5285,7 @@ function renderDailyShareMatrix(points) {
           <tbody>${body}</tbody>
         </table>
       </div>
+      ${clearedBtn}
     `;
   }).join("");
 }
@@ -7979,7 +7994,16 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  // 每日布局矩陣：點日期欄排序（desc → asc → 回預設布局金額排序）
+  // 每日布局矩陣：已清倉列展開/隱藏
+  els.cloudSnapshot.querySelectorAll("[data-matrix-cleared]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const market = btn.dataset.matrixCleared;
+      if (!state.matrixShowCleared) state.matrixShowCleared = {};
+      state.matrixShowCleared[market] = !state.matrixShowCleared[market];
+      renderCloudSnapshot();
+    });
+  });
+  // 每日布局矩陣：點日期欄排序（desc → asc → 回預設最新一天優先）
   els.cloudSnapshot.querySelectorAll("[data-matrix-sort]").forEach((th) => {
     th.style.cursor = "pointer";
     th.addEventListener("click", () => {
