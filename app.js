@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.41.0";
-const APP_VERSION_NOTE = "回填助手全顯示改版：永遠顯示全部持倉，無變動標的自動變暗顯示「未布局」，徽章數只計有變動者，移除「只顯示變動」切換鈕。基於 v0.40.5";
+const APP_VERSION = "v0.41.1";
+const APP_VERSION_NOTE = "根治布局總覽歸 0：syncLayoutAfterSnapshotChange 整表重寫前將 E/F/G 數值化（Sheet GET 回字串、RAW 原樣寫回會污染成文字型數字讓 SUMIFS 歸 0）。基於 v0.41.0";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4102,7 +4102,16 @@ async function syncLayoutAfterSnapshotChange(deletedSnapshots, keptSnapshots, ke
       }
     }
 
-    const finalLayout = [...keptLayout, ...rebuilt];
+    // 鐵律：E/F/G 必為數值。keptLayout 來自 Sheet GET（回傳一律字串），
+    // 原樣 RAW 寫回會把整表污染成文字型數字 → 總覽 SUMIFS 靜默歸 0（COUNTIFS 正常不露餡）。
+    // 2026-07-16 根治：寫回前一律數值化。
+    const toNum = (v) => {
+      const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/,/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    };
+    const finalLayout = [...keptLayout, ...rebuilt].map((r) => [
+      r[0] ?? "", r[1] ?? "", r[2] ?? "", r[3] ?? "", toNum(r[4]), toNum(r[5]), toNum(r[6]),
+    ]);
     await clearSheetValues(SHEET_NAMES.layout, "A2:G");
     if (finalLayout.length) {
       await updateSheetValues(SHEET_NAMES.layout, `A2:G${finalLayout.length + 1}`, finalLayout);
