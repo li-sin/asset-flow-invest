@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.41.1";
-const APP_VERSION_NOTE = "根治布局總覽歸 0：syncLayoutAfterSnapshotChange 整表重寫前將 E/F/G 數值化（Sheet GET 回字串、RAW 原樣寫回會污染成文字型數字讓 SUMIFS 歸 0）。基於 v0.41.0";
+const APP_VERSION = "v0.41.2";
+const APP_VERSION_NOTE = "分頁 📈 favicon；登入頁只顯示版本號；重整免重登（token 效期內自動恢復，約 1h）。基於 v0.41.1";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -196,6 +196,8 @@ let googleIdentityLoadPromise = null;
 let googleTokenClient = null;
 let googleAccessToken = "";
 let googleAccessTokenExpiresAt = 0;
+// 重整免重登：登入成功的 access token（壽命約 1h）存 localStorage，效期內重整自動恢復
+const GOOGLE_TOKEN_STORAGE_KEY = "afi_google_token_v1";
 let sheetTablesReady = false;
 let silentCloudReloadPromise = null;
 
@@ -3209,6 +3211,7 @@ function resetGoogleSession(message = "請使用授權的 Google 帳號登入。
   googleTokenClient = null;
   googleAccessToken = "";
   googleAccessTokenExpiresAt = 0;
+  try { localStorage.removeItem(GOOGLE_TOKEN_STORAGE_KEY); } catch {}
   state.auth = {
     signedIn: false,
     authorized: false,
@@ -3324,6 +3327,8 @@ async function getGoogleAccessToken() {
         try { sessionStorage.setItem("afi_token", googleAccessToken); } catch {} // 供本機開發從正式 App 撈取
         const profile = await fetchGoogleProfile(googleAccessToken);
         authorizeGoogleProfile(profile, latestConfig);
+        // 通過白名單才持久化（重整免重登；效期同 token）
+        try { localStorage.setItem(GOOGLE_TOKEN_STORAGE_KEY, JSON.stringify({ token: googleAccessToken, exp: googleAccessTokenExpiresAt })); } catch {}
         resolve(googleAccessToken);
       } catch (error) {
         googleAccessToken = "";
@@ -8872,11 +8877,32 @@ function renderDevTokenEntry() {
   document.getElementById("dev-token-skip").onclick = () => enterDevPreviewMode();
 }
 
+// 重整免重登：localStorage 有未過期 token → 驗 profile + 白名單後直接進 App。
+// 失敗（過期/撤銷/未授權）→ 清掉存檔回 false，照常走登入閘門。
+// 限制：access token 壽命約 1h，逾時仍需點一次登入（純前端拿不到 refresh token）。
+async function tryRestoreGoogleSession() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(GOOGLE_TOKEN_STORAGE_KEY) || "null"); } catch {}
+  if (!saved?.token || Date.now() >= (saved.exp || 0)) return false;
+  try {
+    const profile = await fetchGoogleProfile(saved.token); // 同時驗 token 是否仍有效
+    authorizeGoogleProfile(profile); // 白名單不符會 throw
+    googleAccessToken = saved.token;
+    googleAccessTokenExpiresAt = saved.exp;
+    try { sessionStorage.setItem("afi_token", saved.token); } catch {}
+    await loadAppAfterAuth();
+    return true;
+  } catch (error) {
+    try { localStorage.removeItem(GOOGLE_TOKEN_STORAGE_KEY); } catch {}
+    console.warn("恢復登入失敗，改走登入閘門", error);
+    return false;
+  }
+}
+
 async function init() {
-  const versionText = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
-  if (els.appVersion) els.appVersion.textContent = versionText;
+  if (els.appVersion) els.appVersion.textContent = `AssetFlow Invest ${APP_VERSION} · ${APP_VERSION_NOTE}`;
   const authVersion = document.getElementById("auth-version");
-  if (authVersion) authVersion.textContent = versionText;
+  if (authVersion) authVersion.textContent = `AssetFlow Invest ${APP_VERSION}`; // 登入頁只顯示版本，不放改版說明
   els.date.value = today();
   bindEvents();
   registerServiceWorker();
@@ -8902,6 +8928,7 @@ async function init() {
   }
 
   setAppLocked(true);
+  if (await tryRestoreGoogleSession()) return; // 重整免重登（token 效期內）
   renderAuthGate();
 }
 
