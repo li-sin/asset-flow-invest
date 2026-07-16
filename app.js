@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.41.2";
-const APP_VERSION_NOTE = "分頁 📈 favicon；登入頁只顯示版本號；重整免重登（token 效期內自動恢復，約 1h）。基於 v0.41.1";
+const APP_VERSION = "v0.41.3";
+const APP_VERSION_NOTE = "登入頁不再顯示允許帳號。基於 v0.41.2";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3232,9 +3232,9 @@ function renderAuthGate(message = "") {
   const config = getSheetSyncConfig();
   const status = message || state.auth.message || "請使用授權的 Google 帳號登入。";
   els.authStatus.textContent = status;
-  els.authEmail.textContent = config.authorizedEmails?.length
-    ? `允許帳號：${config.authorizedEmails.join("、")}`
-    : "允許帳號未設定";
+  // 允許帳號不顯示在登入頁（v0.41.3，Sin 指定）；按鈕啟用判斷與未授權錯誤訊息照舊
+  els.authEmail.textContent = "";
+  els.authEmail.hidden = true;
   els.authSignIn.disabled = !config.clientId || !config.authorizedEmails?.length;
   els.authSignIn.textContent = state.auth.authorized ? "已登入" : "使用 Google 登入";
 }
