@@ -1014,7 +1014,9 @@ textarea {
 }
 
 .level-update-panel .target-level-input {
-  width: 62px;
+  flex: 1 1 0; /* 與日期膠囊（flex:1）平分同列剩餘寬度＝各占一半 */
+  width: auto;
+  min-width: 72px;
   min-height: 40px;
   text-align: right;
   background: var(--panel);

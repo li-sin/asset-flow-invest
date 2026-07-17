@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.41.3";
+const APP_VERSION = "v0.41.4";
 const APP_VERSION_NOTE = "登入頁不再顯示允許帳號。基於 v0.41.2";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
@@ -3847,7 +3847,18 @@ function formatSnapshotDiff(diff, limit = 18) {
   return lines.join("\n");
 }
 
+// 寫入前只重讀 snapshots/positions 更新 state（不動 UI、不觸發 render）：
+// App 開太久或多裝置並用時 state 會過期，同日同市場既有快照比對不到 → 誤走 append 存出兩份
+async function refreshSnapshotIndexFromSheet() {
+  const snapshotValues = await readCloudSheetValues(SHEET_NAMES.snapshots, "A2:H");
+  const snapshots = parseSnapshotRows(stripHeaderRow(snapshotValues, SHEET_HEADERS.snapshots)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const positionValues = await readCloudSheetValues(SHEET_NAMES.positions, "A2:J");
+  const positions = parsePositionRows(stripHeaderRow(positionValues, SHEET_HEADERS.positions));
+  state.cloudHistory = { ...state.cloudHistory, snapshots, positions };
+}
+
 async function writeMarketSnapshotPayloads(payloads) {
+  await refreshSnapshotIndexFromSheet();
   const actions = [];
   const skipped = [];
 
@@ -4325,6 +4336,7 @@ function parseManualRows(text) {
 
 // 手動逐欄表格 → 存快照（重用 savePasteSnapshot 路徑）
 async function saveManualSnapshot() {
+  if (snapshotSaveInFlight) return; // 防連點：被旗標擋下時不可清掉下方 manualRows
   const market = state.pasteMeta.market || "TW";
   const rows = state.manualRows
     .filter((r) => String(r.symbol || "").trim() && Number(r.shares) > 0)
@@ -4414,27 +4426,44 @@ function parsePasteTable(text) {
   return arkRows.length ? { headers: ["代號", "名稱", "種類", "股數", "均成本"], rows: arkRows, colMap: null, source: "ark" } : null;
 }
 
+let snapshotSaveInFlight = false; // 防連點/重複觸發：貼上與手動存快照共用（iOS 連點會並發兩次 append 成兩份快照）
+
 async function savePasteSnapshot() {
+  if (snapshotSaveInFlight) return;
   const parsed = state.pasteParsed;
   const { date, market } = state.pasteMeta;
   if (!parsed?.rows?.length) { alert("尚無解析資料"); return; }
   if (!date) { alert("請選擇日期"); return; }
-  const rows = parsed.rows.map((r) => ({
-    ...r,
-    name: r.name || SYMBOL_NAMES[r.symbol] || "",
-    kind: parsed.source === "ark" ? (r.kind || "") : "",
-    source: parsed.source === "ark" ? (r.source || "ark") : "paste",
-  }));
-  const payloads = buildMarketSnapshotPayloadsFromRows({ createdAt: new Date().toISOString(), date, market, sourceEntryId: "", sourceTitle: "貼上表格", rows });
-  const result = await writeMarketSnapshotPayloads(payloads);
-  if (result.cancelled) return;
-  if (result.written.length) await saveLayoutDeltaToSheet(result.written);
-  const written = result.written?.length ?? 0;
-  const skipped = result.skipped?.length ?? 0;
-  alert(`已儲存 ${written} 筆快照${skipped ? `，跳過 ${skipped} 筆（重複）` : ""}。`);
-  state.pasteParsed = null;
-  state.captureMode = "ocr";
-  await loadLatestCloudSnapshot(true);
+  snapshotSaveInFlight = true;
+  const saveButtons = ["#paste-save-btn", "#manual-save"]
+    .map((sel) => els.cloudSnapshot?.querySelector(sel))
+    .filter(Boolean);
+  const buttonLabels = saveButtons.map((b) => b.textContent);
+  saveButtons.forEach((b) => { b.disabled = true; b.textContent = "寫入中..."; });
+  try {
+    const rows = parsed.rows.map((r) => ({
+      ...r,
+      name: r.name || SYMBOL_NAMES[r.symbol] || "",
+      kind: parsed.source === "ark" ? (r.kind || "") : "",
+      source: parsed.source === "ark" ? (r.source || "ark") : "paste",
+    }));
+    const payloads = buildMarketSnapshotPayloadsFromRows({ createdAt: new Date().toISOString(), date, market, sourceEntryId: "", sourceTitle: "貼上表格", rows });
+    const result = await writeMarketSnapshotPayloads(payloads);
+    if (result.cancelled) return;
+    if (result.written.length) await saveLayoutDeltaToSheet(result.written);
+    const written = result.written?.length ?? 0;
+    const skipped = result.skipped?.length ?? 0;
+    alert(`已儲存 ${written} 筆快照${skipped ? `，跳過 ${skipped} 筆（重複）` : ""}。`);
+    state.pasteParsed = null;
+    state.captureMode = "ocr";
+    await loadLatestCloudSnapshot(true);
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "儲存快照失敗");
+  } finally {
+    snapshotSaveInFlight = false;
+    saveButtons.forEach((b, i) => { b.disabled = false; b.textContent = buttonLabels[i]; });
+  }
 }
 
 function findDuplicateSnapshotGroups(snapshots, positions) {
@@ -6879,8 +6908,8 @@ function renderCloudSnapshot() {
     const selRecord = mktHistory.find((h) => h.date === selDate);
     const latest = mktHistory[0];
     const prev = mktHistory[1];
-    // 輸入框反映「選定日期」已記錄的水位；該日尚無紀錄則留空（不拿最新值誤導）
-    const inputVal = selRecord ? selRecord.targetLevel : "";
+    // 輸入框反映「選定日期」已記錄的水位；該日尚無紀錄則帶當前水位當預設（Sin 需求 2026-07-17，微調免重打）
+    const inputVal = selRecord ? selRecord.targetLevel : (item.targetLevel ?? "");
     const lastRecordText = latest ? `上次更新：${latest.date}` : "尚未記錄";
     const heroNum = item.targetLevel === null ? "—" : String(Math.round(item.targetLevel * 10) / 10);
     // 較上次水位變化（漲綠跌紅），只有一筆或缺值時不顯示
