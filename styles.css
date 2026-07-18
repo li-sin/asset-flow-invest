@@ -998,7 +998,7 @@ textarea {
 .level-date-chip .ldc-text {
   color: var(--ink);
   margin-left: auto; /* 日期靠右：icon 留左、文字推到膠囊右緣，與水位數字（text-align:right）對齊 */
-  font-size: 14px; /* 與水位輸入欄字級一致 */
+  font-size: var(--fs-small); /* 與水位輸入欄、更新鈕同級——整列控制條一體 */
 }
 
 .level-update-panel .level-date-input {
@@ -1038,7 +1038,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: var(--radius-chip);
   padding: 6px 8px;
-  font-size: 14px; /* <16px 的 iOS 點選放大已由 viewport maximum-scale=1 擋掉 */
+  font-size: var(--fs-small); /* 回歸六級字級表；<16px 的 iOS 點選放大已由 viewport maximum-scale=1 擋掉 */
   font-variant-numeric: tabular-nums;
 }
 
