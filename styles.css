@@ -997,6 +997,7 @@ textarea {
 
 .level-date-chip .ldc-text {
   color: var(--ink);
+  margin-left: auto; /* 日期靠右：icon 留左、文字推到膠囊右緣，與水位數字（text-align:right）對齊 */
 }
 
 .level-update-panel .level-date-input {
