@@ -2,7 +2,7 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.41.4";
+const APP_VERSION = "v0.41.5";
 const APP_VERSION_NOTE = "登入頁不再顯示允許帳號。基於 v0.41.2";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
@@ -7777,6 +7777,15 @@ function renderCloudSnapshot() {
       const market = e.target.dataset.levelDateMarket;
       state.levelUpdateDate[market] = e.target.value || today();
       renderCloudSnapshot(); // 重繪讓 % 輸入框反映該日已記錄的水位
+    });
+  });
+  // 整顆日期膠囊點下去都要開日曆：WebKit 靠 CSS 撐滿 indicator（點擊落在 input 本體、這裡不重複處理），
+  // 其餘瀏覽器（如 Firefox）點到 icon/文字時用 showPicker() 補
+  els.cloudSnapshot.querySelectorAll(".level-date-chip").forEach((chip) => {
+    chip.addEventListener("click", (e) => {
+      const input = chip.querySelector(".level-date-input");
+      if (!input || e.target === input) return;
+      try { input.showPicker(); } catch (_) { input.focus(); }
     });
   });
   els.cloudSnapshot.querySelectorAll(".level-update-btn").forEach((btn) => {
