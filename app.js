@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.41.10";
-const APP_VERSION_NOTE = "登入頁不再顯示允許帳號。基於 v0.41.2";
+const APP_VERSION = "v0.42.0";
+const APP_VERSION_NOTE = "回填助手：清倉標的列出提醒，去方舟按 − 完成後打勾；當天顯示已回填、隔天自動消失";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6668,6 +6668,14 @@ async function writeRefillEntryToSheet(market, symbol, shares, avgCost) {
 function arkRefillKey(market, symbol) {
   return `${normalizeMarketKey(market)}_${String(symbol || "").toUpperCase().trim()}`;
 }
+// 時間戳是否為今天（本地時區）；清倉完成列「當天顯示、隔天消失」用
+function isTodayTs(ts) {
+  if (!ts) return false;
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
 // 上次回填時間戳 →「上次回填 M/D」；沒回填過 → 「尚未回填過」（2a：讓「為什麼冒出來」一目了然）
 function arkLastRefillLabel(key) {
   const ts = loadArkRefillLast()[key]?.ts;
@@ -6686,7 +6694,7 @@ function arkRefillValue(v) {
   const n = Number(v || 0);
   return Number.isFinite(n) ? String(n) : "0";
 }
-function renderArkRefill(marketSummaries, dataDate) {
+function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
   const refill = state.arkRefill;
   const firstLabel = refill.order === "avgcost-first" ? "均價" : "股數";
   const secondLabel = refill.order === "avgcost-first" ? "股數" : "均價";
@@ -6696,13 +6704,46 @@ function renderArkRefill(marketSummaries, dataDate) {
   ["TW", "US"].forEach((market) => {
     const summary = (marketSummaries || []).find((s) => s.market === market);
     const allRows = (summary?.rows || []).filter((r) => Number(r.shares || 0) > 0);
-    if (!allRows.length) { perMarket[market] = { html: "", pending: 0 }; return; }
+    // 清倉待處理：上次回填過（股數>0）但本日快照已無持股 → 提醒去方舟按 −。
+    // 只在該市場「選定日期確實有快照」時判斷，避免另一市場沒更新被整批誤判清倉（v0.39.6 教訓）。
+    const lastMap = loadArkRefillLast();
+    const keyPrefix = `${normalizeMarketKey(market)}_`;
+    const heldKeys = new Set(allRows.map((r) => arkRefillKey(market, r.symbol)));
+    const clearedItems = [];
+    if (marketsWithSnap?.has(market)) {
+      Object.keys(lastMap).sort().forEach((key) => {
+        if (!key.startsWith(keyPrefix) || heldKeys.has(key)) return;
+        const last = lastMap[key] || {};
+        const symbol = key.slice(keyPrefix.length);
+        if (Number(last.shares) > 0) {
+          clearedItems.push({ key, symbol, last, done: false });
+        } else if (Number(last.shares) === 0 && isTodayTs(last.ts)) {
+          clearedItems.push({ key, symbol, last, done: true }); // 今天剛完成 → 當天續顯示，隔天消失
+        }
+      });
+    }
+    if (!allRows.length && !clearedItems.length) { perMarket[market] = { html: "", pending: 0 }; return; }
     const shown = allRows.slice().sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
-    // 待回填數＝有變動且尚未 done（徽章只提示還要做幾支，不計駐守中的靜止標的）
+    // 待回填數＝有變動且尚未 done（徽章只提示還要做幾支，不計駐守中的靜止標的）＋清倉待處理數
     const pending = shown.filter((r) => {
       const key = arkRefillKey(market, r.symbol);
       return refill.phase[key] !== "done" && arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
-    }).length;
+    }).length + clearedItems.filter((c) => !c.done).length;
+    const clearedHtml = clearedItems.map((c) => {
+      const name = escapeHtml(resolveSymbolName(c.symbol) || "");
+      const sym = escapeHtml(c.symbol);
+      const lastShares = Number(c.done ? c.last.prevShares : c.last.shares) || 0;
+      const canRedo = Number(c.last.prevShares) > 0;
+      const action = c.done
+        ? `<span class="ark-refill-done">✓ 已清倉回填</span>${canRedo ? `<button class="button compact ghost ark-refill-btn" data-ark-cleared-redo data-ark-key="${escapeHtml(c.key)}">重做</button>` : ""}`
+        : `<span class="ark-refill-hint">去方舟按 − 清倉</span><button class="button compact primary ark-refill-btn" data-ark-cleared-done data-ark-key="${escapeHtml(c.key)}">✓ 完成</button>`;
+      return `
+        <div class="ark-refill-item is-cleared${c.done ? " is-done" : ""}" data-ark-item="${escapeHtml(c.key)}">
+          <div class="ark-refill-id"><strong>${sym}</strong> <span class="muted-text">${name}</span> <span class="ark-refill-lastfill">${escapeHtml(arkLastRefillLabel(c.key))}</span></div>
+          <div class="ark-refill-vals"><span class="ark-refill-cleared-tag">已清倉</span><span>原持股 <b>${formatNumber(lastShares, 4)}</b></span></div>
+          <div class="ark-refill-action">${action}</div>
+        </div>`;
+    }).join("");
     const items = shown.map((r) => {
       const key = arkRefillKey(market, r.symbol);
       const phase = refill.phase[key] || "idle";
@@ -6731,7 +6772,7 @@ function renderArkRefill(marketSummaries, dataDate) {
           <div class="ark-refill-action">${action}</div>
         </div>`;
     }).join("");
-    perMarket[market] = { html: `<div class="ark-refill-market">${items}</div>`, pending };
+    perMarket[market] = { html: `<div class="ark-refill-market">${clearedHtml}${items}</div>`, pending };
   });
   // 台/美股切換鈕（含待回填數徽章），一次只顯示一個市場的清單，避免整頁太長
   const marketTabs = ["TW", "US"].map((market) => {
@@ -6751,7 +6792,7 @@ function renderArkRefill(marketSummaries, dataDate) {
         </div>
       </div>
       <div class="ark-market-tabs">${marketTabs}</div>
-      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）。</p>
+      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。</p>
       ${activeBody}
     </section>`;
 }
@@ -6759,7 +6800,7 @@ function scrollToNextArkRefill() {
   setTimeout(() => {
     if (!els.cloudSnapshot) return;
     const items = [...els.cloudSnapshot.querySelectorAll(".ark-refill-item")];
-    const next = items.find((el) => !el.classList.contains("is-static") && state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
+    const next = items.find((el) => !el.classList.contains("is-static") && !el.classList.contains("is-done") && state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
     if (next) {
       next.scrollIntoView({ behavior: "smooth", block: "center" });
       next.classList.add("is-next");
@@ -6800,6 +6841,37 @@ async function handleArkCopy(btn, segment) {
     const parts = String(key).split("_");
     writeRefillEntryToSheet(parts[0], parts.slice(1).join("_"), shares, avgCost).catch(() => {});
   }
+}
+// 清倉完成：已在方舟按 − → 記 0 股（原值留在 prev* 供同裝置當日重做），隔天起整列消失
+function handleArkClearedDone(key) {
+  const lastMap = loadArkRefillLast();
+  const prev = lastMap[key] || {};
+  lastMap[key] = {
+    shares: 0, avgCost: 0, ts: new Date().toISOString(),
+    prevShares: Number(prev.shares) || 0, prevAvgCost: Number(prev.avgCost) || 0, prevTs: prev.ts || "",
+  };
+  saveArkRefillLast(lastMap);
+  state.arkRefill.phase[key] = "done";
+  saveArkRefillState();
+  renderCloudSnapshot();
+  scrollToNextArkRefill();
+  const parts = String(key).split("_");
+  writeRefillEntryToSheet(parts[0], parts.slice(1).join("_"), 0, 0).catch(() => {});
+}
+// 清倉重做：還原上次回填值 → 回到「清倉待處理」；雲端 refillState 一併還原
+function handleArkClearedRedo(key) {
+  const lastMap = loadArkRefillLast();
+  const cur = lastMap[key];
+  if (!cur || !(Number(cur.prevShares) > 0)) return;
+  const shares = Number(cur.prevShares);
+  const avgCost = Number(cur.prevAvgCost) || 0;
+  lastMap[key] = { shares, avgCost, ts: cur.prevTs || "" };
+  saveArkRefillLast(lastMap);
+  state.arkRefill.phase[key] = "idle";
+  saveArkRefillState();
+  renderCloudSnapshot();
+  const parts = String(key).split("_");
+  writeRefillEntryToSheet(parts[0], parts.slice(1).join("_"), shares, avgCost).catch(() => {});
 }
 
 function renderCloudSnapshot() {
@@ -6845,6 +6917,10 @@ function renderCloudSnapshot() {
   const selectedDate = state.selectedSnapshotDate || availableSnapshotDates[0] || cloud.snapshot.date;
   const selectedSnapshotIds = new Set(
     (state.cloudHistory.snapshots || []).filter((s) => s.date === selectedDate).map((s) => s.snapshotId)
+  );
+  // 選定日期各自有快照的市場（回填助手清倉偵測用：沒快照的市場不判斷清倉）
+  const marketsWithSnapOnDate = new Set(
+    (state.cloudHistory.snapshots || []).filter((s) => s.date === selectedDate).map((s) => normalizeMarketKey(s.market))
   );
   const holdingsRaw = selectedSnapshotIds.size > 0
     ? (state.cloudHistory.positions || []).filter((p) => selectedSnapshotIds.has(p.snapshotId))
@@ -7436,7 +7512,7 @@ function renderCloudSnapshot() {
         </label>
       </div>` : ""}
     </section>
-    ${state.holdingsSubTab === "refill" ? renderArkRefill(holdingsMarketSummaries, selectedDate)
+    ${state.holdingsSubTab === "refill" ? renderArkRefill(holdingsMarketSummaries, selectedDate, marketsWithSnapOnDate)
       : state.holdingsSubTab === "delete" ? snapshotDeleteContent
       : state.holdingsSubTab === "layout" ? layoutMatrixContent
       : holdingsDetailCard}
@@ -7672,6 +7748,12 @@ function renderCloudSnapshot() {
       saveArkRefillState();
       renderCloudSnapshot();
     });
+  });
+  els.cloudSnapshot.querySelectorAll("[data-ark-cleared-done]").forEach((btn) => {
+    btn.addEventListener("click", () => handleArkClearedDone(btn.dataset.arkKey));
+  });
+  els.cloudSnapshot.querySelectorAll("[data-ark-cleared-redo]").forEach((btn) => {
+    btn.addEventListener("click", () => handleArkClearedRedo(btn.dataset.arkKey));
   });
   els.cloudSnapshot.querySelector("[data-ark-toggle-showall]")?.addEventListener("click", () => {
     state.arkRefill.showAll = !state.arkRefill.showAll;

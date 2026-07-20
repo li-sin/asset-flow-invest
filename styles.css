@@ -3649,6 +3649,18 @@ textarea {
   color: var(--danger, #c92a2a);
   white-space: nowrap;
 }
+/* 清倉待處理列：琥珀框提醒（同減碼/清倉語彙）；完成後回一般 done 樣式 */
+.ark-refill-item.is-cleared {
+  border-color: rgba(255, 180, 84, 0.55);
+}
+.ark-refill-item.is-cleared.is-done {
+  border-color: var(--border, #e2e2e2);
+}
+.ark-refill-cleared-tag {
+  color: var(--amber);
+  font-weight: 600;
+  white-space: nowrap;
+}
 
 /* ── Phase 2.5 微互動：press 回饋 + tab 切換 fade + 載入 skeleton ── */
 @media (prefers-reduced-motion: no-preference) {
