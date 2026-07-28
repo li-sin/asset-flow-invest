@@ -3595,6 +3595,10 @@ textarea {
 .ark-refill-item.is-static {
   opacity: 0.6;
 }
+/* 只有均價被券商重算（股數沒動）：比「未布局」亮一點，但不是待辦，不給強調框 */
+.ark-refill-item.is-avgonly {
+  opacity: 0.8;
+}
 .ark-refill-item.is-next {
   border-color: var(--accent, #4c6ef5);
   box-shadow: 0 0 0 3px var(--accent-soft, rgba(76, 110, 245, 0.25));
@@ -3642,6 +3646,12 @@ textarea {
 .ark-refill-static {
   font-size: var(--fs-small);
   color: var(--muted);
+  white-space: nowrap;
+}
+.ark-refill-avgonly {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .ark-refill-pending {

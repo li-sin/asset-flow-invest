@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.0";
-const APP_VERSION_NOTE = "回填助手：清倉標的列出提醒，去方舟按 − 完成後打勾；當天顯示已回填、隔天自動消失";
+const APP_VERSION = "v0.42.1";
+const APP_VERSION_NOTE = "回填助手均價微調不再算變動（券商碎股成本重算的雜訊）；補存前一天快照時，若已過今日開盤會提醒確認庫存是否含今日成交";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -3857,6 +3857,32 @@ async function refreshSnapshotIndexFromSheet() {
   state.cloudHistory = { ...state.cloudHistory, snapshots, positions };
 }
 
+// 各市場今日開盤時間（本地時區 = 台北）：台股 09:00；美股夏令 21:30（冬令 22:30，取較早者保守判斷）
+const MARKET_OPEN_MINUTES = { TW: 9 * 60, US: 21 * 60 + 30 };
+// 本地日期（today() 走 UTC，台北 08:00 前會判成前一天，這裡的「今天」必須用本地）
+function todayLocalDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+// 存的是「前一天」的快照，但現在已過今日開盤 → 券商庫存可能已含今日成交，回傳提醒文字（不需提醒回空字串）
+function staleSnapshotDateWarning(date, market) {
+  const snapDate = normalizeDateText(date);
+  const todayStr = todayLocalDate();
+  if (!snapDate || snapDate >= todayStr) return "";
+  const openMinutes = MARKET_OPEN_MINUTES[normalizeMarketKey(market)];
+  if (openMinutes == null) return "";
+  const now = new Date();
+  if (now.getHours() * 60 + now.getMinutes() < openMinutes) return ""; // 今日尚未開盤 → 不可能混入今日成交
+  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return [
+    `⚠️ 你要存的是 ${snapDate} 的${marketLabel(normalizeMarketKey(market))}快照，但現在是 ${todayStr} ${clock}（已開盤）。`,
+    "",
+    "券商庫存此刻可能已經含今天的成交，這些股數會被算成前一天的布局。",
+    "",
+    `請先確認券商畫面的庫存「不含」今天的成交，再繼續。確定要以 ${snapDate} 存檔嗎？`,
+  ].join("\n");
+}
+
 async function writeMarketSnapshotPayloads(payloads) {
   await refreshSnapshotIndexFromSheet();
   const actions = [];
@@ -3865,6 +3891,9 @@ async function writeMarketSnapshotPayloads(payloads) {
   for (const payload of payloads) {
     const date = payload.snapshotRow[2];
     const market = payload.snapshotRow[3];
+    // 補貼前一天的快照，但券商畫面此刻可能已含今日成交 → 那些量會被算成前一天的布局（v0.42.1）
+    const staleWarning = staleSnapshotDateWarning(date, market);
+    if (staleWarning && !confirm(staleWarning)) return { cancelled: true, written: [], skipped };
     const newRows = payload.positionRows.map((row) => ({
       snapshotId: row[0],
       date: row[1],
@@ -6683,11 +6712,33 @@ function arkLastRefillLabel(key) {
   const d = new Date(ts);
   return Number.isNaN(d.getTime()) ? "尚未回填過" : `上次回填 ${d.getMonth() + 1}/${d.getDate()}`;
 }
+// 均價容差（v0.42.1）：券商會對碎股的每股成本做小數級重算（實測 AMAT 0.0002、PANW 0.02），
+// 股數一股沒動也會讓精確比對判成「有變動」，每貼一份新快照就冒出一批假性待辦。
+// 門檻＝均價的萬分之一（最低 0.01 元）；真的加碼/減碼造成的均價變動遠大於此。
+const ARK_AVG_TOLERANCE_RATIO = 0.0001;
+const ARK_AVG_TOLERANCE_MIN = 0.01;
+function arkAvgTolerance(avgCost) {
+  return Math.max(ARK_AVG_TOLERANCE_MIN, Math.abs(Number(avgCost) || 0) * ARK_AVG_TOLERANCE_RATIO);
+}
+// 跟上次回填值的差異分級：股數變＝真有買賣（催回填、進徽章）；
+// 只有均價超容差＝可選回填（列出並標幅度，不催）；均價在容差內＝視為無變動。
+function arkRefillDiff(market, symbol, shares, avgCost) {
+  const last = loadArkRefillLast()[arkRefillKey(market, symbol)];
+  if (!last) return { isNew: true, sharesChanged: false, avgOnly: false, avgDelta: 0, changed: true };
+  const sharesChanged = Number(last.shares) !== Number(shares);
+  const avgDelta = Number(avgCost) - Number(last.avgCost);
+  const avgChanged = Math.abs(avgDelta) > arkAvgTolerance(avgCost);
+  return {
+    isNew: false,
+    sharesChanged,
+    avgOnly: !sharesChanged && avgChanged,
+    avgDelta,
+    changed: sharesChanged || avgChanged,
+  };
+}
 // 是否「跟上次回填值有變動」（或從未回填過 → 視為待回填）
 function arkRefillChanged(market, symbol, shares, avgCost) {
-  const last = loadArkRefillLast()[arkRefillKey(market, symbol)];
-  if (!last) return true;
-  return Number(last.shares) !== Number(shares) || Number(last.avgCost) !== Number(avgCost);
+  return arkRefillDiff(market, symbol, shares, avgCost).changed;
 }
 // 複製到方舟的純數值字串（無千分位、保留小數；美股碎股可能是小數）
 function arkRefillValue(v) {
@@ -6724,10 +6775,13 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
     }
     if (!allRows.length && !clearedItems.length) { perMarket[market] = { html: "", pending: 0 }; return; }
     const shown = allRows.slice().sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
-    // 待回填數＝有變動且尚未 done（徽章只提示還要做幾支，不計駐守中的靜止標的）＋清倉待處理數
+    // 待回填數＝股數有變動（或從未回填過）且尚未 done＋清倉待處理數
+    // 只有均價超容差的（avgOnly）不計徽章：那是可選回填，不該被當成待辦催（v0.42.1）
     const pending = shown.filter((r) => {
       const key = arkRefillKey(market, r.symbol);
-      return refill.phase[key] !== "done" && arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
+      if (refill.phase[key] === "done") return false;
+      const d = arkRefillDiff(market, r.symbol, r.shares, r.avgCost);
+      return d.isNew || d.sharesChanged;
     }).length + clearedItems.filter((c) => !c.done).length;
     const clearedHtml = clearedItems.map((c) => {
       const name = escapeHtml(resolveSymbolName(c.symbol) || "");
@@ -6747,8 +6801,9 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
     const items = shown.map((r) => {
       const key = arkRefillKey(market, r.symbol);
       const phase = refill.phase[key] || "idle";
-      const changed = arkRefillChanged(market, r.symbol, r.shares, r.avgCost);
-      const isStatic = !changed && phase === "idle"; // 持倉無變動、尚未開始回填流程
+      const diff = arkRefillDiff(market, r.symbol, r.shares, r.avgCost);
+      const isStatic = !diff.changed && phase === "idle"; // 持倉無變動、尚未開始回填流程
+      const isAvgOnly = diff.avgOnly && phase === "idle"; // 股數沒動、只有均價超容差 → 可選回填
       const avgPending = Number(r.avgCost || 0) <= 0;
       const name = escapeHtml(r.name || resolveSymbolName(r.symbol) || "");
       const sym = escapeHtml(r.symbol);
@@ -6762,11 +6817,15 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
         action = `<span class="ark-refill-done">✓ 已回填</span><button class="button compact ghost ark-refill-btn" data-ark-redo ${dataAttrs}>重做</button>`;
       } else if (phase === "mid") {
         action = `<span class="ark-refill-hint">已複製${firstLabel} ✓ 去方舟貼上</span><button class="button compact primary ark-refill-btn" data-ark-copy="second" ${dataAttrs}>② 複製${secondLabel}</button>`;
+      } else if (isAvgOnly) {
+        // 股數沒動、均價超容差：標出幅度讓 Sin 自己判斷值不值得去方舟改，按鈕降為 ghost（不催）
+        const sign = diff.avgDelta > 0 ? "+" : "−";
+        action = `<span class="ark-refill-avgonly">僅均價 ${sign}${formatNumber(Math.abs(diff.avgDelta), 4)}</span><button class="button compact ghost ark-refill-btn" data-ark-copy="first" ${dataAttrs}>仍要回填</button>`;
       } else {
         action = `<button class="button compact primary ark-refill-btn" data-ark-copy="first" ${dataAttrs}>① 複製${firstLabel}</button>`;
       }
       return `
-        <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}${isStatic ? " is-static" : ""}" data-ark-item="${escapeHtml(key)}">
+        <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}${isStatic ? " is-static" : ""}${isAvgOnly ? " is-avgonly" : ""}" data-ark-item="${escapeHtml(key)}">
           <div class="ark-refill-id"><strong>${sym}</strong> <span class="muted-text">${name}</span> <span class="ark-refill-lastfill">${escapeHtml(arkLastRefillLabel(key))}</span></div>
           <div class="ark-refill-vals"><span>股數 <b>${formatNumber(r.shares, 4)}</b></span><span>均價 <b>${formatNumber(r.avgCost, 4)}</b></span></div>
           <div class="ark-refill-action">${action}</div>
@@ -6792,7 +6851,7 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
         </div>
       </div>
       <div class="ark-market-tabs">${marketTabs}</div>
-      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。</p>
+      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；股數沒動、只有券商重算均價的顯示「僅均價 ±X」，不算待辦、想改才按「仍要回填」；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。</p>
       ${activeBody}
     </section>`;
 }
@@ -6800,7 +6859,7 @@ function scrollToNextArkRefill() {
   setTimeout(() => {
     if (!els.cloudSnapshot) return;
     const items = [...els.cloudSnapshot.querySelectorAll(".ark-refill-item")];
-    const next = items.find((el) => !el.classList.contains("is-static") && !el.classList.contains("is-done") && state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
+    const next = items.find((el) => !el.classList.contains("is-static") && !el.classList.contains("is-done") && !el.classList.contains("is-avgonly") && state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
     if (next) {
       next.scrollIntoView({ behavior: "smooth", block: "center" });
       next.classList.add("is-next");
