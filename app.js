@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.1";
-const APP_VERSION_NOTE = "回填助手均價微調不再算變動（券商碎股成本重算的雜訊）；補存前一天快照時，若已過今日開盤會提醒確認庫存是否含今日成交";
+const APP_VERSION = "v0.42.2";
+const APP_VERSION_NOTE = "回填助手看歷史快照時頂端警示（避免把方舟改回舊值）；均價微調不再算變動；補存前一天快照時提醒確認庫存是否含今日成交";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6745,6 +6745,15 @@ function arkRefillValue(v) {
   const n = Number(v || 0);
   return Number.isFinite(n) ? String(n) : "0";
 }
+// 該市場最新一份快照的日期（回填只有「最新」有意義，用來擋歷史日期誤回填）
+function latestSnapshotDateForMarket(market) {
+  const target = normalizeMarketKey(market);
+  return (state.cloudHistory.snapshots || [])
+    .filter((s) => normalizeMarketKey(s.market) === target)
+    .map((s) => normalizeDateText(s.date))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a))[0] || "";
+}
 function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
   const refill = state.arkRefill;
   const firstLabel = refill.order === "avgcost-first" ? "均價" : "股數";
@@ -6840,6 +6849,12 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
   }).join("");
   const activeBody = perMarket[activeMarket].html
     || `<p class="muted-text">${marketLabel(activeMarket)}目前沒有需要回填的變動。有交易或更新持倉後，這裡會列出要同步回方舟的標的。</p>`;
+  // 看的是歷史快照時，這裡的數字是「當天的舊狀態」，照著回填會把方舟改回舊值 → 頂端警示（v0.42.2）
+  const viewingDate = normalizeDateText(dataDate);
+  const latestDate = latestSnapshotDateForMarket(activeMarket);
+  const historyWarning = latestDate && viewingDate && viewingDate < latestDate
+    ? `<p class="ark-refill-history-warn">⚠️ 你正在看 <b>${escapeHtml(viewingDate)}</b> 的歷史快照，${marketLabel(activeMarket)}最新是 <b>${escapeHtml(latestDate)}</b>。照這裡的數字回填會把方舟改回舊值——要回填請先把日期切回最新。</p>`
+    : "";
   return `
     <section class="dashboard-card ark-refill-card">
       <div class="ark-refill-header">
@@ -6851,6 +6866,7 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
         </div>
       </div>
       <div class="ark-market-tabs">${marketTabs}</div>
+      ${historyWarning}
       <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；股數沒動、只有券商重算均價的顯示「僅均價 ±X」，不算待辦、想改才按「仍要回填」；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。</p>
       ${activeBody}
     </section>`;
