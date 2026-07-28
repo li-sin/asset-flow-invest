@@ -3648,6 +3648,14 @@ textarea {
   color: var(--muted);
   white-space: nowrap;
 }
+/* 「↻ 重填」：救援用，平常低調，hover 才明顯，避免誤觸 */
+.ark-refill-reask {
+  opacity: 0.55;
+}
+.ark-refill-reask:hover,
+.ark-refill-reask:focus-visible {
+  opacity: 1;
+}
 .ark-refill-avgonly {
   font-size: var(--fs-small);
   color: var(--muted);

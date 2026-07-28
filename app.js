@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.2";
-const APP_VERSION_NOTE = "回填助手看歷史快照時頂端警示（避免把方舟改回舊值）；均價微調不再算變動；補存前一天快照時提醒確認庫存是否含今日成交";
+const APP_VERSION = "v0.42.3";
+const APP_VERSION_NOTE = "回填助手「重做／↻ 重填」現在會連上次回填值一起清掉，被誤記成已回填的標的叫得回來；看歷史快照時頂端警示";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6694,6 +6694,36 @@ async function writeRefillEntryToSheet(market, symbol, shares, avgCost) {
     }
   } catch (err) { console.warn("writeRefillEntryToSheet", err); }
 }
+// 清掉雲端 refillState 的該列（整列留空；loadRefillStateFromSheet 會略過沒有 market/symbol 的列）
+async function clearRefillEntryFromSheet(market, symbol) {
+  if (!googleAccessToken || !state.auth.authorized) return;
+  try {
+    const mkt = normalizeMarketKey(market);
+    const sym = String(symbol || "").toUpperCase().trim();
+    const values = await readSheetValues(SHEET_NAMES.refillState, "A:E");
+    const target = values
+      .map((row, i) => ({ row, sheetRow: i + 1 }))
+      .find(({ row }) => row[0] && row[1] && normalizeMarketKey(row[0]) === mkt && String(row[1]).toUpperCase().trim() === sym);
+    if (!target) return;
+    await sheetsFetch(`/values/${sheetRange(SHEET_NAMES.refillState, `A${target.sheetRow}:E${target.sheetRow}`)}?valueInputOption=RAW`, {
+      method: "PUT",
+      body: JSON.stringify({ majorDimension: "ROWS", values: [["", "", "", "", ""]] }),
+    });
+  } catch (err) { console.warn("clearRefillEntryFromSheet", err); }
+}
+// 「重做／重新回填」＝連同上次回填值一起清掉（本地＋雲端），該支立刻回到待回填。
+// 只清 phase 不清值的話，值相同會馬上被判成「未布局」，按了等於沒用（v0.42.3 修）
+function handleArkForceRefill(key) {
+  if (!key) return;
+  const lastMap = loadArkRefillLast();
+  delete lastMap[key];
+  saveArkRefillLast(lastMap);
+  state.arkRefill.phase[key] = "idle";
+  saveArkRefillState();
+  renderCloudSnapshot();
+  const parts = String(key).split("_");
+  clearRefillEntryFromSheet(parts[0], parts.slice(1).join("_")).catch(() => {});
+}
 function arkRefillKey(market, symbol) {
   return `${normalizeMarketKey(market)}_${String(symbol || "").toUpperCase().trim()}`;
 }
@@ -6819,7 +6849,8 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
       const dataAttrs = `data-ark-key="${escapeHtml(key)}" data-ark-shares="${escapeHtml(arkRefillValue(r.shares))}" data-ark-avg="${escapeHtml(arkRefillValue(r.avgCost))}"`;
       let action;
       if (isStatic) {
-        action = `<span class="ark-refill-static">未布局</span>`;
+        // 「↻ 重填」＝手動叫回待回填（防 RefillState 記成已回填、但方舟其實沒收到的情況）
+        action = `<span class="ark-refill-static">未布局</span><button class="button compact ghost ark-refill-btn ark-refill-reask" data-ark-redo data-ark-key="${escapeHtml(key)}" title="方舟其實沒填到？點這裡讓它重新列為待回填">↻ 重填</button>`;
       } else if (avgPending) {
         action = `<span class="ark-refill-pending">⚠️ 均價待補，補上後才能回填</span>`;
       } else if (phase === "done") {
@@ -6867,7 +6898,7 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
       </div>
       <div class="ark-market-tabs">${marketTabs}</div>
       ${historyWarning}
-      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；股數沒動、只有券商重算均價的顯示「僅均價 ±X」，不算待辦、想改才按「仍要回填」；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。</p>
+      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；股數沒動、只有券商重算均價的顯示「僅均價 ±X」，不算待辦、想改才按「仍要回填」；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。若某支被記成已回填、方舟其實沒收到，按該列的「↻ 重填」可叫回待回填。</p>
       ${activeBody}
     </section>`;
 }
@@ -7818,11 +7849,7 @@ function renderCloudSnapshot() {
     btn.addEventListener("click", () => handleArkCopy(btn, btn.dataset.arkCopy));
   });
   els.cloudSnapshot.querySelectorAll("[data-ark-redo]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.arkRefill.phase[btn.dataset.arkKey] = "idle";
-      saveArkRefillState();
-      renderCloudSnapshot();
-    });
+    btn.addEventListener("click", () => handleArkForceRefill(btn.dataset.arkKey));
   });
   els.cloudSnapshot.querySelectorAll("[data-ark-cleared-done]").forEach((btn) => {
     btn.addEventListener("click", () => handleArkClearedDone(btn.dataset.arkKey));
