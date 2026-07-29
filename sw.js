@@ -1,4 +1,4 @@
-const CACHE_NAME = "assetflow-invest-v245";
+const CACHE_NAME = "assetflow-invest-v246";
 const ASSETS = [
   "./",
   "./index.html",

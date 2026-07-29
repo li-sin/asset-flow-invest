@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.4";
-const APP_VERSION_NOTE = "日期一律以台北（UTC+8）為準——凌晨 00:00–08:00 開 App 不再預設成前一天；回填「重做／↻ 重填」連上次回填值一起清";
+const APP_VERSION = "v0.42.5";
+const APP_VERSION_NOTE = "日期一律以台北（UTC+8）為準，凌晨開 App 不再少一天；新增庫存的建議日期改分市場算（美股 21:30 前算前一晚那場）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4843,18 +4843,35 @@ function snapshotExistsFor(market, date) {
     (s) => normalizeMarketKey(s.market) === mkt && s.date === date,
   );
 }
+// 日期字串加減天數（純日期運算，一律用 UTC 解析避開裝置時區）
+function shiftDateStr(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+// 週末退到週五（週六退 1、週日退 2）；平日原樣回傳
+function lastWeekdayOnOrBefore(dateStr) {
+  const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0=週日 6=週六
+  if (dow === 6) return shiftDateStr(dateStr, -1);
+  if (dow === 0) return shiftDateStr(dateStr, -2);
+  return dateStr;
+}
+// 建議下一份要建的快照（日期＋市場）。**兩個市場的目標日不同**（v0.42.5）：
+// - 台股＝台北今天（盤 09:00–13:30，與台北日期同一天）
+// - 美股＝美股那場盤的交易日——台北 21:30 前看到的收盤資料是「昨晚那場」＝台北日期 −1；
+//   21:30 之後才是當天開盤（美股盤橫跨台北 21:30 → 次日 04:00，凌晨貼的仍屬前一天那場）
+// 兩者再各自把週末退到週五。v0.42.4 前 today() 走 UTC，凌晨會回前一天，對美股是「碰巧對」；
+// today() 改台北後那個巧合消失，所以改成分市場明算。
 function suggestSnapshotTarget() {
   const todayStr = today();
-  const base = new Date(`${todayStr}T00:00:00`);
-  const dow = base.getDay(); // 0=週日 6=週六
-  let targetDate = todayStr;
-  if (dow === 6 || dow === 0) {
-    base.setDate(base.getDate() - (dow === 6 ? 1 : 2)); // 週六退1、週日退2 → 週五
-    targetDate = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
-  }
-  if (!snapshotExistsFor("TW", targetDate)) return { date: targetDate, market: "TW" };
-  if (!snapshotExistsFor("US", targetDate)) return { date: targetDate, market: "US" };
-  return { date: todayStr, market: "TW" };
+  const now = taipeiNow();
+  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes(); // 台北牆上時間在 UTC 欄位
+  const usBase = nowMinutes >= MARKET_OPEN_MINUTES.US ? todayStr : shiftDateStr(todayStr, -1);
+  const twTarget = lastWeekdayOnOrBefore(todayStr);
+  const usTarget = lastWeekdayOnOrBefore(usBase);
+  if (!snapshotExistsFor("TW", twTarget)) return { date: twTarget, market: "TW" };
+  if (!snapshotExistsFor("US", usTarget)) return { date: usTarget, market: "US" };
+  return { date: twTarget, market: "TW" };
 }
 function maybeApplySnapshotSuggestion() {
   if (state.pasteMeta.userTouched) return;
