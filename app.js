@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.3";
-const APP_VERSION_NOTE = "回填助手「重做／↻ 重填」現在會連上次回填值一起清掉，被誤記成已回填的標的叫得回來；看歷史快照時頂端警示";
+const APP_VERSION = "v0.42.4";
+const APP_VERSION_NOTE = "日期一律以台北（UTC+8）為準——凌晨 00:00–08:00 開 App 不再預設成前一天；回填「重做／↻ 重填」連上次回填值一起清";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -247,8 +247,15 @@ async function getAllEntries() {
   });
 }
 
+// 台北時間（UTC+8）：快照/布局/水位的日期一律以台北為準。
+// 回傳的 Date 其「UTC 欄位」＝台北牆上時間，故取時分要用 getUTCHours/getUTCMinutes。
+function taipeiNow() {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000);
+}
+// 今天（台北）。v0.42.4 前是 `new Date().toISOString()` ＝ UTC 日期，台北 00:00–08:00
+// 會回前一天，害這段時間開 App 的日期預設全少一天。
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return taipeiNow().toISOString().slice(0, 10);
 }
 
 function entryId() {
@@ -3857,23 +3864,18 @@ async function refreshSnapshotIndexFromSheet() {
   state.cloudHistory = { ...state.cloudHistory, snapshots, positions };
 }
 
-// 各市場今日開盤時間（本地時區 = 台北）：台股 09:00；美股夏令 21:30（冬令 22:30，取較早者保守判斷）
+// 各市場今日開盤時間（台北時間）：台股 09:00；美股夏令 21:30（冬令 22:30，取較早者保守判斷）
 const MARKET_OPEN_MINUTES = { TW: 9 * 60, US: 21 * 60 + 30 };
-// 本地日期（today() 走 UTC，台北 08:00 前會判成前一天，這裡的「今天」必須用本地）
-function todayLocalDate() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 // 存的是「前一天」的快照，但現在已過今日開盤 → 券商庫存可能已含今日成交，回傳提醒文字（不需提醒回空字串）
 function staleSnapshotDateWarning(date, market) {
   const snapDate = normalizeDateText(date);
-  const todayStr = todayLocalDate();
+  const todayStr = today();
   if (!snapDate || snapDate >= todayStr) return "";
   const openMinutes = MARKET_OPEN_MINUTES[normalizeMarketKey(market)];
   if (openMinutes == null) return "";
-  const now = new Date();
-  if (now.getHours() * 60 + now.getMinutes() < openMinutes) return ""; // 今日尚未開盤 → 不可能混入今日成交
-  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const now = taipeiNow(); // 台北牆上時間在 UTC 欄位，故用 getUTC*
+  if (now.getUTCHours() * 60 + now.getUTCMinutes() < openMinutes) return ""; // 今日尚未開盤 → 不可能混入今日成交
+  const clock = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
   return [
     `⚠️ 你要存的是 ${snapDate} 的${marketLabel(normalizeMarketKey(market))}快照，但現在是 ${todayStr} ${clock}（已開盤）。`,
     "",
