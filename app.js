@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.5";
-const APP_VERSION_NOTE = "日期一律以台北（UTC+8）為準，凌晨開 App 不再少一天；新增庫存的建議日期改分市場算（美股 21:30 前算前一晚那場）";
+const APP_VERSION = "v0.42.6";
+const APP_VERSION_NOTE = "今天回填過的標的在手機/電腦都顯示「✓ 已回填」（原本另一台只看到「未布局」）；日期一律以台北 UTC+8 為準";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6746,13 +6746,14 @@ function handleArkForceRefill(key) {
 function arkRefillKey(market, symbol) {
   return `${normalizeMarketKey(market)}_${String(symbol || "").toUpperCase().trim()}`;
 }
-// 時間戳是否為今天（本地時區）；清倉完成列「當天顯示、隔天消失」用
+// 時間戳是否為「台北的今天」；清倉完成列「當天顯示、隔天消失」與「✓ 已回填」跨裝置判斷都用它。
+// v0.42.6 起改台北固定時區——原本比裝置本地日期，兩台裝置時區不同就會給出不同答案，
+// 而這個判斷正是用來讓手機/電腦看到同一件事。
 function isTodayTs(ts) {
   if (!ts) return false;
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return false;
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return new Date(d.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10) === today();
 }
 // 上次回填時間戳 →「上次回填 M/D」；沒回填過 → 「尚未回填過」（2a：讓「為什麼冒出來」一目了然）
 function arkLastRefillLabel(key) {
@@ -6868,8 +6869,14 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
       const dataAttrs = `data-ark-key="${escapeHtml(key)}" data-ark-shares="${escapeHtml(arkRefillValue(r.shares))}" data-ark-avg="${escapeHtml(arkRefillValue(r.avgCost))}"`;
       let action;
       if (isStatic) {
+        // 值一致時分兩種：今天回填過＝「✓ 已回填」（ts 有同步雲端，手機/電腦看到的一致）；
+        // 更早回填的＝「未布局」駐守中。v0.42.6 前一律顯示「未布局」，害另一台裝置以為沒同步。
+        const refilledToday = !diff.isNew && isTodayTs(loadArkRefillLast()[key]?.ts);
+        const statusText = refilledToday
+          ? `<span class="ark-refill-done">✓ 已回填</span>`
+          : `<span class="ark-refill-static">未布局</span>`;
         // 「↻ 重填」＝手動叫回待回填（防 RefillState 記成已回填、但方舟其實沒收到的情況）
-        action = `<span class="ark-refill-static">未布局</span><button class="button compact ghost ark-refill-btn ark-refill-reask" data-ark-redo data-ark-key="${escapeHtml(key)}" title="方舟其實沒填到？點這裡讓它重新列為待回填">↻ 重填</button>`;
+        action = `${statusText}<button class="button compact ghost ark-refill-btn ark-refill-reask" data-ark-redo data-ark-key="${escapeHtml(key)}" title="方舟其實沒填到？點這裡讓它重新列為待回填">↻ 重填</button>`;
       } else if (avgPending) {
         action = `<span class="ark-refill-pending">⚠️ 均價待補，補上後才能回填</span>`;
       } else if (phase === "done") {
@@ -6917,7 +6924,7 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
       </div>
       <div class="ark-market-tabs">${marketTabs}</div>
       ${historyWarning}
-      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的顯示為「未布局」（暗色）；股數沒動、只有券商重算均價的顯示「僅均價 ±X」，不算待辦、想改才按「仍要回填」；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。若某支被記成已回填、方舟其實沒收到，按該列的「↻ 重填」可叫回待回填。</p>
+      <p class="muted-text ark-refill-desc">按「複製${firstLabel}」→ 切到方舟貼上 → 回來按「複製${secondLabel}」→ 貼上 → 自動跳下一支。無變動的標的：今天回填過顯示「✓ 已回填」（換手機/電腦看都一樣）、更早回填的顯示「未布局」（暗色）；股數沒動、只有券商重算均價的顯示「僅均價 ±X」，不算待辦、想改才按「仍要回填」；已清倉的標的會提醒去方舟按 −，完成後按「✓ 完成」。若某支被記成已回填、方舟其實沒收到，按該列的「↻ 重填」可叫回待回填。</p>
       ${activeBody}
     </section>`;
 }
