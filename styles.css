@@ -1761,6 +1761,27 @@ textarea {
   color: var(--muted);
 }
 
+/* 存檔前的提醒（跨市場日期不同、代號判不出市場）：琥珀底，與回填助手的警示條同語彙 */
+.save-target-warn {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: rgba(255, 159, 10, 0.14);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* 手動一表兩市場：代號欄左緣色點，一眼看出這列會被存成哪個市場（台股藍／美股琥珀） */
+.manual-symbol.is-tw,
+.manual-symbol.is-us {
+  border-left: 3px solid transparent;
+  padding-left: 6px;
+}
+
+.manual-symbol.is-tw { border-left-color: var(--blue); }
+.manual-symbol.is-us { border-left-color: var(--amber); }
+
 .parse-preview input,
 .parse-preview select,
 .parse-preview textarea {

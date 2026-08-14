@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.9";
-const APP_VERSION_NOTE = "台股開盤前存快照不再建議當天（改建議前一交易日）；日期/市場建議改成每輪重新給，不再因手動改過一次就整個 session 停擺；存檔前明示「將存為 X · 日期」";
+const APP_VERSION = "v0.43.0";
+const APP_VERSION_NOTE = "市場改由代號自動判定（數字＝台股、英文＝美股），市場選擇器移除；手動輸入改台股美股一張表，存檔時自動拆成兩份快照";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -402,6 +402,16 @@ function marketForPosition(row) {
   const market = normalizeMarketKey(row?.market);
   if (market === "TW" || market === "US") return market;
   return /^\d/.test(String(row?.symbol || "")) ? "TW" : "US";
+}
+
+// 純看代號型態判市場（v0.43.0）：台股代號一定數字開頭（0050、2327、00988A 的字母只在結尾）、
+// 美股 ticker 一定字母開頭。兩者都不是（空白、符號、中文）→ null＝無法判定，交給呼叫端處理，
+// 不像 marketForPosition 那樣把垃圾資料默默歸成 US。
+function classifySymbolMarket(symbol) {
+  const s = String(symbol || "").trim();
+  if (/^\d/.test(s)) return "TW";
+  if (/^[A-Za-z]/.test(s)) return "US";
+  return null;
 }
 
 function loadTargetLevels() {
@@ -3710,17 +3720,33 @@ function buildSnapshotPayload(entry) {
   });
 }
 
+// v0.43.0：代號優先，使用者選的市場只當 fallback（原本剛好相反——只要 fallbackMarket 是
+// 有效的 TW/US 就整份強制歸過去，逐列判定那條分支從來沒被執行過。2026-08-12 把美股資料
+// 存成台股快照，14 支美股就這樣全被標成 TW，還連帶讓台股全數被判成清倉、清掉首次布局日）。
+// 混市場（手動一表兩市場）自然拆成兩份快照；無法判定的列用多數決安置，並回報給呼叫端提示。
 function splitRowsByMarket(rows, fallbackMarket = "") {
   const fallbackKey = normalizeMarketKey(fallbackMarket);
   const groups = { TW: [], US: [] };
+  const unclassified = [];
   for (const row of rows || []) {
-    const market = ["TW", "US"].includes(fallbackKey) ? fallbackKey : marketForPosition(row);
-    if (!["TW", "US"].includes(market)) continue;
-    groups[market].push({ ...row, market });
+    const market = classifySymbolMarket(row?.symbol);
+    if (market) groups[market].push({ ...row, market });
+    else unclassified.push(row);
+  }
+  if (unclassified.length) {
+    // 多數決：跟這份資料裡的主要市場走；平手/全無法判定時才用使用者選的，再不然預設台股
+    const majority = groups.TW.length === groups.US.length
+      ? (["TW", "US"].includes(fallbackKey) ? fallbackKey : "TW")
+      : (groups.TW.length > groups.US.length ? "TW" : "US");
+    for (const row of unclassified) groups[majority].push({ ...row, market: majority });
   }
   return Object.entries(groups)
     .filter(([, groupRows]) => groupRows.length)
     .map(([market, groupRows]) => ({ market, rows: groupRows }));
+}
+// 代號判不出市場的列（UI 用來提示「為什麼這幾筆不能自動判斷」）
+function unclassifiedSymbolRows(rows) {
+  return (rows || []).filter((row) => !classifySymbolMarket(row?.symbol));
 }
 
 function buildMarketSnapshotPayloadsFromRows({ createdAt, date, market, sourceEntryId, sourceTitle, rows }) {
@@ -4398,11 +4424,11 @@ function parseManualRows(text) {
 // 手動逐欄表格 → 存快照（重用 savePasteSnapshot 路徑）
 async function saveManualSnapshot() {
   if (snapshotSaveInFlight) return; // 防連點：被旗標擋下時不可清掉下方 manualRows
-  const market = state.pasteMeta.market || "TW";
   const rows = state.manualRows
     .filter((r) => String(r.symbol || "").trim() && Number(r.shares) > 0)
     .map((r) => {
-      const sym = normalizeSymbolForMarket(market, r.symbol);
+      // v0.43.0：一表兩市場，正規化規則逐列依代號判（不再套單一選定市場）
+      const sym = normalizeSymbolForMarket(classifySymbolMarket(r.symbol) || "TW", r.symbol);
       return { symbol: sym, name: String(r.name || "").trim() || resolveSymbolName(sym), shares: Number(r.shares), avgCost: Number(r.avgCost) || 0 };
     });
   if (!rows.length) { alert("請至少輸入一支（代號 + 股數）"); return; }
@@ -4412,18 +4438,21 @@ async function saveManualSnapshot() {
   state.manualRows = [{ symbol: "", name: "", shares: "", avgCost: "" }];
 }
 // 手動 mode 預填：帶入該市場最新快照的所有持倉（代號+名稱），股數/均價留空供填寫
-function prefillManualFromLatest(market) {
-  const mkt = normalizeMarketKey(market) || "TW";
-  const snaps = (state.cloudHistory.snapshots || [])
-    .filter((s) => normalizeMarketKey(s.market) === mkt)
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  const latest = snaps[0];
-  const rows = latest
-    ? (state.cloudHistory.positions || [])
-        .filter((p) => p.snapshotId === latest.snapshotId && Number(p.shares || 0) > 0)
-        .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }))
-        .map((p) => ({ symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol), shares: "", avgCost: "" }))
-    : [];
+// v0.43.0：不再依市場帶入，兩個市場的最新持倉一次全帶（存檔時 splitRowsByMarket 依代號
+// 自動拆成兩份快照）。市場選擇器已移除，這裡沒有「該帶哪一份」的問題了。
+function prefillManualFromLatest() {
+  const rows = [];
+  for (const mkt of ["TW", "US"]) {
+    const latest = (state.cloudHistory.snapshots || [])
+      .filter((s) => normalizeMarketKey(s.market) === mkt)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+    if (!latest) continue;
+    const mktRows = (state.cloudHistory.positions || [])
+      .filter((p) => p.snapshotId === latest.snapshotId && Number(p.shares || 0) > 0)
+      .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }))
+      .map((p) => ({ symbol: p.symbol, name: p.name || resolveSymbolName(p.symbol), shares: "", avgCost: "" }));
+    rows.push(...mktRows);
+  }
   rows.push({ symbol: "", name: "", shares: "", avgCost: "" }); // 末尾空列供新增
   state.manualRows = rows;
 }
@@ -4893,17 +4922,22 @@ function lastWeekdayOnOrBefore(dateStr) {
 //   21:30 之後才是當天開盤（美股盤橫跨台北 21:30 → 次日 04:00，凌晨貼的仍屬前一天那場）
 // 兩者再各自把週末退到週五。v0.42.4 前 today() 走 UTC，凌晨會回前一天，對美股是「碰巧對」；
 // today() 改台北後那個巧合消失，所以改成分市場明算。
-function suggestSnapshotTarget() {
+// 各市場「現在該存的那一份」的目標日。兩市場同一條規則：今日尚未開盤 → 券商庫存畫面還停在
+// 前一個交易日的收盤狀態，目標日退一天。v0.42.9 前只有美股做這件事，台股直接用今天 →
+// 台股 09:00 開盤前存（Sin 的習慣是早上 8 點）一律建議當天，逼使用者每次手動改回昨天，
+// 連帶把 userTouched 打開、整個 session 不再給建議。
+function marketTargetDates() {
   const todayStr = today();
   const now = taipeiNow();
   const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes(); // 台北牆上時間在 UTC 欄位
-  // 兩市場同一條規則：今日尚未開盤 → 券商庫存畫面還停在前一個交易日的收盤狀態，目標日退一天。
-  // v0.42.9 前只有美股做這件事，台股直接用今天 → 台股 09:00 開盤前存（Sin 的習慣是早上 8 點）
-  // 一律建議當天，逼使用者每次手動改回昨天，連帶把 userTouched 打開、整個 session 不再給建議。
-  const twBase = nowMinutes >= MARKET_OPEN_MINUTES.TW ? todayStr : shiftDateStr(todayStr, -1);
-  const usBase = nowMinutes >= MARKET_OPEN_MINUTES.US ? todayStr : shiftDateStr(todayStr, -1);
-  const twTarget = lastWeekdayOnOrBefore(twBase);
-  const usTarget = lastWeekdayOnOrBefore(usBase);
+  const base = (openMinutes) => (nowMinutes >= openMinutes ? todayStr : shiftDateStr(todayStr, -1));
+  return {
+    TW: lastWeekdayOnOrBefore(base(MARKET_OPEN_MINUTES.TW)),
+    US: lastWeekdayOnOrBefore(base(MARKET_OPEN_MINUTES.US)),
+  };
+}
+function suggestSnapshotTarget() {
+  const { TW: twTarget, US: usTarget } = marketTargetDates();
   if (!snapshotExistsFor("TW", twTarget)) return { date: twTarget, market: "TW" };
   if (!snapshotExistsFor("US", usTarget)) return { date: usTarget, market: "US" };
   return { date: twTarget, market: "TW" };
@@ -4914,14 +4948,31 @@ function maybeApplySnapshotSuggestion() {
   state.pasteMeta.date = sug.date;
   state.pasteMeta.market = sug.market;
 }
-// 存檔前明示「將存為 X · 日期（週幾）」：日期算錯一眼看得到，比多一個 confirm 彈窗有效
-// （每天要按兩次的 confirm 很快會變成無腦點掉）。未被手動改過時標「自動帶入」。
-function saveTargetHint(market, date) {
+// 存檔前明示「將存為 台股 9 筆 · 美股 18 筆 · 日期（週幾）」：市場已改由代號自動判定，
+// 這行就是唯一的確認點，日期或市場判錯要一眼看得到（比多一個 confirm 有效——每天要按兩次的
+// 確認很快會變成無腦點掉）。無法判定市場的代號另起一行點名，說明為什麼它不能自動判斷。
+function saveTargetHint(rows, date) {
   const d = normalizeDateText(date) || "";
   if (!d) return "";
   const dow = "日一二三四五六"[new Date(`${d}T00:00:00Z`).getUTCDay()] || "";
-  const auto = state.pasteMeta.userTouched ? "" : `<span class="save-target-auto">自動帶入</span>`;
-  return `<p class="save-target-hint">將存為 <strong>${escapeHtml(marketLabel(normalizeMarketKey(market)))}</strong> · <strong>${escapeHtml(d)}</strong>（週${dow}）${auto}</p>`;
+  const groups = splitRowsByMarket(rows);
+  const parts = groups.map((g) => `<strong>${escapeHtml(marketLabel(g.market))} ${g.rows.length} 筆</strong>`);
+  const auto = state.pasteMeta.userTouched ? "" : `<span class="save-target-auto">日期自動帶入</span>`;
+  // 一表兩市場、但兩市場的目標日不同（台北 09:00–21:30 之間存）→ 兩份快照會共用同一個日期，
+  // 美股那份可能記到還沒收盤的那天。不自動拆日期（單一日期欄是刻意的簡化），改成明說讓 Sin 決定。
+  const targets = marketTargetDates();
+  const crossMarket = groups.length > 1 && targets.TW !== targets.US;
+  const dateWarn = crossMarket
+    ? `<p class="save-target-warn">⚠ 現在台股與美股的目標日不同（台股 ${escapeHtml(targets.TW)}、美股 ${escapeHtml(targets.US)}），但兩份快照都會存為 <strong>${escapeHtml(d)}</strong>。要分開記就先存一個市場、改日期後再存另一個。</p>`
+    : "";
+  const bad = unclassifiedSymbolRows(rows);
+  const badLine = bad.length
+    ? `<p class="save-target-warn">⚠ ${bad.length} 筆代號無法判斷市場（不是數字開頭也不是英文開頭）：${escapeHtml(bad.slice(0, 5).map((r) => r.symbol || "（空白）").join("、"))}${bad.length > 5 ? " …" : ""}<br>這些會跟著本次多數的市場一起存，請確認代號是否正確。</p>`
+    : "";
+  const targetLine = parts.length
+    ? `<p class="save-target-hint">將存為 ${parts.join(" · ")} · <strong>${escapeHtml(d)}</strong>（週${dow}）${auto}</p>`
+    : "";
+  return targetLine + dateWarn + badLine;
 }
 // 這一輪輸入是否還沒開始（沒有解析結果、手動表格也還沒填）
 function snapshotInputIdle() {
@@ -7733,17 +7784,11 @@ function renderCloudSnapshot() {
           </table>
         </div>
         <div class="paste-meta-row">
-          <label>市場
-            <select id="paste-market-select" class="cell-input">
-              <option value="TW"${meta.market === "TW" ? " selected" : ""}>台股</option>
-              <option value="US"${meta.market === "US" ? " selected" : ""}>美股</option>
-            </select>
-          </label>
           <label>日期
             <input type="date" id="paste-date-input" class="cell-input" value="${escapeHtml(meta.date)}">
           </label>
         </div>
-        ${saveTargetHint(meta.market, meta.date)}
+        ${saveTargetHint(p.rows, meta.date)}
         <button id="paste-save-btn" class="button primary" type="button">儲存為快照</button>
         <button id="paste-clear-btn" class="button secondary" type="button" style="margin-left:8px">清除</button>
       </div>`;
@@ -7760,14 +7805,14 @@ function renderCloudSnapshot() {
         </div>
       </div>
       ${state.captureMode === "manual" ? `
-        <p class="muted-text">已自動帶入最新快照的庫存代號，對照券商<strong>填股數和均價</strong>即可；代號輸入會自動帶名稱。已全賣出的股票<strong>左滑該列刪除</strong>，新買的按「＋新增一列」。選市場/日期後存快照。</p>
+        <p class="muted-text"><strong>台股與美股一起帶入</strong>（存檔時依代號自動拆成兩份快照），對照券商<strong>填股數和均價</strong>即可；代號輸入會自動帶名稱。已全賣出的股票<strong>左滑該列刪除</strong>，新買的按「＋新增一列」。只填日期就能存。</p>
         <div class="manual-table-head"><span>代號</span><span>名稱</span><span>股數</span><span>均價</span></div>
         <div class="manual-rows">
           ${state.manualRows.map((r, i) => `
             <div class="swipe-row manual-row">
               <button class="swipe-delete-action" type="button" data-manual-delete="${i}">刪除</button>
               <div class="swipe-row-content manual-row-content">
-                <input class="cell-input manual-symbol" data-manual-index="${i}" placeholder="代號" value="${escapeHtml(String(r.symbol || ""))}">
+                <input class="cell-input manual-symbol${classifySymbolMarket(r.symbol) ? ` is-${classifySymbolMarket(r.symbol).toLowerCase()}` : ""}" data-manual-index="${i}" placeholder="代號" value="${escapeHtml(String(r.symbol || ""))}">
                 <span class="manual-name" data-manual-name="${i}">${escapeHtml(String(r.name || ""))}</span>
                 <input type="number" inputmode="decimal" class="cell-input manual-shares" data-manual-index="${i}" placeholder="股數" value="${escapeHtml(String(r.shares || ""))}">
                 <input type="number" inputmode="decimal" class="cell-input manual-avg" data-manual-index="${i}" placeholder="均價" value="${escapeHtml(String(r.avgCost || ""))}">
@@ -7780,17 +7825,11 @@ function renderCloudSnapshot() {
           <button id="manual-clear" class="button compact ghost" type="button">清空</button>
         </div>
         <div class="paste-meta-row" style="margin-top:10px">
-          <label>市場
-            <select id="manual-market" class="cell-input">
-              <option value="TW"${state.pasteMeta.market === "TW" ? " selected" : ""}>台股</option>
-              <option value="US"${state.pasteMeta.market === "US" ? " selected" : ""}>美股</option>
-            </select>
-          </label>
           <label>日期
             <input type="date" id="manual-date" class="cell-input" value="${escapeHtml(state.pasteMeta.date || today())}">
           </label>
         </div>
-        ${saveTargetHint(state.pasteMeta.market, state.pasteMeta.date)}
+        ${saveTargetHint(state.manualRows.filter((r) => String(r.symbol || "").trim() && Number(r.shares) > 0), state.pasteMeta.date)}
         <button id="manual-save" class="button primary" type="button" style="margin-top:8px">存快照</button>
       ` : state.captureMode === "broker" ? `
         <p class="muted-text">上傳永豐網頁版匯出的「庫存」xlsx（自動解析代號、今餘股數、成本均價），選市場/日期後存成快照。台股用此檔；美股複委託改用「貼上表格」貼 Firstrade 持倉。</p>
@@ -7861,7 +7900,7 @@ function renderCloudSnapshot() {
     btn.addEventListener("click", () => {
       state.captureMode = btn.dataset.captureMode;
       refreshSnapshotSuggestion(); // 還沒開始輸入才重新建議，不吃掉填到一半的資料
-      if (state.captureMode === "manual" && isManualRowsEmpty()) prefillManualFromLatest(state.pasteMeta.market);
+      if (state.captureMode === "manual" && isManualRowsEmpty()) prefillManualFromLatest();
       renderCloudSnapshot();
     });
   });
@@ -7878,8 +7917,7 @@ function renderCloudSnapshot() {
       if (dateInput) { dateInput.focus(); try { dateInput.showPicker(); } catch (_) {} }
     }, 50);
   });
-  els.cloudSnapshot.querySelector("#paste-market-select")?.addEventListener("change", (e) => { state.pasteMeta.market = e.target.value; state.pasteMeta.userTouched = true; });
-  els.cloudSnapshot.querySelector("#paste-date-input")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; state.pasteMeta.userTouched = true; });
+  els.cloudSnapshot.querySelector("#paste-date-input")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; state.pasteMeta.userTouched = true; renderCloudSnapshot(); });
   els.cloudSnapshot.querySelector("#paste-save-btn")?.addEventListener("click", savePasteSnapshot);
   els.cloudSnapshot.querySelector("#paste-clear-btn")?.addEventListener("click", () => { state.pasteParsed = null; renderCloudSnapshot(); });
   els.cloudSnapshot.querySelector("#broker-file-input")?.addEventListener("change", (e) => {
@@ -7891,10 +7929,12 @@ function renderCloudSnapshot() {
     inp.addEventListener("change", (e) => {
       const i = +e.target.dataset.manualIndex;
       if (!state.manualRows[i]) return;
-      const nm = resolveSymbolName(normalizeSymbolForMarket(state.pasteMeta.market || "TW", e.target.value));
+      // v0.43.0：一表兩市場，正規化規則看這一列的代號自己判（原本套全域選定市場）
+      const nm = resolveSymbolName(normalizeSymbolForMarket(classifySymbolMarket(e.target.value) || "TW", e.target.value));
       state.manualRows[i].name = nm;
       const span = els.cloudSnapshot.querySelector(`[data-manual-name="${i}"]`);
       if (span) span.textContent = nm;
+      renderCloudSnapshot(); // 市場色點與「將存為」筆數要跟著這一列的代號更新
     });
   });
   els.cloudSnapshot.querySelectorAll(".manual-shares").forEach((inp) => {
@@ -7908,7 +7948,7 @@ function renderCloudSnapshot() {
     renderCloudSnapshot();
   });
   els.cloudSnapshot.querySelector("#manual-prefill")?.addEventListener("click", () => {
-    prefillManualFromLatest(state.pasteMeta.market);
+    prefillManualFromLatest();
     renderCloudSnapshot();
   });
   els.cloudSnapshot.querySelector("#manual-clear")?.addEventListener("click", () => {
@@ -7922,13 +7962,7 @@ function renderCloudSnapshot() {
       renderCloudSnapshot();
     });
   });
-  els.cloudSnapshot.querySelector("#manual-market")?.addEventListener("change", (e) => {
-    state.pasteMeta.market = e.target.value;
-    state.pasteMeta.userTouched = true;
-    prefillManualFromLatest(state.pasteMeta.market);
-    renderCloudSnapshot();
-  });
-  els.cloudSnapshot.querySelector("#manual-date")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; state.pasteMeta.userTouched = true; });
+  els.cloudSnapshot.querySelector("#manual-date")?.addEventListener("change", (e) => { state.pasteMeta.date = e.target.value; state.pasteMeta.userTouched = true; renderCloudSnapshot(); });
   els.cloudSnapshot.querySelector("#manual-save")?.addEventListener("click", saveManualSnapshot);
   els.cloudSnapshot.querySelectorAll("[data-ark-copy]").forEach((btn) => {
     btn.addEventListener("click", () => handleArkCopy(btn, btn.dataset.arkCopy));
