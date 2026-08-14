@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.6";
-const APP_VERSION_NOTE = "今天回填過的標的在手機/電腦都顯示「✓ 已回填」（原本另一台只看到「未布局」）；日期一律以台北 UTC+8 為準";
+const APP_VERSION = "v0.42.8";
+const APP_VERSION_NOTE = "首次布局日改合併寫入 Google Sheet（原本每次都先清空整張表再重寫，記憶體殘缺時會把持有中標的的持有天數整批洗掉）";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -428,7 +428,11 @@ async function saveFirstBuyDate(market, symbol, date) {
   state.firstBuyDates[`${market}_${symbol}`] = date;
   localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(state.firstBuyDates));
   if (state.auth.authorized) {
-    await writeFirstBuyDatesToSheet().catch(() => {});
+    // 不可靜默失敗：存不進雲端要讓使用者看得到，否則換裝置就消失
+    await writeFirstBuyDatesToSheet().catch((err) => {
+      console.error("saveFirstBuyDate", err);
+      alert(`${symbol} 的首次布局日已存在本機，但寫入 Google Sheet 失敗：${err?.message || err}`);
+    });
   }
 }
 // 直接修正 Sheet 裡所有缺 "00" 前綴的台股 ETF 代號
@@ -549,7 +553,10 @@ async function savePositionEdits(market, symbol, shares, avgCost, newSymbolRaw, 
         state.firstBuyDates[`${market}_${newSymbol}`] = fbVal;
         delete state.firstBuyDates[oldKey];
         localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(state.firstBuyDates));
-        await writeFirstBuyDatesToSheet().catch(() => {});
+        // 舊 key 要明確移除，否則合併寫入會把它留在雲端變成孤兒列
+        await writeFirstBuyDatesToSheet([oldKey]).catch((err) => {
+          console.warn("writeFirstBuyDatesToSheet failed:", err);
+        });
       }
     }
     await recalcLayoutAfterPositionEdit(market, symbolChanged ? newSymbol : symbol, latestSnap.snapshotId, shares);
@@ -704,16 +711,33 @@ async function recalcLayoutAfterPositionEdit(market, symbol, editedSnapshotId, n
   }
 }
 
-async function writeFirstBuyDatesToSheet() {
+// 合併寫入（v0.42.8）：雲端已有、記憶體沒有的條目一律保留，只有 removals 列出的 key 才移除。
+// 原本是「無條件 clear A2:C → 依 state 重寫」，記憶體殘缺時（換裝置、清 cache、雲端 async 尚未載完
+// 就先存快照）會把整張表洗掉；而 saveLayoutDeltaToSheet 只在「從 0 到有」才補記，
+// 持續持有的標的一旦被洗掉就永遠補不回來也不會報錯（2026-08 台股首次布局日大量消失即此因）。
+async function writeFirstBuyDatesToSheet(removals = []) {
   await ensureCloudSheetTables();
-  await clearSheetValues(SHEET_NAMES.firstBuy, "A2:C");
-  const rows = Object.entries(state.firstBuyDates)
-    .filter(([, d]) => d)
+  // 讀不到雲端現值就不寫：寧可這次存不進去（呼叫端會提示），也不要拿殘缺狀態覆蓋
+  const values = await readCloudSheetValues(SHEET_NAMES.firstBuy, "A2:C");
+  const merged = {};
+  for (const row of stripHeaderRow(values || [], SHEET_HEADERS.firstBuy)) {
+    const [symbol, date, market] = row;
+    if (symbol && date && market) merged[`${market}_${symbol}`] = date;
+  }
+  const cloudRowCount = Object.keys(merged).length;
+  for (const [key, date] of Object.entries(state.firstBuyDates)) {
+    if (date) merged[key] = date;
+  }
+  for (const key of removals) delete merged[key];
+  const rows = Object.entries(merged)
     .map(([key, d]) => {
       const idx = key.indexOf("_");
       return [key.slice(idx + 1), d, key.slice(0, idx)];
-    });
-  if (rows.length) await updateSheetValues(SHEET_NAMES.firstBuy, "A2:C", rows);
+    })
+    .sort((a, b) => (a[2] === b[2] ? String(a[0]).localeCompare(String(b[0])) : String(a[2]).localeCompare(String(b[2]))));
+  // 先寫後清尾：任何一刻表都不會是空的（原本先 clear 後寫，中途失敗就留下空表）
+  if (rows.length) await updateSheetValues(SHEET_NAMES.firstBuy, `A2:C${rows.length + 1}`, rows);
+  if (cloudRowCount > rows.length) await clearSheetValues(SHEET_NAMES.firstBuy, `A${rows.length + 2}:C`);
 }
 async function loadFirstBuyDatesFromSheet() {
   try {
@@ -4021,6 +4045,7 @@ async function saveLayoutDeltaToSheet(newPayloads) {
     const allSnapshots = state.cloudHistory?.snapshots || [];
     const rows = [];
     let firstBuyDirty = false;
+    const firstBuyRemovals = []; // 明確刪除（清倉）才傳給雲端，其餘一律合併保留
     for (const payload of newPayloads) {
       // date/market 在 snapshotRow[2]/[3]，payload 沒有 top-level date/market
       // （舊版誤取 payload.date/market → undefined → 寫出空白日期列、prev 找不到）
@@ -4053,6 +4078,7 @@ async function saveLayoutDeltaToSheet(newPayloads) {
           firstBuyDirty = true;
         } else if (newRow.shares === 0 && prevShares > 0 && state.firstBuyDates[fbKey]) {
           delete state.firstBuyDates[fbKey];
+          firstBuyRemovals.push(fbKey);
           firstBuyDirty = true;
         }
       }
@@ -4065,6 +4091,7 @@ async function saveLayoutDeltaToSheet(newPayloads) {
           const fbKey = `${marketKey}_${prev.symbol}`;
           if (state.firstBuyDates[fbKey]) {
             delete state.firstBuyDates[fbKey];
+            firstBuyRemovals.push(fbKey);
             firstBuyDirty = true;
           }
         }
@@ -4075,7 +4102,9 @@ async function saveLayoutDeltaToSheet(newPayloads) {
     }
     if (firstBuyDirty) {
       localStorage.setItem(FIRST_BUY_DATES_KEY, JSON.stringify(state.firstBuyDates));
-      await writeFirstBuyDatesToSheet().catch(() => {});
+      await writeFirstBuyDatesToSheet(firstBuyRemovals).catch((err) => {
+        console.warn("writeFirstBuyDatesToSheet failed:", err);
+      });
     }
   } catch (error) {
     console.warn("saveLayoutDeltaToSheet", error);
