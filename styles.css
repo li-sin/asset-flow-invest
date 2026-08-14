@@ -1743,6 +1743,24 @@ textarea {
   gap: 4px;
 }
 
+/* 存檔前明示目標市場/日期（v0.42.9）：日期算錯要一眼看得到 */
+.save-target-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+
+.save-target-auto {
+  padding: 1px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-2);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
 .parse-preview input,
 .parse-preview select,
 .parse-preview textarea {

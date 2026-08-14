@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.8";
-const APP_VERSION_NOTE = "首次布局日改合併寫入 Google Sheet（原本每次都先清空整張表再重寫，記憶體殘缺時會把持有中標的的持有天數整批洗掉）";
+const APP_VERSION = "v0.42.9";
+const APP_VERSION_NOTE = "台股開盤前存快照不再建議當天（改建議前一交易日）；日期/市場建議改成每輪重新給，不再因手動改過一次就整個 session 停擺；存檔前明示「將存為 X · 日期」";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -4370,6 +4370,7 @@ async function handleBrokerFile(file) {
     const rows = parseSinopacHoldings(buf);
     if (!rows || !rows.length) { alert("解析不到持倉資料，請確認是永豐網頁版匯出的「庫存」xlsx。"); return; }
     state.pasteParsed = { headers: ["代號", "名稱", "股數", "均成本"], rows, colMap: null, source: "broker", _debug: `永豐 xlsx 解析 ${rows.length} 筆` };
+    refreshSnapshotSuggestion({ force: true }); // 新解析＝新一輪，重新給日期/市場建議
     if (!state.pasteMeta.date) state.pasteMeta.date = today();
     renderCloudSnapshot();
   } catch (err) {
@@ -4516,6 +4517,7 @@ async function savePasteSnapshot() {
     alert(`已儲存 ${written} 筆快照${skipped ? `，跳過 ${skipped} 筆（重複）` : ""}。`);
     state.pasteParsed = null;
     state.captureMode = "ocr";
+    refreshSnapshotSuggestion({ force: true }); // 存完＝這一輪結束，下一份重新給建議（如台股存完自動指向美股）
     await loadLatestCloudSnapshot(true);
   } catch (error) {
     console.error(error);
@@ -4895,8 +4897,12 @@ function suggestSnapshotTarget() {
   const todayStr = today();
   const now = taipeiNow();
   const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes(); // 台北牆上時間在 UTC 欄位
+  // 兩市場同一條規則：今日尚未開盤 → 券商庫存畫面還停在前一個交易日的收盤狀態，目標日退一天。
+  // v0.42.9 前只有美股做這件事，台股直接用今天 → 台股 09:00 開盤前存（Sin 的習慣是早上 8 點）
+  // 一律建議當天，逼使用者每次手動改回昨天，連帶把 userTouched 打開、整個 session 不再給建議。
+  const twBase = nowMinutes >= MARKET_OPEN_MINUTES.TW ? todayStr : shiftDateStr(todayStr, -1);
   const usBase = nowMinutes >= MARKET_OPEN_MINUTES.US ? todayStr : shiftDateStr(todayStr, -1);
-  const twTarget = lastWeekdayOnOrBefore(todayStr);
+  const twTarget = lastWeekdayOnOrBefore(twBase);
   const usTarget = lastWeekdayOnOrBefore(usBase);
   if (!snapshotExistsFor("TW", twTarget)) return { date: twTarget, market: "TW" };
   if (!snapshotExistsFor("US", usTarget)) return { date: usTarget, market: "US" };
@@ -4907,6 +4913,26 @@ function maybeApplySnapshotSuggestion() {
   const sug = suggestSnapshotTarget();
   state.pasteMeta.date = sug.date;
   state.pasteMeta.market = sug.market;
+}
+// 存檔前明示「將存為 X · 日期（週幾）」：日期算錯一眼看得到，比多一個 confirm 彈窗有效
+// （每天要按兩次的 confirm 很快會變成無腦點掉）。未被手動改過時標「自動帶入」。
+function saveTargetHint(market, date) {
+  const d = normalizeDateText(date) || "";
+  if (!d) return "";
+  const dow = "日一二三四五六"[new Date(`${d}T00:00:00Z`).getUTCDay()] || "";
+  const auto = state.pasteMeta.userTouched ? "" : `<span class="save-target-auto">自動帶入</span>`;
+  return `<p class="save-target-hint">將存為 <strong>${escapeHtml(marketLabel(normalizeMarketKey(market)))}</strong> · <strong>${escapeHtml(d)}</strong>（週${dow}）${auto}</p>`;
+}
+// 這一輪輸入是否還沒開始（沒有解析結果、手動表格也還沒填）
+function snapshotInputIdle() {
+  return !state.pasteParsed && isManualRowsEmpty();
+}
+// 重新開放建議（v0.42.9）：userTouched 原本只有開沒有關，改一次日期就讓建議整個 session 停擺。
+// 它真正的職責是「別讓 re-render 蓋掉我正在輸入的值」，不是「永久關閉建議」，
+// 所以改成在每一輪的起點重新開放：進新增庫存頁（僅在還沒開始輸入時）、解析出新資料、存檔成功。
+function refreshSnapshotSuggestion({ force = false } = {}) {
+  if (!force && !snapshotInputIdle()) return;
+  state.pasteMeta.userTouched = false;
 }
 
 function parsePositionRows(values) {
@@ -7717,6 +7743,7 @@ function renderCloudSnapshot() {
             <input type="date" id="paste-date-input" class="cell-input" value="${escapeHtml(meta.date)}">
           </label>
         </div>
+        ${saveTargetHint(meta.market, meta.date)}
         <button id="paste-save-btn" class="button primary" type="button">儲存為快照</button>
         <button id="paste-clear-btn" class="button secondary" type="button" style="margin-left:8px">清除</button>
       </div>`;
@@ -7763,6 +7790,7 @@ function renderCloudSnapshot() {
             <input type="date" id="manual-date" class="cell-input" value="${escapeHtml(state.pasteMeta.date || today())}">
           </label>
         </div>
+        ${saveTargetHint(state.pasteMeta.market, state.pasteMeta.date)}
         <button id="manual-save" class="button primary" type="button" style="margin-top:8px">存快照</button>
       ` : state.captureMode === "broker" ? `
         <p class="muted-text">上傳永豐網頁版匯出的「庫存」xlsx（自動解析代號、今餘股數、成本均價），選市場/日期後存成快照。台股用此檔；美股複委託改用「貼上表格」貼 Firstrade 持倉。</p>
@@ -7832,6 +7860,7 @@ function renderCloudSnapshot() {
   els.cloudSnapshot.querySelectorAll("[data-capture-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.captureMode = btn.dataset.captureMode;
+      refreshSnapshotSuggestion(); // 還沒開始輸入才重新建議，不吃掉填到一半的資料
       if (state.captureMode === "manual" && isManualRowsEmpty()) prefillManualFromLatest(state.pasteMeta.market);
       renderCloudSnapshot();
     });
@@ -7841,6 +7870,7 @@ function renderCloudSnapshot() {
     const result = parsePasteTable(text);
     if (!result) { alert("無法解析。\n\n支援格式：\n① Apple Live Text 從方舟截圖複製的文字\n② Google Sheets 複製的 Tab 分隔表格（含表頭）"); return; }
     state.pasteParsed = result;
+    refreshSnapshotSuggestion({ force: true }); // 新解析＝新一輪，重新給日期/市場建議
     if (!state.pasteMeta.date) state.pasteMeta.date = today();
     renderCloudSnapshot();
     setTimeout(() => {
@@ -7942,6 +7972,7 @@ function renderCloudSnapshot() {
         return;
       }
       state.dashboardTab = nextTab;
+      if (nextTab === "capture") refreshSnapshotSuggestion(); // 進新增庫存頁重新給建議（未開始輸入才套用）
       state.tabFadePending = true;
       renderCloudSnapshot();
       reloadCloudSnapshotSilently();
@@ -8993,8 +9024,8 @@ function bindEvents() {
   document.querySelectorAll("[data-quick]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const q = btn.dataset.quick;
-      if (q === "paste") { state.dashboardTab = "capture"; state.captureMode = "paste"; }
-      else if (q === "broker") { state.dashboardTab = "capture"; state.captureMode = "broker"; }
+      if (q === "paste") { state.dashboardTab = "capture"; state.captureMode = "paste"; refreshSnapshotSuggestion(); }
+      else if (q === "broker") { state.dashboardTab = "capture"; state.captureMode = "broker"; refreshSnapshotSuggestion(); }
       else if (q === "refill") { state.dashboardTab = "holdings"; state.holdingsSubTab = "refill"; }
       renderCloudSnapshot();
       els.cloudSnapshot?.scrollIntoView?.({ behavior: "smooth", block: "start" });
