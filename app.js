@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.42.6";
-const APP_VERSION_NOTE = "今天回填過的標的在手機/電腦都顯示「✓ 已回填」（原本另一台只看到「未布局」）；日期一律以台北 UTC+8 為準";
+const APP_VERSION = "v0.42.7";
+const APP_VERSION_NOTE = "「修正代號」改成庫存＋布局兩張表一起修（原本只修庫存，布局留著舊代號對不起來），並新增「預覽代號」先看不寫入";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -432,30 +432,68 @@ async function saveFirstBuyDate(market, symbol, date) {
   }
 }
 // 直接修正 Sheet 裡所有缺 "00" 前綴的台股 ETF 代號
-async function fixSheetSymbols() {
+// 兩張表一起修：AssetFlowPositions（代號 D/名稱 E）＋ AssetFlowLayout（代號 C/名稱 D）。
+// 只修 positions 會讓 layout 留著舊代號，兩表 join 對不起來（recalcLayoutAfterPositionEdit
+// 用精確比對找 layout 列 → 髒列永遠找不到；布局總覽會把 631L 和 00631L 當兩支）。
+// dryRun = 只列出待修清單、不寫入。
+async function fixSheetSymbols(dryRun = false) {
   if (!state.auth.authorized) { alert("請先登入"); return; }
   try {
-    const values = await readSheetValues(SHEET_NAMES.positions, "A:J");
-    const toFix = [];
-    for (let i = 1; i < values.length; i++) {
-      const row = values[i];
-      const orig = String(row[3] || "").trim();
-      const fixed = normalizeTWSymbol(orig);
-      if (fixed !== orig) {
-        toFix.push({ sheetRow: i + 1, orig, fixed, name: SYMBOL_NAMES[fixed] || row[4] || "" });
+    const [posValues, layoutValues] = await Promise.all([
+      readSheetValues(SHEET_NAMES.positions, "A:J"),
+      readSheetValues(SHEET_NAMES.layout, "A:G").catch(() => []),
+    ]);
+    // symbolCol/nameCol 為 0-based；兩表都無條件套 normalizeTWSymbol、不依市場分流，
+    // 規則一致才不會修完又對不起來（美股代號查不到 "00"+代號，最多轉大寫）。
+    const collect = (values, symbolCol, nameCol) => {
+      const list = [];
+      for (let i = 1; i < values.length; i++) {
+        const row = values[i];
+        const orig = String(row[symbolCol] || "").trim();
+        if (!orig) continue;
+        const fixed = normalizeTWSymbol(orig);
+        if (fixed !== orig) {
+          list.push({ sheetRow: i + 1, orig, fixed, name: SYMBOL_NAMES[fixed] || row[nameCol] || "" });
+        }
       }
+      return list;
+    };
+    const posFix = collect(posValues, 3, 4);
+    const layoutFix = collect(layoutValues, 2, 3);
+    const total = posFix.length + layoutFix.length;
+    if (!total) { alert("Sheet 中沒有需要修正的代號。"); return; }
+    // 同一組 orig→fixed 通常橫跨很多列（layout 每天每支一列），聚合後才看得懂
+    const summarize = (list, label) => {
+      if (!list.length) return `${label}：0 筆`;
+      const counts = new Map();
+      for (const r of list) {
+        const key = `${r.orig} → ${r.fixed}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      return `${label}：${list.length} 筆\n${[...counts].map(([k, n]) => `  ${k}（${n} 列）`).join("\n")}`;
+    };
+    const detail = `${summarize(posFix, "庫存 AssetFlowPositions")}\n\n${summarize(layoutFix, "布局 AssetFlowLayout")}`;
+    if (dryRun) {
+      console.log("[fixSheetSymbols 預覽]", { positions: posFix, layout: layoutFix });
+      alert(`【預覽，未寫入 Sheet】共 ${total} 筆需修正：\n\n${detail}\n\n逐列清單見 Console。確認無誤後再按「修正代號」。`);
+      return;
     }
-    if (!toFix.length) { alert("Sheet 中沒有需要修正的代號。"); return; }
-    const preview = toFix.slice(0, 5).map((r) => `${r.orig} → ${r.fixed}`).join("\n");
-    if (!confirm(`找到 ${toFix.length} 筆需修正的代號：\n${preview}${toFix.length > 5 ? "\n…" : ""}\n\n確定直接修正 Sheet？`)) return;
-    for (const { sheetRow, fixed, name } of toFix) {
-      await sheetsFetch(
-        `/values/${sheetRange(SHEET_NAMES.positions, `D${sheetRow}:E${sheetRow}`)}?valueInputOption=RAW`,
-        { method: "PUT", body: JSON.stringify({ majorDimension: "ROWS", values: [[fixed, name]] }) }
-      );
-    }
+    if (!confirm(`找到 ${total} 筆需修正的代號：\n\n${detail}\n\n確定直接修正 Sheet？`)) return;
+    // 逐列 PUT 會是幾十個 request（layout 每天每支一列）→ 一次 batchUpdate
+    const batchData = [
+      ...posFix.map(({ sheetRow, fixed, name }) => ({
+        range: `${SHEET_NAMES.positions}!D${sheetRow}:E${sheetRow}`, values: [[fixed, name]],
+      })),
+      ...layoutFix.map(({ sheetRow, fixed, name }) => ({
+        range: `${SHEET_NAMES.layout}!C${sheetRow}:D${sheetRow}`, values: [[fixed, name]],
+      })),
+    ];
+    await sheetsFetch("/values:batchUpdate", {
+      method: "POST",
+      body: JSON.stringify({ valueInputOption: "RAW", data: batchData }),
+    });
     await loadLatestCloudSnapshot(true);
-    alert(`已修正 ${toFix.length} 筆代號，資料已重新載入。`);
+    alert(`已修正 ${total} 筆代號（庫存 ${posFix.length}／布局 ${layoutFix.length}），資料已重新載入。`);
   } catch (err) {
     console.error(err);
     alert(err.message || "修正失敗");
@@ -3741,7 +3779,10 @@ function buildSnapshotPayloadFromRows({ snapshotId: id, createdAt, date, market,
       id,
       date || today(),
       market || "",
-      row.symbol || "",
+      // 保險：解析路徑都已 normalize 過，這層擋手動輸入等未來新入口。
+      // 刻意放在 payload 生成處而非 saveLayoutDeltaToSheet——layout 的代號取自
+      // 同一份 positionRows，只在 layout 那端 normalize 反而讓兩表寫出不同值。
+      normalizeTWSymbol(row.symbol || ""),
       row.name || "",
       row.kind || "",
       row.shares ?? "",
@@ -7589,8 +7630,10 @@ function renderCloudSnapshot() {
           ${matchingEntry
             ? `<button class="button compact secondary" id="view-entry-btn" data-entry-id="${escapeHtml(matchingEntry.id)}">查看截圖</button>`
             : ""}
-          ${(state.cloudHistory.positions || []).some((p) => normalizeTWSymbol(p.symbol) !== p.symbol)
-            ? `<button class="button compact ghost danger" id="fix-symbols-btn" title="偵測到 Sheet 有代號缺 00 前綴">修正代號</button>`
+          ${[...(state.cloudHistory.positions || []), ...(state.cloudHistory.layout || [])]
+            .some((p) => normalizeTWSymbol(p.symbol) !== p.symbol)
+            ? `<button class="button compact ghost" id="preview-symbols-btn" title="只列出待修代號，不寫入 Sheet">預覽代號</button>
+               <button class="button compact ghost danger" id="fix-symbols-btn" title="偵測到 Sheet 有代號缺 00 前綴（庫存／布局）">修正代號</button>`
             : ""}
           ${(state.cloudHistory.positions || []).some((p) => Number(p.shares || 0) === 0 && Number(p.avgCost || 0) === 0)
             ? `<button class="button compact ghost danger" id="cleanup-zero-btn" title="偵測到 Sheet 有股數=0 且均價=0 的廢棄倉位">清除廢棄列</button>`
@@ -8405,6 +8448,7 @@ function renderCloudSnapshot() {
     if (id) openDetail(id);
   });
   // B tab：修正 Sheet 代號
+  els.cloudSnapshot.querySelector("#preview-symbols-btn")?.addEventListener("click", () => fixSheetSymbols(true));
   els.cloudSnapshot.querySelector("#fix-symbols-btn")?.addEventListener("click", () => fixSheetSymbols());
   // B tab：清除廢棄倉位
   els.cloudSnapshot.querySelector("#cleanup-zero-btn")?.addEventListener("click", () => cleanupZeroPositions());
