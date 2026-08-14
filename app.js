@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.43.0";
-const APP_VERSION_NOTE = "市場改由代號自動判定（數字＝台股、英文＝美股），市場選擇器移除；手動輸入改台股美股一張表，存檔時自動拆成兩份快照";
+const APP_VERSION = "v0.43.1";
+const APP_VERSION_NOTE = "修回填助手「已回填」誤判：本機回填進度（phase）的 done 原本永不失效，會蓋掉股數變動判斷——在另一台裝置更新庫存後，曾回填過的裝置會把待回填全顯示成已回填";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6940,11 +6940,11 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
     }
     if (!allRows.length && !clearedItems.length) { perMarket[market] = { html: "", pending: 0 }; return; }
     const shown = allRows.slice().sort((a, b) => String(a.symbol).localeCompare(String(b.symbol), undefined, { numeric: true }));
-    // 待回填數＝股數有變動（或從未回填過）且尚未 done＋清倉待處理數
+    // 待回填數＝股數有變動（或從未回填過）＋清倉待處理數
     // 只有均價超容差的（avgOnly）不計徽章：那是可選回填，不該被當成待辦催（v0.42.1）
+    // v0.43.1 起**完全不看本機 phase**：原本第一行是 `if (refill.phase[key] === "done") return false`，
+    // 在算 diff 之前就 early return → 那台裝置只要曾按過②完成，之後股數再怎麼變都漏算徽章。
     const pending = shown.filter((r) => {
-      const key = arkRefillKey(market, r.symbol);
-      if (refill.phase[key] === "done") return false;
       const d = arkRefillDiff(market, r.symbol, r.shares, r.avgCost);
       return d.isNew || d.sharesChanged;
     }).length + clearedItems.filter((c) => !c.done).length;
@@ -6965,8 +6965,16 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
     }).join("");
     const items = shown.map((r) => {
       const key = arkRefillKey(market, r.symbol);
-      const phase = refill.phase[key] || "idle";
       const diff = arkRefillDiff(market, r.symbol, r.shares, r.avgCost);
+      // phase 是「①複製→②複製」的本機進度（localStorage，不上雲），而它的 done **只有手動互動才會清**
+      // （↻重填／重做／「清除進度」鈕）——存新快照、載入新快照、換日期一律不清。
+      // v0.43.1：股數真的變了（或雲端查無紀錄）就讓 done 失效，否則它會蓋掉 diff 已經算對的結論，
+      // 把待回填顯示成「✓ 已回填」＝「電腦更新庫存、iPad 卻全是已回填」的病灶。
+      // 用 sharesChanged 而非 changed：只有均價超容差的是券商碎股重算雜訊（v0.42.1），不該叫回已回填的。
+      // 只對 done 生效，mid 保留 → 回填流程進行到一半不會被打斷。
+      const phaseStale = diff.isNew || diff.sharesChanged;
+      const rawPhase = refill.phase[key] || "idle";
+      const phase = phaseStale && rawPhase === "done" ? "idle" : rawPhase;
       const isStatic = !diff.changed && phase === "idle"; // 持倉無變動、尚未開始回填流程
       const isAvgOnly = diff.avgOnly && phase === "idle"; // 股數沒動、只有均價超容差 → 可選回填
       const avgPending = Number(r.avgCost || 0) <= 0;
@@ -7038,7 +7046,9 @@ function scrollToNextArkRefill() {
   setTimeout(() => {
     if (!els.cloudSnapshot) return;
     const items = [...els.cloudSnapshot.querySelectorAll(".ark-refill-item")];
-    const next = items.find((el) => !el.classList.contains("is-static") && !el.classList.contains("is-done") && !el.classList.contains("is-avgonly") && state.arkRefill.phase[el.getAttribute("data-ark-item")] !== "done");
+    // 只看 class：is-done 已由降級後的 phase 產生。v0.43.1 前這裡還多讀一次 state.arkRefill.phase，
+    // 會把「done 已失效、畫面上其實是待回填」的項目當成 done 跳過，自動跳下一支就會漏掉它。
+    const next = items.find((el) => !el.classList.contains("is-static") && !el.classList.contains("is-done") && !el.classList.contains("is-avgonly"));
     if (next) {
       next.scrollIntoView({ behavior: "smooth", block: "center" });
       next.classList.add("is-next");
