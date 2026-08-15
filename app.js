@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.43.1";
-const APP_VERSION_NOTE = "修回填助手「已回填」誤判：本機回填進度（phase）的 done 原本永不失效，會蓋掉股數變動判斷——在另一台裝置更新庫存後，曾回填過的裝置會把待回填全顯示成已回填";
+const APP_VERSION = "v0.43.2";
+const APP_VERSION_NOTE = "回歸防護：純邏輯抽到 logic.js（9 個 export），測試直接 import 改壞即紅";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -247,16 +247,7 @@ async function getAllEntries() {
   });
 }
 
-// 台北時間（UTC+8）：快照/布局/水位的日期一律以台北為準。
-// 回傳的 Date 其「UTC 欄位」＝台北牆上時間，故取時分要用 getUTCHours/getUTCMinutes。
-function taipeiNow() {
-  return new Date(Date.now() + 8 * 60 * 60 * 1000);
-}
-// 今天（台北）。v0.42.4 前是 `new Date().toISOString()` ＝ UTC 日期，台北 00:00–08:00
-// 會回前一天，害這段時間開 App 的日期預設全少一天。
-function today() {
-  return taipeiNow().toISOString().slice(0, 10);
-}
+// taipeiNow, today → 已搬到 logic.js（Phase 1 回歸防護，由 logic-init.js 掛 window）
 
 function entryId() {
   return `shot_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -391,12 +382,7 @@ function marketLabel(market) {
   return { TW: "台股", US: "美股", ALL: "全部" }[market] || market;
 }
 
-function normalizeMarketKey(market) {
-  const value = String(market || "").trim().toUpperCase();
-  if (["TW", "台股", "TAIWAN", "TPE", "TSE"].includes(value)) return "TW";
-  if (["US", "美股", "USA", "NYSE", "NASDAQ"].includes(value)) return "US";
-  return value;
-}
+// normalizeMarketKey → 已搬到 logic.js（Phase 1 回歸防護，由 logic-init.js 掛 window）
 
 function marketForPosition(row) {
   const market = normalizeMarketKey(row?.market);
@@ -404,15 +390,7 @@ function marketForPosition(row) {
   return /^\d/.test(String(row?.symbol || "")) ? "TW" : "US";
 }
 
-// 純看代號型態判市場（v0.43.0）：台股代號一定數字開頭（0050、2327、00988A 的字母只在結尾）、
-// 美股 ticker 一定字母開頭。兩者都不是（空白、符號、中文）→ null＝無法判定，交給呼叫端處理，
-// 不像 marketForPosition 那樣把垃圾資料默默歸成 US。
-function classifySymbolMarket(symbol) {
-  const s = String(symbol || "").trim();
-  if (/^\d/.test(s)) return "TW";
-  if (/^[A-Za-z]/.test(s)) return "US";
-  return null;
-}
+// classifySymbolMarket → 已搬到 logic.js（Phase 0 回歸防護試點，由 logic-init.js 掛 window）
 
 function loadTargetLevels() {
   try {
@@ -729,25 +707,11 @@ async function writeFirstBuyDatesToSheet(removals = []) {
   await ensureCloudSheetTables();
   // 讀不到雲端現值就不寫：寧可這次存不進去（呼叫端會提示），也不要拿殘缺狀態覆蓋
   const values = await readCloudSheetValues(SHEET_NAMES.firstBuy, "A2:C");
-  const merged = {};
-  for (const row of stripHeaderRow(values || [], SHEET_HEADERS.firstBuy)) {
-    const [symbol, date, market] = row;
-    if (symbol && date && market) merged[`${market}_${symbol}`] = date;
-  }
-  const cloudRowCount = Object.keys(merged).length;
-  for (const [key, date] of Object.entries(state.firstBuyDates)) {
-    if (date) merged[key] = date;
-  }
-  for (const key of removals) delete merged[key];
-  const rows = Object.entries(merged)
-    .map(([key, d]) => {
-      const idx = key.indexOf("_");
-      return [key.slice(idx + 1), d, key.slice(0, idx)];
-    })
-    .sort((a, b) => (a[2] === b[2] ? String(a[0]).localeCompare(String(b[0])) : String(a[2]).localeCompare(String(b[2]))));
+  // 合併邏輯已搬到 logic.js computeFirstBuyMerge（Phase 1 回歸防護）
+  const { rows, writeRange, clearFrom } = computeFirstBuyMerge(values, state.firstBuyDates, removals, SHEET_HEADERS.firstBuy);
   // 先寫後清尾：任何一刻表都不會是空的（原本先 clear 後寫，中途失敗就留下空表）
-  if (rows.length) await updateSheetValues(SHEET_NAMES.firstBuy, `A2:C${rows.length + 1}`, rows);
-  if (cloudRowCount > rows.length) await clearSheetValues(SHEET_NAMES.firstBuy, `A${rows.length + 2}:C`);
+  if (writeRange) await updateSheetValues(SHEET_NAMES.firstBuy, writeRange, rows);
+  if (clearFrom) await clearSheetValues(SHEET_NAMES.firstBuy, clearFrom);
 }
 async function loadFirstBuyDatesFromSheet() {
   try {
@@ -3720,34 +3684,7 @@ function buildSnapshotPayload(entry) {
   });
 }
 
-// v0.43.0：代號優先，使用者選的市場只當 fallback（原本剛好相反——只要 fallbackMarket 是
-// 有效的 TW/US 就整份強制歸過去，逐列判定那條分支從來沒被執行過。2026-08-12 把美股資料
-// 存成台股快照，14 支美股就這樣全被標成 TW，還連帶讓台股全數被判成清倉、清掉首次布局日）。
-// 混市場（手動一表兩市場）自然拆成兩份快照；無法判定的列用多數決安置，並回報給呼叫端提示。
-function splitRowsByMarket(rows, fallbackMarket = "") {
-  const fallbackKey = normalizeMarketKey(fallbackMarket);
-  const groups = { TW: [], US: [] };
-  const unclassified = [];
-  for (const row of rows || []) {
-    const market = classifySymbolMarket(row?.symbol);
-    if (market) groups[market].push({ ...row, market });
-    else unclassified.push(row);
-  }
-  if (unclassified.length) {
-    // 多數決：跟這份資料裡的主要市場走；平手/全無法判定時才用使用者選的，再不然預設台股
-    const majority = groups.TW.length === groups.US.length
-      ? (["TW", "US"].includes(fallbackKey) ? fallbackKey : "TW")
-      : (groups.TW.length > groups.US.length ? "TW" : "US");
-    for (const row of unclassified) groups[majority].push({ ...row, market: majority });
-  }
-  return Object.entries(groups)
-    .filter(([, groupRows]) => groupRows.length)
-    .map(([market, groupRows]) => ({ market, rows: groupRows }));
-}
-// 代號判不出市場的列（UI 用來提示「為什麼這幾筆不能自動判斷」）
-function unclassifiedSymbolRows(rows) {
-  return (rows || []).filter((row) => !classifySymbolMarket(row?.symbol));
-}
+// splitRowsByMarket, unclassifiedSymbolRows → 已搬到 logic.js（Phase 1 回歸防護，由 logic-init.js 掛 window）
 
 function buildMarketSnapshotPayloadsFromRows({ createdAt, date, market, sourceEntryId, sourceTitle, rows }) {
   return splitRowsByMarket(rows, market).map((group) => buildSnapshotPayloadFromRows({
@@ -4204,13 +4141,7 @@ async function syncLayoutAfterSnapshotChange(deletedSnapshots, keptSnapshots, ke
       }
     }
 
-    // 鐵律：E/F/G 必為數值。keptLayout 來自 Sheet GET（回傳一律字串），
-    // 原樣 RAW 寫回會把整表污染成文字型數字 → 總覽 SUMIFS 靜默歸 0（COUNTIFS 正常不露餡）。
-    // 2026-07-16 根治：寫回前一律數值化。
-    const toNum = (v) => {
-      const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/,/g, ""));
-      return Number.isFinite(n) ? n : 0;
-    };
+    // toNum → 已搬到 logic.js（Phase 1 回歸防護，由 logic-init.js 掛 window）
     const finalLayout = [...keptLayout, ...rebuilt].map((r) => [
       r[0] ?? "", r[1] ?? "", r[2] ?? "", r[3] ?? "", toNum(r[4]), toNum(r[5]), toNum(r[6]),
     ]);
@@ -5069,12 +5000,7 @@ function reloadCloudSnapshotSilently() {
     });
 }
 
-function stripHeaderRow(values, headers) {
-  if (!values?.length) return [];
-  const first = values[0].map((value) => String(value || "").trim());
-  const sameHeader = headers.every((header, index) => first[index] === header);
-  return sameHeader ? values.slice(1) : values;
-}
+// stripHeaderRow → 已搬到 logic.js（Phase 1 回歸防護，由 logic-init.js 掛 window）
 
 // 取當前 USD/TWD 匯率（從 state.quotes 已抓的報價取得）
 function getUsdTwdRate() {

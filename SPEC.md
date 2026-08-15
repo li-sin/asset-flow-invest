@@ -27,7 +27,7 @@
 2. **`ai-quickref.md` 寫 app.js「7500+ 行」，實際 9306 行**。
 3. **app.js 有 20 個死碼函式**（定義了但全檔無呼叫點）。其中 `arkRefillChanged` 在 v0.43.0 就已是死碼，不是 v0.43.1 造成的。OCR 相關佔 5 個，另有 4 個 render 函式對應已從 UI 移除的功能。
 
-**AC 尚未定義。** 這份是骨架，功能清單已核實，驗收條件待逐項補上。補的順序建議跟著「🟢＋🔴」走，那是最該先有自動化測試的地方。
+**AC 已定義 13 項**（2026-08-15，依 log.md 除蟲紀錄補齊）：高優先 9 項（F06／F08／F10／F11／F12／F16／F17／F18／F44）＋中優先 2 項（F09／F43）＋低優先 2 項（F13／F32）。其餘功能 AC 待逐項補上。
 
 ---
 
@@ -42,10 +42,19 @@
 | F03 | 美股 Firstrade 持倉貼上（跳統計行、單位成本＝均價） | `parsePasteTable` | ✅ | 🟢 | 🟠 | ⚠️ |
 | F04 | 手動逐欄輸入＋自動帶入兩市場最新持倉 | `prefillManualFromLatest` / `saveManualSnapshot` | ✅ | 🟢 | 🟠 | ⚠️ |
 | F05 | 代號正規化（補 `00`，僅限字典內） | `normalizeTWSymbol` | ✅ | 🟢 | 🟠 | ⚠️ |
-| F06 | **市場判定與拆分**（代號優先，一表兩市場） | `classifySymbolMarket` / `splitRowsByMarket` | ✅ | 🟢 | 🔴 | 有設計未進 repo（28 項） |
+| F06 | **市場判定與拆分**（代號優先，一表兩市場） | `classifySymbolMarket` / `splitRowsByMarket` | ✅ | 🟢 | 🔴 | `test_market_split.mjs` 36 項 ✅ |
 | F07 | 截圖 OCR（Tesseract 瀏覽器端） | `Tesseract` 相關 | ⏸️ | ⚪ | ⚫ | ⚠️ |
 
 > F07 註：UI 入口仍在（index.html「解析截圖」鈕、`captureMode === "ocr"`），但主線輸入已換成 F01/F03，Sin 不再使用。相關的 `recognizeArkColumns`／`renderColumnOcrText`／`parseDraftImageWithRowLines`／`parseColumnOcrRows`／`marketFromText` 已是死碼。
+
+### F06 驗收條件 — ✅ 4/4 AC 有自動化測試
+
+- **AC1**：台股代號（`0050`、`00830`、`2327` 等數字開頭）→ 判定 `TW` — ✅ `test_market_split.mjs`
+- **AC2**：美股代號（`AAPL`、`TSLA` 等字母開頭）→ 判定 `US` — ✅ `test_market_split.mjs`
+- **AC3**：一份輸入同時含台股＋美股 → `splitRowsByMarket` 拆成兩份獨立 payload — ✅ `test_market_split.mjs`
+- **AC4**：拆分後各 payload 的代號、股數、均價與原始資料一致（不丟列、不混市場） — ✅ `test_market_split.mjs`
+
+> 歷史教訓（session 40）：`splitRowsByMarket` 曾把使用者選的市場當最高優先、代號判定是死路徑，導致美股資料被強制歸台股 → 四環節連鎖刪掉 6 支台股首次布局日。
 
 ## Module B：資料寫入與同步（無 UI，底層）
 
@@ -55,14 +64,75 @@
 | F09 | 防重複存檔（in-flight 旗標＋寫入前刷新索引） | `snapshotSaveInFlight` / `refreshSnapshotIndexFromSheet` | ✅ | 🟡 | 🔴 | ⚠️ |
 | F10 | 布局 delta 寫入（含「前一份有、這次消失＝賣光」歸零列） | `saveLayoutDeltaToSheet` | ✅ | 🟢 | 🔴 | ⚠️ |
 | F11 | 快照刪除／改日期後同步 layout（移孤兒列、重算後續） | `syncLayoutAfterSnapshotChange` | ✅ | 🟡 | 🔴 | ⚠️ |
-| F12 | **首次布局日合併寫入**（先寫後清尾、讀不到雲端就不寫） | `writeFirstBuyDatesToSheet` | ✅ | 🟢 | 🔴 | 有設計未進 repo（23 項） |
+| F12 | **首次布局日合併寫入**（先寫後清尾、讀不到雲端就不寫） | `writeFirstBuyDatesToSheet` | ✅ | 🟢 | 🔴 | `test_firstbuy_merge.mjs` 27 項 ✅ |
 | F13 | 建議快照日期（分市場、盤前退一天、退週五） | `suggestSnapshotTarget` / `marketTargetDates` | ✅ | 🟢 | ⚫ | 有設計未進 repo（18 項） |
 | F14 | 存檔前明示「將存為 N 筆 · 日期」＋兩種琥珀提醒 | `saveTargetHint` | ✅ | 🟢 | ⚫ | ⚠️ |
 | F15 | 補存前一天防呆（已過該市場開盤時 confirm） | `staleSnapshotDateWarning` | ✅ | 🟢 | 🟠 | ⚠️ |
-| F16 | **RAW 寫入型別**（數字欄必須傳 float，否則 SUMIFS 靜默歸零） | `toNum` | ✅ | 🟢 | 🔴 | ⚠️ |
-| F17 | **日期基準固定台北 UTC+8** | `taipeiNow` / `today` | ✅ | 🟢 | 🔴 | ⚠️ |
+| F16 | **RAW 寫入型別**（數字欄必須傳 float，否則 SUMIFS 靜默歸零） | `toNum` | ✅ | 🟢 | 🔴 | `test_tonum.mjs` 15 項 ✅ |
+| F17 | **日期基準固定台北 UTC+8** | `taipeiNow` / `today` | ✅ | 🟢 | 🔴 | `test_datetime.mjs` 4 項 ✅ |
 
 > F16 註：曾兩度造成資料污染（2026-07-15／07-16，共修 439+488 列）。污染源是「Sheet GET 讀回一律字串 → 原樣 RAW 整表寫回」，同模式的新程式碼一律要比照 `toNum()` 數值化。
+
+### F08 驗收條件 — ⚠️ 0/3 AC 有自動化測試
+
+- **AC1**：連點/並發呼叫只產生一筆快照（`snapshotSaveInFlight` 擋住第二次） — ⚠️ 需 API mock
+- **AC2**：寫入前必刷新雲端索引（`refreshSnapshotIndexFromSheet`），不得用過期 state 比對重複 — ⚠️ 需 API mock
+- **AC3**：payload 的 date 和 market 不得為 undefined，否則不寫入 — ⚠️ 需 API mock
+
+> 歷史教訓（session 36）：iOS 連點觸發兩次並發，兩次都用舊 state 查不到既有快照，各 append 一份。（session 24）：`payload.date`/`.market` 解構到 undefined，寫出空白日期列被所有篩選靜默過濾。
+
+### F09 驗收條件 — ⚠️ 0/2 AC 有自動化測試
+
+- **AC1**：寫入中按鈕 disable + 文字顯示「寫入中...」 — ⚠️ 純 UI
+- **AC2**：所有儲存路徑（貼上/手動/券商/合併）都經過同一個 choke point（`snapshotSaveInFlight`） — ⚠️ 架構檢查
+
+### F10 驗收條件 — ⚠️ 1/4 AC 有自動化測試
+
+- **AC1**：新快照有、前一份沒有的代號 → 寫入正數 delta — ⚠️ delta 邏輯待抽出
+- **AC2**：新快照股數與前一份不同 → delta = 新 − 舊 — ⚠️ delta 邏輯待抽出
+- **AC3**：前一份有、新快照消失 → 寫入歸零列（delta = −舊值） — ⚠️ delta 邏輯待抽出
+- **AC4**：同市場內所有數字欄以 float 寫入（不是字串數字） — ✅ `test_tonum.mjs`
+
+### F11 驗收條件 — ⚠️ 1/3 AC 有自動化測試
+
+- **AC1**：刪快照 → 對應 layout 列被清除，不留孤兒 — ⚠️ 需 API mock
+- **AC2**：刪中段快照 → 僅「被刪日期 + 其後第一份」的 delta 重算，更後面不動 — ⚠️ 需 API mock
+- **AC3**：整表寫回前，E/F/G 欄必須經 `toNum()` 數值化（防讀回字串原樣寫回的型別污染） — ✅ `test_tonum.mjs`
+
+> 歷史教訓（session 24）：三個刪除函式全不碰 layout → 孤兒殘留＋重存重複計算。（session 34）：`syncLayoutAfterSnapshotChange` 的 read-modify-write 把字串型別原樣寫回，第二次觸發型別污染。
+
+### F12 驗收條件 — ✅ 3/5 AC 有自動化測試
+
+- **AC1**：雲端已有該代號的首次布局日 → 保留雲端值，不覆寫 — ✅ `test_firstbuy_merge.mjs`
+- **AC2**：雲端沒有但本地有 → 新增該筆 — ✅ `test_firstbuy_merge.mjs`
+- **AC3**：removals 清單內的代號 → 從雲端移除 — ✅ `test_firstbuy_merge.mjs`
+- **AC4**：讀不到雲端現值（API 失敗）→ 整個寫入不執行 — ⚠️ 非純邏輯（async API 層）
+- **AC5**：寫入失敗 → alert 通知使用者，不靜默失敗 — ⚠️ 純 UI
+
+> 歷史教訓（session 40）：舊版整份覆寫，誤存市場後刪快照不回滾 → 6 支台股首次布局日永久丟失。
+
+### F13 驗收條件 — ⚠️ 0/3 AC 有自動化測試
+
+- **AC1**：台股早上（盤前）存快照 → 建議日期為前一交易日 — ⚠️ 邏輯待抽出到 logic.js
+- **AC2**：美股凌晨（台北 00:00–08:00）存快照 → 建議日期為前一交易日 — ⚠️ 邏輯待抽出到 logic.js
+- **AC3**：週一盤前 → 建議退到上週五 — ⚠️ 邏輯待抽出到 logic.js
+
+> scratchpad 有 18 項測試設計（已流失）。歷史教訓（session 40）：台股漏「盤前退一天」，Sin 天天手動改日期 → 天天觸發 `userTouched` 關閉推薦功能。
+
+### F16 驗收條件 — ✅ 2/3 AC 有自動化測試
+
+- **AC1**：字串數字（如 `"123.45"`）→ `toNum` 轉成 `123.45`（number） — ✅ `test_tonum.mjs`
+- **AC2**：空字串 / null / undefined → 回傳 `0` — ✅ `test_tonum.mjs`
+- **AC3**：寫入 Sheet 時 `value_input_option="RAW"` + 數字欄為 number，確保 SUMIFS 正常 — ⚠️ API 層整合
+
+> 歷史教訓（session 33/34）：文字型數字讓 SUMIFS 靜默歸零但 COUNTIFS/顯示都正常，極難察覺。「讀回→改一部分→整表 RAW 寫回」是活污染源。
+
+### F17 驗收條件 — ✅ 2/2 AC 有自動化測試
+
+- **AC1**：`taipeiNow()` 不論系統時區，回傳 UTC+8 的當前時間 — ✅ `test_datetime.mjs`
+- **AC2**：`today()` 回傳格式 `YYYY-MM-DD`，基於 UTC+8 — ✅ `test_datetime.mjs`
+
+> 歷史教訓（session 38）：`today()` 走 UTC，台北 00:00–08:00 全站 24 處「今天」少一天。改 UTC+8 後美股建議日期的「碰巧正確」消失，才發現是兩個錯誤互相抵銷。
 
 ## Module C：方舟回填助手（庫存子分頁 `refill`）
 
@@ -78,6 +148,14 @@
 | F25 | 救援：↻ 重填／重做／清除進度 | `handleArkForceRefill` | ✅ | 🟢 | ⚫ | ⚠️ |
 
 > `arkRefillChanged` 為 💀 死碼（v0.43.0 起無呼叫點），保留未清。
+
+### F18 驗收條件 — ⚠️ 0/3 AC 有自動化測試
+
+- **AC1**：pending 判定完全不看本機 `phase`，只看雲端回填值 vs 最新快照的 diff — ⚠️ 邏輯待抽出到 logic.js
+- **AC2**：`phase.done` 遇到 `isNew || sharesChanged` 必須降級為 idle（用 `sharesChanged` 不用 `changed`，避免均價容差雜訊叫回已回填的） — ⚠️ 邏輯待抽出到 logic.js
+- **AC3**：僅均價微幅變動（容差 `max(0.01, 均價×0.0001)` 內）不算待回填，不進徽章 — ⚠️ 邏輯待抽出到 logic.js
+
+> 歷史教訓（session 41）：`phase.done` 永不自動清 + early return 擺在算 diff 之前 → 任何裝置曾按過②完成就永久黏著「已回填」。（session 38）：券商碎股重算造成均價微幅漂移，無容差時觸發假回填。
 
 ## Module D：庫存明細與快照管理（庫存子分頁 `detail`／`layout`／`delete`）
 
@@ -96,6 +174,12 @@
 > F32 是 README Tab 說明表漏掉的子分頁。
 > F34 的兩表版本（含 `AssetFlowLayout`）在 branch `fix/symbol-normalize-layout`，刻意未併 main（Sheet 實查 0 筆髒代號、OCR 已停用）。
 
+### F32 驗收條件 — ⚠️ 0/1 AC 有自動化測試
+
+- **AC1**：每份快照只更新自己市場的 delta 列，`market !== normalizeMarketKey(snapshot.market)` 時 skip（不產生跨市場假清倉） — ⚠️ 需完整 layout 上下文
+
+> 歷史教訓（session 30）：`buildLayoutAnalysis` 把台/美股混在同一時間軸，單一市場更新時另一市場整批被誤判清倉。
+
 ## Module E：首頁分析（`homeSubTab`：overview／alerts／analysis）
 
 | F | 功能 | 關鍵函式 | 狀態 | 可測 | 後果 | 現有測試 |
@@ -112,6 +196,14 @@
 
 > 已從 UI 移除但函式仍在（💀 死碼）：`renderWaterCostAnalysis`／`renderLayoutDeltaTable`／`renderLayoutSharesChart`／`renderAllSymbolsChart`。
 
+### F43 驗收條件 — ⚠️ 0/3 AC 有自動化測試
+
+- **AC1**：上市股（如 `2327`）用 `.TW` 後綴取得報價 — ⚠️ 需 API mock
+- **AC2**：上櫃股（如 `5274`）`.TW` 查無價格時自動改試 `.TWO` — ⚠️ 需 API mock
+- **AC3**：回傳 key 用原始代號（不帶 `.TW`/`.TWO` 後綴） — ⚠️ 需 API mock
+
+> 歷史教訓（session 23）：持股清單加入第一支上櫃股 5274 才發現一律補 `.TW` 的假設不成立，現價永遠顯示「—」。
+
 ## Module F：月績效與現金試算（`homeSubTab: monthly`）
 
 | F | 功能 | 關鍵函式 | 狀態 | 可測 | 後果 | 現有測試 |
@@ -121,6 +213,14 @@
 | F46 | 跨 Sheet 讀 BudgetAssistant 月度帳本 | `BUDGET_SHEET_ID` | ✅ | 🟡 | ⚫ | ⚠️ |
 | F47 | 現金需求試算（平均月支出→6 個月緩衝＋未來 12 個月計畫） | 月績效區塊內 | ✅ | 🟢 | ⚫ | ⚠️ |
 | F48 | 現金計畫 tab 讀寫（全覆寫、保留 header） | `loadCashPlan` | ✅ | 🟡 | 🟠 | ⚠️ |
+
+### F44 驗收條件 — ⚠️ 0/3 AC 有自動化測試
+
+- **AC1**：引用的常數（`PERF_BASE_YEAR`、`PERF_HEADER`）必須有宣告，不得讓 ReferenceError 被 `.catch` 靜默吞掉 — ⚠️ 需程式碼靜態檢查
+- **AC2**：只寫 B/D/F 欄 + 補 C 欄公式，E/G 欄絕不碰 — ⚠️ 需 API mock
+- **AC3**：`.catch` 不得靜默吞掉程式錯誤（ReferenceError/TypeError 等），至少 console.error — ⚠️ 需程式碼靜態檢查
+
+> 歷史教訓（session 20）：`PERF_BASE_YEAR`/`PERF_HEADER` 未宣告 → ReferenceError 被 `.catch(() => {})` 靜默吞掉 → 月績效表格完全空白、零 console error。
 
 ## Module G：基礎設施
 
@@ -134,14 +234,43 @@
 
 ---
 
-## 測試現況總結
+## 測試現況總結（2026-08-15 Phase 0–4 完成後更新）
 
-| | 項數 | 說明 |
+### 架構
+
+純邏輯抽到 `logic.js`（ES module），app.js 透過 `logic-init.js` 橋接掛 `window`，測試直接 `import` from `logic.js`。改壞 logic.js → 測試立刻紅（已驗證）。
+
+### repo 內測試
+
+| 檔案 | 項數 | 覆蓋功能 | import 真程式碼 |
+|---|---|---|---|
+| `test_market_split.mjs` | 36 | F06（AC1–AC4）+ `normalizeMarketKey` | ✅ |
+| `test_firstbuy_merge.mjs` | 27 | F12（AC1–AC3）+ `stripHeaderRow` | ✅ |
+| `test_tonum.mjs` | 15 | F16（AC1–AC2）、F10-AC4、F11-AC3 | ✅ |
+| `test_datetime.mjs` | 4 | F17（AC1–AC2） | ✅ |
+| `test_parser.mjs` | 15 | F02（貼上解析） | ❌ 副本 |
+| **合計** | **97** | | |
+
+一行全跑：`node tests/run-all.mjs`
+
+### AC 覆蓋率
+
+| 狀態 | AC 數 | 功能 |
 |---|---|---|
-| repo 內測試 | 15 | 只有 `test_parser.mjs`（F02） |
-| 有設計但未進 repo | 111 | 散在 scratchpad 五個檔案，隨 session 目錄流失 |
-| **實際回歸防護** | **0** | **所有測試都是把 app.js 邏輯複製一份再測，改壞 app.js 測試照樣全過** |
+| ✅ 有自動化測試 | 14 | F06×4、F10-AC4、F11-AC3、F12×3、F16×2、F17×2 |
+| ⚠️ 無自動化測試 | 28 | F08×3、F09×2、F10×3、F11×2、F12×2、F13×3、F16-AC3、F18×3、F32×1、F43×3、F44×3 |
+| **合計（已定義 AC）** | **42** | **覆蓋率 33%** |
 
-app.js 是瀏覽器 script（第 7 行就有 `document.getElementById`，無 export），node 無法直接 import，所以測試只能複製邏輯。要有真正的回歸防護，得先把純邏輯抽成可 import 的模組。
+### 下一步優先
 
-**建議優先補 AC 與測試的五項**（🟢 可測 ＋ 🔴 後果嚴重）：F06、F10、F12、F16、F17。其中 F06、F12 已有現成測試設計，只差接上真程式碼。
+⚠️ AC 中最適合抽純邏輯補測試的：
+
+1. **F13**（建議日期）— `suggestSnapshotTarget` 是純邏輯，scratchpad 曾有 18 項設計（已流失，需重寫）
+2. **F18**（回填判定）— `arkRefillDiff` 是純邏輯，scratchpad 曾有 30 項設計（已流失，需重寫）
+3. **F10**（布局 delta）— `saveLayoutDeltaToSheet` 的 diff 邏輯可抽出
+
+### 優先度分級
+
+- 🔴 高優先（反覆出問題或踩坑極深）：**F06** ✅／**F08** ⚠️／**F10** ⚠️／**F11** ⚠️／**F12** ✅／**F16** ✅／**F17** ✅／**F18** ⚠️／**F44** ⚠️
+- 🟠 中優先（出過一次但教訓深刻）：**F09** ⚠️／**F43** ⚠️
+- ⚫ 低優先（出過一次、已有保護）：**F13** ⚠️／**F32** ⚠️
