@@ -2,8 +2,8 @@
 const DB_NAME = "assetflow_invest_screenshots";
 const DB_VERSION = 1;
 const STORE = "entries";
-const APP_VERSION = "v0.43.2";
-const APP_VERSION_NOTE = "回歸防護：純邏輯抽到 logic.js（9 個 export），測試直接 import 改壞即紅";
+const APP_VERSION = "v0.43.3";
+const APP_VERSION_NOTE = "回填助手新增「只複製股數」模式切換＋順序/模式每次開頁面重置預設";
 document.getElementById("main-css").href = `./styles.css?v=${APP_VERSION}`;
 const TARGET_LEVEL_STORAGE_KEY = "assetflow_invest_target_levels_v1";
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
@@ -6686,12 +6686,13 @@ function loadArkRefillState() {
     const s = JSON.parse(localStorage.getItem("afi_ark_refill_state_v1") || "{}");
     return {
       phase: s && typeof s.phase === "object" && s.phase ? s.phase : {},
-      order: s && s.order === "avgcost-first" ? "avgcost-first" : "shares-first",
+      order: "shares-first",
+      mode: "both",
       showAll: !!(s && s.showAll),
       market: s && s.market === "US" ? "US" : "TW",
     };
   } catch (_) {
-    return { phase: {}, order: "shares-first", showAll: false, market: "TW" };
+    return { phase: {}, order: "shares-first", mode: "both", showAll: false, market: "TW" };
   }
 }
 function saveArkRefillState() {
@@ -6838,6 +6839,7 @@ function latestSnapshotDateForMarket(market) {
 }
 function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
   const refill = state.arkRefill;
+  const sharesOnly = refill.mode === "shares-only";
   const firstLabel = refill.order === "avgcost-first" ? "均價" : "股數";
   const secondLabel = refill.order === "avgcost-first" ? "股數" : "均價";
   const activeMarket = refill.market === "US" ? "US" : "TW";
@@ -6901,8 +6903,10 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
       const phaseStale = diff.isNew || diff.sharesChanged;
       const rawPhase = refill.phase[key] || "idle";
       const phase = phaseStale && rawPhase === "done" ? "idle" : rawPhase;
-      const isStatic = !diff.changed && phase === "idle"; // 持倉無變動、尚未開始回填流程
-      const isAvgOnly = diff.avgOnly && phase === "idle"; // 股數沒動、只有均價超容差 → 可選回填
+      const isStatic = sharesOnly
+        ? (!diff.isNew && !diff.sharesChanged && phase === "idle")
+        : (!diff.changed && phase === "idle");
+      const isAvgOnly = !sharesOnly && diff.avgOnly && phase === "idle";
       const avgPending = Number(r.avgCost || 0) <= 0;
       const name = escapeHtml(r.name || resolveSymbolName(r.symbol) || "");
       const sym = escapeHtml(r.symbol);
@@ -6917,18 +6921,20 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
           : `<span class="ark-refill-static">未布局</span>`;
         // 「↻ 重填」＝手動叫回待回填（防 RefillState 記成已回填、但方舟其實沒收到的情況）
         action = `${statusText}<button class="button compact ghost ark-refill-btn ark-refill-reask" data-ark-redo data-ark-key="${escapeHtml(key)}" title="方舟其實沒填到？點這裡讓它重新列為待回填">↻ 重填</button>`;
-      } else if (avgPending) {
+      } else if (!sharesOnly && avgPending) {
         action = `<span class="ark-refill-pending">⚠️ 均價待補，補上後才能回填</span>`;
       } else if (phase === "done") {
         action = `<span class="ark-refill-done">✓ 已回填</span><button class="button compact ghost ark-refill-btn" data-ark-redo ${dataAttrs}>重做</button>`;
-      } else if (phase === "mid") {
+      } else if (!sharesOnly && phase === "mid") {
         action = `<span class="ark-refill-hint">已複製${firstLabel} ✓ 去方舟貼上</span><button class="button compact primary ark-refill-btn" data-ark-copy="second" ${dataAttrs}>② 複製${secondLabel}</button>`;
       } else if (isAvgOnly) {
         // 股數沒動、均價超容差：標出幅度讓 Sin 自己判斷值不值得去方舟改，按鈕降為 ghost（不催）
         const sign = diff.avgDelta > 0 ? "+" : "−";
         action = `<span class="ark-refill-avgonly">僅均價 ${sign}${formatNumber(Math.abs(diff.avgDelta), 4)}</span><button class="button compact ghost ark-refill-btn" data-ark-copy="first" ${dataAttrs}>仍要回填</button>`;
       } else {
-        action = `<button class="button compact primary ark-refill-btn" data-ark-copy="first" ${dataAttrs}>① 複製${firstLabel}</button>`;
+        action = sharesOnly
+          ? `<button class="button compact primary ark-refill-btn" data-ark-copy="first" ${dataAttrs}>複製股數</button>`
+          : `<button class="button compact primary ark-refill-btn" data-ark-copy="first" ${dataAttrs}>① 複製${firstLabel}</button>`;
       }
       return `
         <div class="ark-refill-item${phase === "done" ? " is-done" : ""}${phase === "mid" ? " is-mid" : ""}${isStatic ? " is-static" : ""}${isAvgOnly ? " is-avgonly" : ""}" data-ark-item="${escapeHtml(key)}">
@@ -6958,7 +6964,8 @@ function renderArkRefill(marketSummaries, dataDate, marketsWithSnap) {
         <h3>方舟回填助手</h3>
         ${dataDate ? `<span class="ark-refill-date">${escapeHtml(dataDate)} 庫存</span>` : `<span class="ark-refill-date is-empty">尚無資料</span>`}
         <div class="ark-refill-controls">
-          <button class="ark-ctrl-btn" data-ark-toggle-order title="切換先複製股數或均價">順序：${firstLabel} → ${secondLabel} ⇄</button>
+          <button class="ark-ctrl-btn${sharesOnly ? ' is-on' : ''}" data-ark-toggle-mode title="切換只複製股數或兩段式回填">${sharesOnly ? '模式：只複製股數' : '模式：股數＋均價'}</button>
+          ${sharesOnly ? '' : `<button class="ark-ctrl-btn" data-ark-toggle-order title="切換先複製股數或均價">順序：${firstLabel} → ${secondLabel} ⇄</button>`}
           <button class="ark-ctrl-btn" data-ark-reset title="清除回填進度（已回填標記）">清除進度</button>
         </div>
       </div>
@@ -6984,9 +6991,10 @@ function scrollToNextArkRefill() {
 }
 async function handleArkCopy(btn, segment) {
   const key = btn.dataset.arkKey;
+  const sharesOnly = state.arkRefill.mode === "shares-only";
   const order = state.arkRefill.order;
   const firstField = order === "avgcost-first" ? "avgcost" : "shares";
-  const field = segment === "first" ? firstField : (firstField === "shares" ? "avgcost" : "shares");
+  const field = sharesOnly ? "shares" : (segment === "first" ? firstField : (firstField === "shares" ? "avgcost" : "shares"));
   const value = field === "shares" ? btn.dataset.arkShares : btn.dataset.arkAvg;
   try {
     await navigator.clipboard.writeText(String(value));
@@ -6997,7 +7005,7 @@ async function handleArkCopy(btn, segment) {
     try { document.execCommand("copy"); } catch (__) {}
     document.body.removeChild(ta);
   }
-  if (segment === "first") {
+  if (!sharesOnly && segment === "first") {
     state.arkRefill.phase[key] = "mid";
     saveArkRefillState();
     renderCloudSnapshot();
@@ -7914,6 +7922,11 @@ function renderCloudSnapshot() {
   });
   els.cloudSnapshot.querySelector("[data-ark-toggle-showall]")?.addEventListener("click", () => {
     state.arkRefill.showAll = !state.arkRefill.showAll;
+    saveArkRefillState();
+    renderCloudSnapshot();
+  });
+  els.cloudSnapshot.querySelector("[data-ark-toggle-mode]")?.addEventListener("click", () => {
+    state.arkRefill.mode = state.arkRefill.mode === "shares-only" ? "both" : "shares-only";
     saveArkRefillState();
     renderCloudSnapshot();
   });
